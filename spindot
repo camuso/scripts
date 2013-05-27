@@ -1,0 +1,11 @@
+#!/bin/bash
+#
+# read -p "How many seconds per dot? " secs
+
+t=$1
+t="$(echo $1 | tr -d '[[:blank:]]')"
+[ -z $t ] && secs=1
+[ ! -z $t ] && secs=$1
+#secs=$1
+while : ; do echo -n .; sleep $secs; done
+

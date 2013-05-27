@@ -1,0 +1,32 @@
+#!/bin/bash
+
+source ~/bin/lib/ui.source
+source ~/bin/lib/gitutilities.source
+
+function usage {
+	echo
+	echo "gitgenpatchset file [dir]"
+	echo
+	echo -e "\tfile - Path to a file containinga list of commits, each"
+	echo -e "\t       commit on its own line."
+	echo -e "\tdir  - Optional destiination directory of the patchest."
+	echo -e "\t     - The default is to use the same directory as the"
+	echo -e "\t       file containing the commits."
+	echo
+	echo -e "\tCreates the patchset in the directory having the list of"
+	echo -e "\tcommits."
+	echo
+	exit 1
+}
+
+pathname="$1"
+
+[ "$pathname" ] || usage
+
+if [ $# -eq 2 ]; then
+	 dirspec=$2
+else
+	dirspec="$(ui_getdirspec "$pathname")"
+fi
+git_file2patchset $pathname $dirspec
+

@@ -1,0 +1,33 @@
+#!/bin/bash
+#
+
+if [ "$1" ]; then
+	file=""$1".tgz"
+else
+	file=""
+fi
+
+echo
+echo "root@dl380g8"
+rsync -va ~/ark/"$file" "root@dl380g8:"
+
+echo
+echo "root@bl460cg7"
+rsync -va ~/ark/"$file" "root@bl460cg7:"
+
+echo
+echo "root@hp-octane-01"
+rsync -va ~/ark/"$file" "root@hp-octane-01:"
+
+echo
+echo "camuso@dl380g8"
+rsync -va ~/ark/"$file" "camuso@dl380g8:"
+
+echo
+echo "camuso@hp-octane-01"
+rsync -va ~/ark/"$file" "camuso@hp-octane-01:"
+
+echo
+echo "camuso@desktop"
+rsync -va ~/ark/"$file" camuso@desktop:
+

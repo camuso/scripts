@@ -1,0 +1,28 @@
+#!/bin/bash
+
+function usage {
+	echo
+	echo "renpat <directory> <prefix>"
+	echo
+	echo -e "\tRenames files in the <directory> as \"<prefix>-xx.yy.patch\""
+	echo -e "\twhere xx is the patch number in the set and yy is the total"
+	echo -e "\tnumber of patches in the set."
+	echo
+	exit
+}
+
+[ $# -eq 2 ] || usage
+
+cd $1
+echo "Changing directory to "$PWD""
+count=1
+total=$(ls | wc -l)
+prefix=$2
+
+for filename in $(ls); do
+	newname=$(printf "%s-%02d.%02d.patch" $prefix $count $total)
+	echo "mv $filename -> $newname"
+	mv $filename $newname
+	count=$((count+1))
+done
+cd -

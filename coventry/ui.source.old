@@ -1,0 +1,125 @@
+#!/bin/bash
+#
+# ui.source
+#
+# bash library
+#
+
+# Text attributes
+#
+attr_bold="\033[1m"
+
+attr_OFF="\033[0m"
+
+function buhbye() {
+	local exitstr=$1
+	local exitfun=$2
+	echo -e "$exitstr"
+	exit 0
+}
+
+firstgetynflag=true
+function getyn() {
+	local promptstring=$1
+	local answer
+	if firstgetynflag ; then
+		echo "Throughout this script, whenever you see the \"(y/n\) prompt,"
+		echo "you may press \"q\" to quit, or \"x\" to spawn a new shell."
+		firstgetynflag=false
+	fi
+	while true; do
+		echo -en "$attr_bold$promptstring (y/n): $attr_OFF"
+		read -n1 answer
+		echo
+		[ "$answer" == "y" ] && break
+		[ "$answer" == "n" ] && break
+		[ "$answer" == "q" ] && buhbye "$exitok"
+		if [ "$answer" == "x" ] then;
+			echo "Spawning a child shell."
+			echo "Type \"ctrl-D\" or \"exit\" to return to previous shell."
+			bash
+		fi
+	done
+	[ $# -eq 2 ] && eval ${2}=${answer}
+}
+
+function doyn() {
+	local promptstring=$1
+	local y_command=$2
+	local n_command=$3
+	local response
+	getyn "$promptstring" response
+	[ $# -lt 3 ] && n_command=""
+	[ "$response" == "y" ] && $y_command
+	[ "$response" == "n" ] && $n_command
+	[ $# -eq 4 ] && eval $4=$response
+}
+
+function getuser() {
+	local promptstring="$1"
+	echo -ne "$attr_bold$promptstring$attr_OFF"
+	read var
+	( [ "$var" == "x" ] || [ "$var" == "q" ] ) && buhbye "Exiting ..."
+	eval $2=$var
+}
+
+# chkdir "$string"
+# where string is a string representation of a directory
+# returns
+#	0 if directory does not exist
+#	1 if the string exists as a file
+#	2 if the string exists as a directory
+#
+function chkdir {
+	[ -d "$1" ] && return 2
+	[ -e "$1" ] && return 1
+	return 0
+}
+
+# getdir prompt name
+# Prompts the user for a name to create a new directory and passes
+# it back to the caller in the "name" argument.
+# If the name already exists as a file, prompts for a new name.
+# If the name already exists as a directory, asks if user wants to
+# use that directory, warning that all its contents will first be
+# erased.
+#
+function getdir {
+	local prompt="$1"
+	while true; do
+		getuser "$prompt" newdir
+		chkdir "$newdir"
+		status=$?
+
+		[ $status -eq 1 ] && \
+			echo "\""$newdir"\" already exists as a file."
+
+		if [ $status -eq 2 ]; then
+			echo "\""$newdir"\" already exists as a directory."
+			echo "If you use it, the contents will be destroyed."
+			getyn "Use it anyway?" ans
+			if [ "$ans" == "y" ]; then
+				# rm -f "$newdir"/*
+				eval $2="$newdir"
+				return $status
+			fi
+		fi
+
+		if [ $status -eq 0 ]; then
+			mkdir -p "$newdir"
+			eval $2="$newdir"
+			return $status
+		fi
+	done
+}
+
+# backout
+# Back out of all shells until you are down to the one you want.
+# Takes one parameter, the shell you want to back out to.
+#
+function backout {
+	while [ $SHLVL -gt $1 ]; do
+		echo "Exiting shell level $SHLVL"
+		exit 0
+	done
+}

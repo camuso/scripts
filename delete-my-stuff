@@ -1,0 +1,14 @@
+#!/bin/bash
+
+echo "current directory $PWD"
+cd $HOME
+echo "changed to home directory $PWD"
+mv bin/bin.tgz ~/
+tar -xvf bin.tgz
+mv .bashrc .bashrc.orig
+cp -f bin/.bashrc ~/.
+cp -f bin/.vimrc ~/.
+cd -
+echo "back to current directory $PWD"
+
+exit 0

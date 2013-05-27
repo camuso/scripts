@@ -1,0 +1,109 @@
+#!/bin/bash
+
+sPath=""
+filename=""
+hostname=""
+username="root"
+hostnumber="-0"
+userhostflag=0
+down=0
+
+function usage
+{
+	echo ""
+	echo "hos [[-<1..9>] | [-h]] host [[-l] | [-u username]]"
+	echo "	-<1..9>      - host name is prepended to one of the enumerated IPs"
+	echo "                 (see list below)"
+	echo "	-h --host    - user specifies destination host"
+	echo "	               (requires complete IP)"
+	echo "	-u --user    - specific username (default is root)"
+	echo "	-l --logname - the login user\'s name (\$LOGNAME is $LOGNAME)"
+	echo ""
+	echo "Host Numbers:"
+	echo "	-0 - rhts.bos.redhat.com (default)"
+	echo "	-1 - rhts.eng.bos.redhat.com"
+	echo "	-2 - rhts.lab.bos.redhat.com"
+	echo "	-3 - lab.bos.redhat.com"
+	echo ""
+	exit 0
+}
+
+#################################
+#
+# Parse the command line.
+#
+#################################
+
+# If there's no arguments to the command, dump the help and exit.
+#
+if [ "$1" = "" ]
+then usage
+fi
+
+# Okay, this is tricky
+# Walk through the argument list.
+# If the first character is a "-", we know its an option.
+# If the first character is NOT a "-", then it must be one of the
+# required arguments - filename first, and host name last.
+#
+while [	"$1" !=	"" ]; do
+
+	str="$1"
+
+	firstchr=${str:0:1}
+
+	echo "str=$str firstchr=$firstchr"
+
+	if [ $firstchr = "-" ]; then
+
+		case $1 in
+			-0 | -1 | -2 | -3 )
+					hostnumber=$1
+					shift
+					hostname=$1
+					;;
+			-u | --user )	shift
+					username=$1
+					;;
+			-l | --login )	username=$LOGNAME
+					;;
+			-h | --host )	shift
+					hostname=$1
+					userhostflag=1
+					;;
+			* )		usage
+					;;
+		esac
+
+	else
+		hostname=$1
+	fi
+	shift
+done
+
+if [ $userhostflag -eq 1 ]; then
+	sPath="$username@$hostname"
+else
+	case $hostnumber in
+			-0 )	sPath="$username@$hostname.rhts.bos.redhat.com"
+				;;
+			-1 )	sPath="$username@$hostname.rhts.eng.bos.redhat.com"
+				;;
+			-2 )	sPath="$username@$hostname.lab.rhts.bos.redhat.com"
+				;;
+			-3 )	sPath="$username@$hostname.lab.bos.redhat.com"
+				;;
+			* )	echo "Number $hostnumber has not been assigned to a host."
+				exit 0
+				;;
+	esac
+fi
+
+echo "ssh $sPath"
+ssh $sPath
+
+exit 0
+
+
+ssh root@$1.rhts.bos.redhat.com
+

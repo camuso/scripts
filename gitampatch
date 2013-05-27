@@ -1,0 +1,164 @@
+#!/bin/bash
+#
+# gitampatch
+#
+# Patch the kernel from a mailbox and automate the process of applying,
+# editing, and submitting the patches.
+#
+# Automate the patch process
+#
+
+VERSION="1.0"
+
+# This script needs a bash library source file
+#
+# functions in ~/bin/lib/ui.source
+#	buhbye	- exit function
+#	getyn	- prompt user for y or n
+#	doyn	- prompt user for y or n and execute a command
+#	getuser - prompt the user for a string
+#	chkdir	- check whether the passed string exists as a file or dir
+#	ui_getnewdir	- get a directory name
+#
+
+#bind 'TAB:dynamic-complete-history'
+
+source ~/bin/lib/ui.source
+source ~/bin/lib/project.source
+source ~/bin/lib/gitutilities.source
+
+b_ui_int_first_getyn=false
+
+myshlvl=$SHLVL
+
+# Herald
+#
+echo
+echo "gitampatch $VERSION"
+echo
+echo -e "\tAutomates backporting patches from email."
+echo -e "\tThe patches to be backported should be correctly formatted as"
+echo -e "\temail for \"git am\" and they must have \".patch\" at the"
+echo -e "\tend of their filenames.\n"
+echo -e "\tPress 'x' to spawn a shell or 'q' to quitq at any prompt."
+echo
+
+# Project directories and data are stored in prjfile
+#
+prj_indir=1	# Offset in prjfile to name of source directory
+prj_outdir=2	# Offset in prjfile to name of Destination directory
+prj_maxline=2	# Number of lines in the file. Must be updated if you add more data.
+
+prj_init_prjfile ~/bin/.data/gitampatch.prj $prj_maxline
+prj_set_directory "source" $prj_indir indir
+prj_set_directory "output" $prj_outdir outdir
+
+# Create the project files
+#
+commitmessagefile=""$outdir"/commitmessage"
+newcommitslog=""$outdir"/newcommits.log"
+echo "newcommitslog: "$newcommitslog""
+
+echo "Patches in "$indir""
+ls "$indir"/*.patch
+patchcount=$(ls "$indir" | wc -l)
+if [ $patchcount -eq 0 ]; then
+	echo "There are no files in $indir."
+	doyn "Want to spawn a shell to deal with it now?" "ui_sh_spawn"
+fi
+echo "There are $patchcount patches to apply."
+
+# Apply the patches from the first branch.
+#
+
+function chkconflicts {
+	local conflicts=true
+
+	while $conflicts; do
+		git status
+		getyn "Conflicts to fix?" conflicts
+		if $conflicts; then
+			ui_sh_spawn \
+				"Be sure to commit your changes before exiting"
+			git status
+		else
+			break
+		fi
+	done
+}
+
+b_newcmtloginited=false
+
+getyn "Apply these patches now?" yn
+
+if $yn; then
+
+	for patch in $( ls "$indir"/*.patch ); do
+
+		b_apply=false
+		b_autocommit=false
+
+		if ! $b_newcmtloginited ; then
+			cat /dev/null > "$newcommitslog"
+			# rm -f $newcommitslog
+			b_newcmtloginited=true
+		fi
+
+		echo -e "Patch: "$attr_bold""$patch""$attr_OFF""
+		doyn "Apply this patch?" "git am "$indir/$patch"" "" b_apply
+
+		if $b_apply; then
+			chkconflicts
+
+			echo "$(git log -n1 --pretty=oneline | cut -d' ' -f1)" \
+				>> "$newcommitslog"
+
+			git log -n1
+			getyn "Modify the commit message?" b_autocommit
+		fi
+
+		if $b_autocommit; then
+
+			# Create the new commit message in a file consisting of ..
+			#	empty line
+			#	descriptor line, with leading whitespace trimmed
+			#	three more empty lines
+			#
+			echo -e "\n" >> $commitmessagefile
+			description=$(git log -n1 | head -5 | tail -1)
+			#
+			# Trim leading whitespace from description line
+			#
+			description=$(echo -e $description)
+			echo "$description" >> $commitmessagefile
+			echo -en "\n\n\n" >> $commitmessagefile
+			#
+			# Add the current commit message
+			#
+			git log -n1 >> $commitmessagefile
+			echo -e "$attr_bold"
+			echo -e "Edit the commit message ..."
+			echo -e "$attr_OFF"
+			git commit -s --amend --reset-author \
+				      --file=$commitmessagefile --edit
+		fi
+	done
+fi
+
+# Create the patch set
+#
+getyn "Create a patch set?" ans
+
+if $ans; then
+	echo
+	git_getsubjectprefix
+	patchcount=$(cat "$newcommitslog" | wc -l)
+	lastcommit=$(tail -1 $newcommitslog)
+	echo
+	git format-patch -s -$patchcount "$lastcommit" -o "$outdir"
+fi
+
+ui_sh_backout $myshlvl
+echo
+echo "Done."
+echo

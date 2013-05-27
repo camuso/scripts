@@ -1,0 +1,5 @@
+#!/bin/bash
+remote_host="$1"
+remote_file="$2"
+local_file="$3"
+ssh "$remote_host" cat "$remote_file" | diff "$local_file" -

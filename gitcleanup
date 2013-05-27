@@ -1,0 +1,6 @@
+#!/bin/bash
+branch="$(git status | head -1 | cut -d' ' -f4)"
+head="$(cat .git/refs/heads/"$branch")"
+git reset --hard "$head"
+git checkout .
+git clean -df

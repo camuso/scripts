@@ -1,0 +1,130 @@
+#!/bin/bash
+
+sPath=""
+filename=""
+hostname=""
+username="root"
+hostnumber="-0"
+down=0
+userhostflag=0
+recursive=""
+
+function usage
+{
+	echo ""
+	echo "scpft [[-<1..9> host] | [-h host]] [[-l] | [-u username]] [-r] filename"
+	echo "	-<1..9>      - host name is prepended to one of the enumerated IPs"
+	echo "                 (see list below)"
+	echo "	-h --host    - user specifies destination host"
+	echo "	               (requires complete IP)"
+	echo "	-u --user    - specific username (default is root)"
+	echo "	-l --logname - the login user's name (\$LOGNAME is $LOGNAME)"
+	echo "	-r           - recursively copies directories"
+	echo ""
+	echo "Host Numbers:"
+	echo "	-0 - rhts.bos.redhat.com (default)"
+	echo "	-1 - rhts.eng.bos.redhat.com"
+	echo "  -2 - lab.rhts.bos.redhat.com"
+	echo ""
+	echo ""
+	exit 0
+}
+
+#################################
+#
+# Parse the command line.
+#
+#################################
+
+# If there's no arguments to the command, dump the help and exit.
+#
+if [ "$1" = "" ]
+then usage
+fi
+
+# Okay, this is tricky
+# Walk through the argument list.
+# If the first character is a "-", we know its an option.
+# If the first character is NOT a "-", then it must be one of the
+# required arguments - filename first, and host name last.
+#
+while [	"$1" !=	"" ]; do
+
+	str="$1"
+	firstchr=${str:0:1}
+
+	if [ $firstchr = "-" ]; then
+
+		case $1 in
+			-0 | -1 | -2 )
+					hostnumber=$1
+					shift
+					hostname=$1
+					;;
+			-u | --user )	shift
+					username=$1
+					;;
+			-h | --host )	userhostflag=1
+					shift
+					hostname=$1
+					;;
+			-l | --login )	username=$LOGNAME
+					;;
+			-r )		recursive=$1
+					;;
+			-? | --help )	usage
+					;;
+			* )		usage
+					;;
+		esac
+
+	else [ -z $filename ]; then
+		echo "filename null, so assign it to $1"
+		filename=$1
+	fi
+	shift
+done
+
+if [ $userhostflag -eq 1 ]; then
+	sPath="$username@$hostname"
+else
+	case $hostnumber in
+		-0 )	sPath="$username@$hostname.rhts.bos.redhat.com:"
+			;;
+		-1 )	sPath="$username@$hostname.rhts.eng.bos.redhat.com:"
+			;;
+		-2 )	sPath="$username@$hostname.lab.rhts.bos.redhat.com"
+			;;
+		* )	echo "Number $hostnumber has not been assigned to a host."
+			exit 0
+			;;
+	esac
+fi
+
+
+# If we are uploading, then scp the filename to the host
+# else we are downloading, so copy the host/filename to current directory
+#
+echo "filename=$filename sPath=$sPath"
+
+if [ $down -eq 0 ]
+then
+	echo "scp -p $recursive $filename $sPath"
+	scp -p $recursive $filename $sPath
+else
+	echo "scp -p $recursive $sPath$filename ."
+	scp -p $recursive $sPath$filename .
+fi
+
+exit 0
+
+#########################################################################
+if [ -z host ]; then
+	if [ $eng -eq 0 ]
+	then sPath="root@$1.rhts.bos.redhat.com:"
+	else sPath="root@$1.rhts.eng.bos.redhat.com:"
+	fi
+else
+	sPath=host
+fi
+

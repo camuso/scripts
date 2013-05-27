@@ -1,0 +1,126 @@
+#!/bin/bash
+
+sPath=""
+filename=""
+hostname=""
+username="root"
+logname="$LOGNAME"
+hostnumber="-0"
+down=0
+userhostflag=0
+
+function usage
+{
+	echo ""
+	echo "hos [-n number] [-u username] filename host"
+	echo "	-<1..9>      - host number (see list below)"
+	echo "	-u --user    - specific username (default is root)"
+	echo "	-l --logname - the login user's name (\$LOGNAME is $LOGNAME)"
+	echo "	-h --host    - user specifies destination host"
+	echo "	               (not one of the nubered hosts)"
+	echo ""
+	echo "Host Numbers:"
+	echo "	-0 - rhts.bos.redhat.com (default)"
+	echo "	-1 - rhts.eng.bos.redhat.com"
+	echo "	-2 - rhts.lab.bos.redhat.com"
+	echo "	-3 - lab.bos.redhat.com"
+	echo ""
+	echo ""
+	exit 0
+}
+
+#################################
+#
+# Parse the command line.
+#
+#################################
+
+# If there's no arguments to the command, dump the help and exit.
+#
+if [ "$1" = "" ]
+then usage
+fi
+
+# Okay, this is tricky
+# Walk through the argument list.
+# If the first character is a "-", we know its an option.
+# If the first character is NOT a "-", then it must be one of the
+# required arguments - filename first, and host name last.
+#
+while [	"$1" !=	"" ]; do
+
+	str="$1"
+	firstchr=${str:0:1}
+
+	if [ $firstchr = "-" ]; then
+
+		case $1 in
+			-0 | -1 | -2 | -3 )
+					hostnumber=$1
+					;;
+			-u | --user )	shift
+					username=$1
+					;;
+			-h | --host )	userhostflag=1
+					;;
+			-l | --login )	username=$LOGNAME
+					;;
+			-? | --help )	usage
+					;;
+			* )		usage
+					;;
+		esac
+
+	else
+		hostname=$1
+	fi
+	shift
+done
+
+if [ $userhostflag -eq 1 ]; then
+	sPath="$username@$hostname"
+else
+	case $hostnumber in
+		-0 )	sPath="$username@$hostname.rhts.bos.redhat.com"
+			;;
+		-1 )	sPath="$username@$hostname.rhts.eng.bos.redhat.com"
+			;;
+		-2 )	sPath="$username@$hostname.rhts.lab.bos.redhat.com"
+			;;
+		-3 )	sPath="$username@$hostname.lab.bos.redhat.com"
+			;;
+		* )	echo "Number $hostnumber has not been assigned to a host."
+			exit 0
+			;;
+	esac
+fi
+
+
+echo "Copying ~/ark/bin.tgz ~/ark/hints.tgz ~/ark/code.tgz ~/bin/init-my-stuff to $sPath:"
+scp -p ~/ark/bin.tgz ~/ark/hints.tgz ~/ark/code.tgz ~/bin/init-my-stuff $sPath:
+
+exit 0
+
+#!/bin/bash
+
+sOption="$2"
+sPath=""
+
+echo "Option = $2"
+
+if [ -z sOption ]; then
+	sPath="root@$1.rhts.bos.redhat.com:"
+elif [ $sOption = "1" ]; then
+	sPath="root@$1.rhts.eng.bos.redhat.com:"
+else
+	sPath=sOption
+fi
+
+echo "Copying to $sPath"
+scp -pr ~/.vimrc 		\
+	~/searchdown.pl 	\
+	~/.bashrc 		\
+	~/bin/yum-install-git 	\
+	~/bin/clone-linus 	\
+	~/code/dmishow 		\
+	$sPath

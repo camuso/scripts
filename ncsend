@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# ncsend
+#
+# This script sends strings endlessly to a port at a destination ip
+# to generate lots of net traffic.
+#
+# The default sending ort is 2222, but the user can specify a
+# port using the '-p' switch.
+#
+
+usage() {
+	echo
+	echo "Usage: nclisten <port>"
+	echo -e "\t where \"port\" is an optional port number"
+	echo
+	exit 0
+}
+
+outstr="BBBBBBBBBBBBBBBB"
+
+echo "ncsend dest-ip <port>, where \"port\" is an optional port number."
+echo -e "Sends \"$outstr\" forever to the dest-ip on the given or default port."
+
+[ -n $1 ] || usage
+dest=$1
+
+if [ -n "$2" ];
+then port=$2
+else port=2222
+fi
+
+if ! [[ "$port" =~ ^[0-9]+$ ]];
+then
+	echo "$1 is not a number"
+	port=2222
+	echo "Using default port $port"
+fi
+
+echo "yes $outstr | nc -v $dest $port > /dev/null"
+read -a answer -p "Will send to $dest on port $port. Go? [Y/n]: "
+
+if [[ $answer =~ ^[yY] ]];
+then
+	yes $outstr | nc -v $dest $port > /dev/null
+else
+	echo "You answered \"$answer\", exiting ..."
+	echo
+	exit 0
+fi
+

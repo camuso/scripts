@@ -1,0 +1,26 @@
+#!/bin/bash
+
+function usage {
+	echo
+	echo "numpat <directory>"
+	echo
+	echo -e "\tRenames files in the <directory> as \"xx.patch\""
+	echo -e "\twhere xx is a sequential number."
+	echo
+	exit
+}
+
+[ $# -eq 1 ] || usage
+
+cd $1
+count=1
+total=$(ls | wc -l)
+prefix=$2
+
+for filename in $(ls); do
+	newname=$(printf "%s-%02d.%02d.patch" $prefix $count $total)
+	echo "mv $filename -> $newname"
+	mv $filename $newname
+	count=$((count+1))
+done
+cd -

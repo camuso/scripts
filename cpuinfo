@@ -1,0 +1,23 @@
+#!/bin/bash
+
+function usage {
+	echo
+	echo "cpuinfo string"
+	echo "The \"string\" argument can be any string or substring"
+	echo "in the first field of /proc/cpuinfo"
+	echo
+	exit
+}
+
+[ -z "$1" ] && usage
+
+cpu_count=$(cat /proc/cpuinfo | grep processor | wc -l)
+line_count=$(cat /proc/cpuinfo | wc -l)
+for (( i = 0; i < (line_count/cpu_count); i++ ))
+do
+	read line
+	parm=${line%%:*}
+	[[ "$parm" =~ "$1" ]] && echo $line
+done < /proc/cpuinfo
+
+# cat /proc/cpuinfo | grep "$1" | head -n1

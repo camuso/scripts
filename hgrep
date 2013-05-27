@@ -1,0 +1,106 @@
+#!/bin/bash
+
+function usage {
+	echo
+	echo "hgrep [options] string path"
+	echo -e "\tWhere filespec can include a regexp, like \"drivers/*.[hc]\""
+	echo -e "\tOptions must come first and can be any valid grep options."
+	echo -e "\tIf you omit the \"path\" argument, the grep will be done for"
+	echo -e "\tevery file in every directory from the PWD."
+	echo -e "\tIf you use a wildcard in the path, you must enclose the path"
+	echo -e "\tin double quotes: \"path/filename*\""
+	echo
+	exit
+}
+
+# Use command substitution for this function, i.e.
+# 	filespec=$(getfilespec arg)
+#
+function getfilespec() {
+	local str="$1"
+	local fs="${str##*/}"
+	if [ "$fs" = "" ]; then fs="*"; fi
+	echo "$fs"
+}
+
+# Use command substitution for this function, i.e.
+# 	dirspec=$(getdirspec arg)
+#
+function getdirspec() {
+	local str="$1"
+	local isdir=$(echo "$str" | grep "/")
+	if [ "$isdir" != "" ]; then
+		local rts=$(echo "$str" | rev)
+		local ds=$(echo "${rts#*/}" | rev)
+	else
+		ds="./"
+	fi
+	echo "$ds"
+}
+
+# Default values
+#
+string=""i
+filespec="*"
+dirspec="./"
+
+# If the first argument is an option list (begins with '-'), then we
+# must have at least two arguments.
+# else
+# we must have at least two arguments.
+
+# echo "number of args: $#"
+# echo "arg1: $1"
+# echo "arg2: $2"
+# echo "arg3: $3"
+
+arg1="$1"
+
+# See if we have an options argument
+#
+if [ "${arg1:0:1}" = "-" ];
+then
+	# echo "we have options"
+	[ $# -gt 3 ] && usage
+	[ $# -lt 2 ] && usage
+	grepopts="$arg1"
+	string=$2
+	if [ $# -eq 3 ]; then
+		filespec=$(getfilespec "$3")
+		dirspec=$(getdirspec "$3")
+	fi
+else
+	# echo "we do not have options"
+	[ $# -le 2 ] || usage
+	[ $# -ge 1 ] || usage
+	grepopts=""
+	string="$1"
+	if [ $# -eq 2 ]; then
+		filespec=$(getfilespec "$2")
+		dirspec=$(getdirspec "$2")
+	fi
+fi
+
+# echo "string:   $string"
+# echo "grepopts: $grepopts"
+# echo "filespec: "$filespec""
+# echo "dirspec:  "$dirspec""
+
+# Need to get the grep version, because earlier versions do not support
+# the '-T' option.
+#
+# The minimum version supporting the '-T' option is 2.6.0
+#
+mingrepversion=260
+
+# Get the first line of the grep version and trim out everything but the
+# version number.
+#
+grepversion=$(grep -V | head -1 | tr -cd '[[:digit:]]')
+
+# If the grepversion is 2.6.0 or greater, then it supports '-T'
+#
+if [ $grepversion -ge $mingrepversion ]; then tee='T'; else tee=''; fi
+
+echo -e "find $dirspec -type f -iname "$filespec" -exec grep -Hn"$tee" "$grepopts" --color "$string" '{}' \\;"
+find "$dirspec" -type f -iname "$filespec" -exec grep -Hn$tee $grepopts --color "$string" '{}' \;

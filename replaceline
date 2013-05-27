@@ -1,0 +1,14 @@
+#!/bin/bash
+lc=$(cat $3 | wc -l)
+
+[ $1 -gt $lc ] && exit 1
+
+awk -v line=$1 -v new_content="$2" '{
+        if (NR == line) {
+                print new_content;
+        } else {
+                print $0;
+        }
+}' $3 > temp
+mv temp "$3"
+

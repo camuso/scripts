@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# genpatset
+#
+# relies on external script ~/bin/gitfor1pat
+
+function usage() {
+	echo
+	echo "usage: genpatset <directory>"
+	echo
+	echo -e "\tGenerate a patchset from non-contiguous patches in <directory>."
+	echo -e "\tPatches will be named with leading sequential numbers followed"
+	echo -e "\tby the one-line description and \".patch\"."
+	echo
+	exit 1
+}
+
+[ $# -ne 1 ] && usage
+
+directory="$1"
+index=0
+
+echo "Enter the commits you want to format as patches."
+echo "Press Enter alone to quit."
+
+while true; do
+	indexstr="$(printf "%03d" $((index + 1)) )"
+	read -p "Commit "$indexstr": " commits[index]
+	if [ -z "${commits[index]}" ]; then
+		 break
+	fi
+	let index++	# ((index++)) would also work
+done
+
+for ((loop=0; loop < index; loop++)); do
+	echo "${commits[$loop]}"
+	gitfor1pat "$directory" $((loop + 1)) "${commits[$loop]}"
+done

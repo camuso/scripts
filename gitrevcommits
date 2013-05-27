@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Extracts all the oneline commits between two revisions whose first
+# line contains the provided string and outputs them to a file.
+#
+# $1 - Earliest Revision string
+# $2 - Latest Revision string
+# $3 - Search string
+
+rev1="$1"
+rev2="$2"
+str="$3"
+
+git log $rev1..$rev2 --oneline | grep -iw "$str" > /tmp/$rev2-commits
+
+echo
+echo -e "Your file is saved in /tmp/$rev2-commits."
+echo

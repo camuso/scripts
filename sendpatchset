@@ -1,0 +1,325 @@
+#!/usr/bin/python
+
+# sendpatchset - tool for submitting patches to mailing lists
+#
+# Copyright (c) 2004 Silicon Graphics, Inc.  All rights reserved.
+# Author: Paul Jackson <pj@sgi.com>
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+
+import sys
+import os
+import string
+import smtplib
+import re
+import email.Utils
+import time
+
+cmd = sys.argv[0]
+
+def usage():
+    print """
+    Usage: sendpatchset controlfile ...
+
+    Sample control file:
+# this is a comment
+SMTP: mail.boston.redhat.com
+From: Prarit Bhargava <prarit@redhat.com>
+#To: rhkernel-list@redhat.com
+To: prarit@redhat.com
+Subject: [PATCH 1/2] Short sweet descriptive phrase
+File: path-of-message-text-for-first-patch
+Subject: [PATCH 2/2] Another short sweet phrase
+File: path-of-message-text-for-second-patch
+    
+    Above sends out two email messages, with specified Subject lines,
+    and contents from corresponding Files.
+    
+    Each "File" line sends a message, using the latest values for
+    the other keywords set so far in file.  The To, Cc and Bcc lists
+    accumulate.
+    
+    Multiple control files are handled entirely independently.
+    
+    All but the first message are sent in "Reference" to, and
+    "In-Reply-To" the first message.
+    
+    First word on each line of control file is a keyword.  It can be
+    any mix of upper/lower case, with optional trailing semicolon.
+    The keyword "Subject" can be abbreviated as "Subj".
+    
+    The From address is also added to the Cc list.
+    
+    The SMTP server must be a host responding to SMTP on port 25.
+    
+    Try testing by first sending patch set only to one or more of
+    your own email addresses.
+    
+    The following documents explain how to submit patches to the
+    Linux kernel:
+
+     1) Documentation/SubmittingPatches, a file in the kernel source
+	  http://lxr.linux.no/source/Documentation/SubmittingPatches
+     2) Documentation/CodingStyle
+	  http://lxr.linux.no/source/Documentation/CodingStyle
+     3) Andrew Morton's "The Perfect Patch", available at:
+          http://www.zip.com.au/~akpm/linux/patches/stuff/tpp.txt
+     4) Jeff Garzik's "Linux kernel patch submission format", at:
+          http://linux.yyz.us/patch-format.html
+     5) Jeff Garzik's "How to piss off a kernel subsystem maintainer"
+	  http://www.kroah.com/log/2005/03/31/
+     6) Linus's email on the canonical patch format:
+          http://lkml.org/lkml/2005/4/7/183
+
+    Linus describes the canonical patch format:
+
+	That canonical format is:
+
+		Subject: [PATCH 001/123] [<area>:] <explanation>
+
+	together with the first line of the body being a
+
+		From: Original Author <origa@email.com>
+
+	followed by an empty line and then the body of the explanation.
+
+	After the body of the explanation comes the "Signed-off-by:"
+	lines, and then a simple "---" line, and below that comes the
+	diffstat of the patch and then the patch itself.
+"""
+
+smtpserver=""
+fromaddr=""
+subject = ""
+filename = ""
+toaddrs = []
+ccaddrs = []
+bccaddrs = []
+refid = ""
+
+# trim trailing lineseparator, if present
+def chomp(str, sep=os.linesep):
+    n = len(sep)
+    if str[-n:] == sep:
+        str = str[:-n]
+    return str
+
+def unique(s):
+    u = {}
+    for x in s:
+        u[x] = 1
+    return u.keys()
+
+def sendmsg(msgtext, actually_send_message, n, npatches):
+    global smtpserver, fromaddr, subject, filename, toaddrs, ccaddrs, bccaddrs, refid
+
+    if not smtpserver:
+        print "%s: Oops - smtp server not specified" % (cmd)
+	sys.exit(1)
+    if not fromaddr:
+        print "%s: Oops - from address not specified" % (cmd)
+	sys.exit(1)
+    if not subject:
+        print "%s: Oops - no subject for filename: %s" % (cmd, filename)
+	sys.exit(1)
+    if not filename:
+        print "%s: Oops - empty filename after subject: %s" %(cmd, subject)
+	sys.exit(1)
+    if not toaddrs:
+        print "%s: Oops - no to addresses for filename: %s" % (cmd, filename)
+	sys.exit(1)
+    if not ccaddrs:
+        print "%s: Oops - no cc addresses for filename: %s" % (cmd, filename)
+	sys.exit(1)
+
+    toaddrs = unique(toaddrs)
+    ccaddrs = unique(ccaddrs)
+    bccaddrs = unique(bccaddrs)
+
+    toaddr_str = ",".join(toaddrs)
+    ccaddr_str = ",".join(ccaddrs)
+
+    msgid = email.Utils.make_msgid("sendpatchset")
+
+    msg  = "From: %s\r\n" % (fromaddr)
+    msg += "To: %s\r\n" % (toaddr_str)
+    msg += "Cc: %s\r\n" % (ccaddr_str)
+    msg += "Message-Id: %s\r\n" % (msgid)
+    if refid:
+        msg += "In-Reply-To: %s\r\n" % (refid)
+        msg += "References: %s\r\n" % (refid)
+    # if npatches > 1:
+    #	msg += "Subject: [patch %d/%d] %s\r\n" % (n, npatches, subject)
+    # else:
+    #	msg += "Subject: [patch] %s\r\n" % (subject)
+    msg += "Subject: %s\r\n" % (subject)
+    msg += "\r\n"
+    msg += msgtext
+    try:
+        sigfd = open(os.getenv("HOME") + "/.signature")
+	msg += "\n-- \n"
+	msg += sigfd.read()
+	sigfd.close()
+    except:
+        pass
+
+    try:
+        s=smtplib.SMTP(smtpserver)
+    except:
+        print "%s: Oops - Cant connect to SMTP Server <%s>" % (cmd, smtpserver)
+	sys.exit(1)
+
+    s.set_debuglevel(0)
+    if not actually_send_message:
+	for a in toaddrs + ccaddrs + bccaddrs:
+	    if n == 1:
+                (code, resp) = s.verify(a)
+	        sys.stdout.write(".")
+	        sys.stdout.flush()
+		if code == 550:
+		    print "%s: Oops - bad address: %s" % (cmd, resp)
+		    sys.exit(1)
+    else:
+        print "Sending: %s" % (subject),
+        sys.stdout.flush()
+        s.sendmail(fromaddr, toaddrs + ccaddrs + bccaddrs, msg)
+        print "... sent."
+        # Give recipients a chance of receiving patches in correct order.
+        time.sleep(5)
+
+    s.quit()
+
+    # First message sent w/o reply-to or reference id.
+    # All subsequent messages sent in reference and reply to first message
+    if not refid:
+        refid = msgid
+
+
+
+def dopass(file, npatches, actually_send_message):
+    global smtpserver, fromaddr, subject, filename, toaddrs, ccaddrs, bccaddrs
+
+    try:
+	ctrlfd = open (file)
+    except IOError, msg:
+	usage()
+	sys.exit(1)
+
+    n = 0
+
+    for line in ctrlfd.readlines():
+        line = chomp(line)
+
+	# remove optional comment and strip line
+	i = line.find('#')
+	if i >= 0:
+	    line = line[:i]
+	line = line.strip()
+	if not line:
+	    continue
+
+	k = re.match("smtp\s*:*\s+", line, re.I)
+	if k:
+	    smtpserver = line[k.span()[1]:]
+	    continue
+
+	k = re.match("from\s*:*\s+", line, re.I)
+	if k:
+	    fromaddr = line[k.span()[1]:]
+	    ccaddrs.append(line[k.span()[1]:])
+	    continue
+
+	k = re.match("to\s*:*\s+", line, re.I)
+	if k:
+	    toaddrs.append(line[k.span()[1]:])
+	    continue
+
+	k = re.match("cc\s*:*\s+", line, re.I)
+	if k:
+	    ccaddrs.append(line[k.span()[1]:])
+	    continue
+
+	k = re.match("bcc\s*:*\s+", line, re.I)
+	if k:
+	    bccaddrs.append(line[k.span()[1]:])
+	    continue
+
+	k = re.match("subj(ect)?\s*:*\s+", line, re.I)
+	if k:
+	    subject = line[k.span()[1]:]
+	    continue
+
+	k = re.match("file\s*:*\s+", line, re.I)
+	if k:
+	    filename = line[k.span()[1]:]
+	    msgtext = ""
+	    try:
+	        msgfd = open(filename)
+		msgtext = msgfd.read()
+	        msgfd.close()
+	    except IOError, msg:
+		print "%s: Oops - cant open %s:\n\t%s" % (cmd, filename, msg)
+		sys.exit(1)
+	    if not msgtext:
+	        print "%s: Oops - empty message text file: %s" % (cmd, filename)
+		sys.exit(1)
+	    n += 1
+	    sendmsg(msgtext, actually_send_message, n, npatches)
+	    continue
+
+	# bogus line - matched nothing
+	print "%s: Oops - unrecognized line: <%s>" % (cmd, line)
+	sys.exit(1)
+
+    ctrlfd.close()
+    return n
+
+args = sys.argv[1:]
+if not args:
+    usage()
+    sys.exit(1)
+
+for file in args:
+    # read control file twice - verify all "file", count total num patches
+    # Make two passes over control file:
+    #  Pass 0 - Count number patches 'npatches', and error checking, so we
+    #           dont send any messages unless we can probably send all.
+    #  Pass 1 - Actually send the patch email messages.
+
+    print "Verifying control file, pathnames and addresses ",
+    sys.stdout.flush()
+
+    smtpserver=""
+    fromaddr=""
+    subject = ""
+    filename = ""
+    refid = ""
+    toaddrs = []
+    ccaddrs = []
+    bccaddrs = []
+    npatches = dopass(file, 0, False)
+
+    print ""
+
+    smtpserver=""
+    fromaddr=""
+    subject = ""
+    filename = ""
+    refid = ""
+    toaddrs = []
+    ccaddrs = []
+    bccaddrs = []
+    dopass(file, npatches, True)
+

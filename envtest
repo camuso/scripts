@@ -1,0 +1,11 @@
+# env TESTR=testr
+
+
+foo() {
+	TESTR="new"
+	# export TESTR
+
+}
+
+foo
+

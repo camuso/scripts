@@ -1,0 +1,10 @@
+#!/bin/bash
+
+while read line
+do
+	trimmedline="$(echo $line | tr -d '[[:blank:]]')"
+	# echo $trimmedline
+	[ -z $trimmedline ] && break
+	echo "$line"
+done < /proc/cpuinfo
+

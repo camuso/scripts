@@ -1,0 +1,13 @@
+#!/bin/bash
+
+function usage() {
+	echo
+	echo "usage: g2-list"
+	echo -e "\tNo parameters"
+	echo
+	exit
+}
+
+[ $# -ge 1 ] && usage
+
+grub2-editenv list

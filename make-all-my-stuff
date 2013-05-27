@@ -1,0 +1,20 @@
+#!/bin/bash
+
+echo "current directory $PWD"
+savedir="$PWD"
+cd $HOME
+echo "changed to home directory $PWD"
+tar -czvf bin.tgz bin/
+tar -czvf code.tgz code/
+tar -czvf hints.tgz hints/
+
+if ! [ -d ark ]; then
+	mkdir ark/
+fi
+
+mv -fv bin.tgz ark/
+mv -fv code.tgz ark/
+mv -fv hints.tgz ark/
+
+echo "Returning to "$savedir""
+cd "$savedir"

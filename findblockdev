@@ -1,0 +1,16 @@
+#!/bin/bash
+
+cd /dev
+
+for i in $( ls )
+do
+	if [ -b $i ]
+	then
+		echo $i " is a block device"
+	else
+		echo $i
+	fi
+done
+
+cd -
+

@@ -1,0 +1,16 @@
+#!/bin/bash
+
+cd /dev
+
+for i in $( ls )
+do
+	if [ ${i:0:2} == "sd" ]
+	then
+		echo $i " is a disk drive"
+#	else
+#		echo $i
+	fi
+done
+
+cd -
+

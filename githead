@@ -1,0 +1,7 @@
+#!/bin/bash
+#
+# Save the commit number of the HEAD of the tree to a file.
+#
+git log --pretty=oneline -n1 | cut -d " " -f1 > ../githead
+git log --pretty -n1 $(cat ../githead)
+echo "git head $(cat ../githead) is stored in file ../githead."

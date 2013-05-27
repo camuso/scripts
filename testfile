@@ -1,0 +1,18 @@
+# this is a comment
+SMTP: smtp.corp.redhat.com
+From: tcamuso@redhat.com
+#To: rhkernel-list@redhat.com
+To: prarit@redhat.com,tcamuso@redhat.com
+Subject: [PATCH 0/5]PCI: x86 MMCONFIG
+File: /home/camuso/mcfg/mmconf.patch-0.5
+Subject: [PATCH 1/5]PCI: x86 MMCONFIG: introduce PCI_USING_MMCONF
+File: /home/camuso/mcfg/mmconf.patch-1.5
+Subject: [PATCH 2/5]PCI: x86 MMCONFIG: add legacy pci conf functions
+File: /home/camuso/mcfg/mmconf.patch-2.5
+Subject: [PATCH 3/5]PCI: x86 MMCONFIG: init legacy pci conf functions
+File: /home/camuso/mcfg/mmconf.patch-3.5
+Subject: [PATCH 4/5]PCI: x86 MMCONFIG: introduce pcibios_fix_bus_scan()
+File: /home/camuso/mcfg/mmconf.patch-4.5
+Subject: [PATCH 5/5]PCI: x86 MMCONFIG: call pcibios_fix_bus_scan()
+File: /home/camuso/mcfg/mmconf.patch-5.5
+

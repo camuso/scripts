@@ -1,0 +1,23 @@
+#!/bin/bash
+
+source ~/bin/lib/ui.source
+
+foo()
+{
+	a="y"
+	eval $1=$a
+}
+
+
+foo b
+
+if $b; then
+	echo "yes" 
+fi
+
+if ! $b; then
+	echo "no"
+fi
+
+getyn "test" yn
+

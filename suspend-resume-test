@@ -1,0 +1,29 @@
+#!/bin/bash
+#This script will automatically suspend and resume the system.
+
+########################################################################################
+# The looping script
+
+# Log file
+LOG_FILE=/var/tmp/S3_Suspend_message.log
+echo "The log file S3_Suspend_message.log is created in /var/tmp folder."
+
+read -p "Number of iterations: " count
+
+for((loop=1;loop<=$count;loop++))
+do
+#record the suspend and resume log
+	echo "#######################################################################" >> $LOG_FILE
+	echo $loop_time" times" >> $LOG_FILE
+	date >> $LOG_FILE
+	dmesg >> $LOG_FILE
+    	echo "The system will suspend after 30 second and resume after 60 second when it's in S3."
+	sleep 30
+	rtcwake --mode=mem --second=60
+
+done
+#Change mod of log file
+chmod 777 /var/tmp/S3_Suspend_message.log
+echo "Please check the log file in /var/tmp folder."
+exit 0
+

@@ -1,0 +1,401 @@
+#!/bin/bash
+#
+# gitcherrypick
+#
+# Provide some automation for cherrypicking.
+#
+
+# This script needs a bash library source file
+#
+source ~/bin/lib/ui.source
+
+# Disable the herald from the first call to ui.source::getyn
+#
+b_ui_int_first_getyn=false
+
+myshlvl=$SHLVL
+
+# Herald
+#
+str_herald=\
+"\ngitcherrypick v0.2 - Automates cherrypicking\n\n\
+\t\"Cherry-picked\" commits are those you are attempting to backport.\n\
+\t\"Backported\" commits are those you have committed after having\n\
+\tcherry-picked and resolved any conflicts.\n\n\
+\tTo capture all input and output from this session, quit now and\n\
+\trestart with the following command.\n\n\
+\t\tgitcherrypick script.sh 3>&2>&1 | tee gitcherrypick.log\n\n\
+\tYou can also use \"script\" to capture your session. This will\n\
+\tcapture all activity, including activity in spawned shells.\n\n\
+\t\tscript -c gitcherrypick gitcherrypick.log\n\n\
+\tTo enjoy enhanced input editing capabilities, use \"rlwrap\".\n\n\
+\t\trlwrap gitcherrypick\n\n\
+\t"$attr_bold"Press 'x' to spawn a shell or 'q' to quit at any prompt.\
+"$attr_OFF"\n"
+
+echo -e "$str_herald"
+
+# Query for a project directory
+#
+#printenv | grep -q PRJDIR
+#bPrjDirExists=$?
+#bNewPrj=false
+
+# Project directories and data are stored in prjfile
+#
+prjfile=~/bin/.data/gitcherrypick.prj
+prj_indir=1	# Offset in prjfile to name of directory for cherry-picked patches
+prj_outdir=2	# Offset in prjfile to name of directory for backported cherry-picked patches
+prj_maxline=2	# Number of lines in the file. Must be updated if you add more data.
+
+# Booleans to control management of the project file and its contents.
+#
+b_outdir_exists=false
+b_indir_exists=false
+
+b_save_indir=false
+b_save_outdir=false
+
+b_new_indir=false
+b_new_outdir=false
+
+# Let's see what we've got
+#
+if [ -f "$prjfile" ]; then
+	linecount=$(cat "$prjfile" | wc -l)
+	indir="$(ui_catoneline "$prjfile" $prj_indir)"
+	[ -d "$indir" ] && b_indir_exists=true
+
+	if [ $linecount -gt $prj_indir ]; then
+		outdir="$(ui_catoneline "$prjfile" $prj_outdir)"
+		[ -d "$outdir" ] && b_outdir_exists=true
+	fi
+else
+	# When creating the prjfile for the first time, be sure it has
+	# enough lines to contain all the data.
+	#
+	for ((i = 0; i < prj_maxline; i++)); do
+		echo "" >> "$prjfile"
+	done
+fi
+
+# $1 - prompt
+# $2 - true if directory exists
+# $3 - true if we want a different directory - returned
+# $4 - true if we want to save the info - returned
+# $5 - name of environment file - returned
+#
+function prj_create_env {
+	local prompt="$1"
+	local b_dir_exists
+	eval  b_dir_exists=${!2}
+	local b_new_dir
+	eval  b_new_dir=${!3}
+	local b_save_dir
+	eval  b_save_dir=${!4}
+	local dir="$5"
+
+	if $b_dir_exists; then
+		echo -e "Current "$prompt" directory: "$attr_bold""${!dir}""$attr_OFF""
+		getyn "Change this?" b_new_dir
+
+		if ! $b_new_dir; then
+			echo -e "You have chosen to re-use "$attr_bold""${!dir}""$attr_OFF""
+			echo "Contents of the directory may be altered."
+		fi
+	else
+		b_new_dir=true
+	fi
+
+	if $b_new_dir; then
+		ui_getnewdir "New "$prompt" directory: " dir
+		# echo -e "New "$prompt" directory is "$attr_bold""$dir""$attr_OFF""
+		getyn "Remember this "$prompt" directory?" yn
+		b_save_dir=true
+		eval $4=$b_save_dir
+		eval $5=$dir
+	fi
+
+	eval $3=$b_new_dir
+}
+
+prj_create_env "cherry-picked" b_indir_exists b_new_indir b_save_indir indir
+prj_create_env "backported" b_outdir_exists b_new_outdir b_save_outdir outdir
+
+$b_save_indir && ui_replaceline $prj_indir "$indir" "$prjfile"
+$b_save_outdir && ui_replaceline $prj_outdir "$outdir" "$prjfile"
+
+# Create the project files
+#
+commitmessagefile=""$outdir"/commitmessage"
+bpcommitsfile=""$outdir"/backported-commits.log"
+cpcommitsfile=""$indir"/cherry-picked-commits.log"
+
+echo "bpcommitsfile: "$bpcommitsfile""
+echo "cpcommitsfile : "$cpcommitsfile""
+
+# Initialize logfiles and logic
+#
+b_use_cpcmtlog=false
+b_use_bpcmtlog=false
+b_shellcommit=false
+b_shellcommit_noauto=false
+
+if [ -e "$cpcommitsfile" ]; then
+	getyn ""$cpcommitsfile" exists. Use it?" yes
+	$yes && b_use_cpcmtlog=true
+	n_lines_cpcommitsfile=$(cat "$cpcommitsfile" | wc -l)
+fi
+
+if [ -e "$bpcommitsfile" ]; then
+	getyn ""$bpcommitsfile" exists. Leave it?" yes
+	$yes && b_use_bpcmtlog=true
+	n_lines_bpcommitsfile=$(cat "$bpcommitsfile" | wc -l)
+fi
+
+$b_use_cpcmtlog || cat /dev/null > "$cpcommitsfile"
+$b_use_bpcmtlog || cat /dev/null > "$bpcommitsfile"
+
+# Initialize this session's counters.
+#
+shellindex=1
+index=1
+
+# Create some string variables here, because they are too large to put in-line.
+#
+str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
+str_conflicts="Cherry-picked from the following upstream commit."
+str_cmtmsg="$str_conflicts"
+str_cpprompt="\nPress \"Enter\" to skip this step.\nCherrypick from commit: "
+
+# \tThe activity in the new shell will be saved in ...\n\
+# \t\t"$attr_bold""$outdir"/shell_$shellindex.log"$attr_OFF"\n\
+
+str_shellmsg=\
+"\nSpawning a new shell so you can edit conflicts.\n\
+\tType \"exit\" or \"ctrl-D\" to return here.\n\n\
+\tType \"exit 1\" if you use a different upstream commit in your\n\
+\tshell session, and you will be prompted for the commit you used.\n\n\
+\tType \"exit 2\" if you use different upstream commits and already\n\
+\tcommitted your backports and commit messages before exiting the\n\
+\tshell. In that case, be sure to manually update these commit files\n\
+\twith the cherry-picked and backported commits.\n\
+\t"$attr_bold""$cpcommitsfile"\n\
+\t"$bpcommitsfile""$attr_OFF"\n"
+
+str_extcmt_query=\
+"\nYou signaled that you used an upstream commit other than $commit\n\
+when you were executing in an external shell. Please enter that commit now."
+
+str_extcmt_validate=\
+"\nYou signaled that you have completed the commits in an extermal shell and\n\
+have updated the following commits files accordingly
+\t"$attr_bold""$cpcommitsfile"\n\
+\t"$bpcommitsfile""$attr_OFF"\n\
+If you want to exit to a shell to take care of unfinished business, or to\n\
+recheck your work, press \"x\" now, or any other key to continue. "
+
+while true; do
+
+	b_autocommit=false
+	b_shellcommit=false
+	b_shellcommit_noauto=false
+
+	if $b_use_cpcmtlog; then
+		if [ $index -le $n_lines_cpcommitsfile ]; then
+			commit="$(ui_readline $index $cpcommitsfile)"
+			echo -e ""$attr_bold""$commit""$attr_off""
+			getyn "Use this commit?" yes
+		else
+			echo -e "No more commits in "$attr_bold""$cpcommitsfile""$attr_OFF""
+			yes=false
+		fi
+
+		if $yes; then
+			commit="$(echo $commit | cut -d' ' -f1)"
+		else
+			getuser "$str_cpprompt" commit
+		fi
+	else
+		getuser "$str_cpprompt" commit
+	fi
+
+	if [ "$commit" ]; then
+
+		git cherry-pick "$commit"
+		git status
+		getyn "Conflicts to fix?" conflicts
+
+		if $conflicts; then
+			echo -e "$str_shellmsg"
+			# bash 3>&2>&1 | tee $outdir/shell_$shell_index
+			bash
+			retval=$?
+			[ $retval -eq 1 ] && b_shellcommit=true
+			[ $retval -eq 2 ] && b_shellcommit_noauto=true
+			str_cmtmsg="$str_conflicts"
+			let shellindex++
+		else
+			str_cmtmsg="$str_noconflicts"
+		fi
+
+		git status
+	fi
+
+	# If user typed "exit 1" when exiting the external shell, he is signaling
+	# that he used a different upstream commit.
+	#
+	if $b_shellcommit; then
+		echo -e "$str_extcmt_query"
+		getuser "$str_cpprompt" commit
+	fi
+
+	# If user typed "exit 2" when exiting the external shell, he is signaling
+	# that he has taken care of this commit manually. Give him one last chance
+	# to check his work or take care of unfinished business, and set the
+	# commit string to null so we don't query for auto commit or update the
+	# commit log files.
+	#
+	if $b_shellcommit_noauto; then
+		echo -en "$str_extcmt_validate"
+		read -n1 spawnshell
+		if [ "$spawnshell" == "x" ]; then
+			ui_sh_spawn
+		else
+			echo -e "\tContinuing ..."
+		fi
+		commit=""
+	fi
+
+	# If we have an upstream commit hash, and user has not changed it in the
+	# shell, then prompt him for b_autocommit.
+	# Print the instructions on the first pass.
+	#
+	if [ "$commit" ]; then
+		if [ $index -eq 1 ]; then
+			echo
+			echo -e "\tIf you have not already commited your changes,"
+			echo -e "\tthey can be committed for you automatically,"
+			echo -e "\tincluding the commit message. You will be given"
+			echo -e "\tan opportunity to edit the commit message."
+			echo
+		fi
+		getyn "Want to automatically commit your changes?" b_autocommit
+	fi
+
+	if $b_autocommit; then
+
+		git commit -C "$commit"
+
+		# Create the new commit message in a file consisting of ..
+		#	The user of this script as author of the patch
+		#	The current date
+		#	Descriptor line, with leading whitespace trimmed
+		#	Standard commit message (str_cmtmsg in this file)
+		#	Original commit message from cherry-picked commit
+		#	Signed-off-by: line
+		#
+		echo -e "\n" > $commitmessagefile
+		description=$(git log -n1 "$commit" | head -5 | tail -1)
+		#
+		# Trim leading whitespace from description line and append
+		# it to the commit message. Also append the standard commit
+		# message.
+		#
+		description=$(echo -e $description)
+		echo "$description" >> $commitmessagefile
+		echo -e "\n" >> $commitmessagefile
+		echo -e "$str_cmtmsg" >> $commitmessagefile
+		echo -e "\n" >> $commitmessagefile
+		#
+		# Append the oroginal commit message.
+		#
+		git log -n1 "$commit" >> $commitmessagefile
+		#
+		# Amend the commit messsage with you as author, using the
+		# commit message file we built in the previous few lines,
+		# and a Signed-off-by: ("-s") line.
+		#
+		git commit -s --amend --reset-author --file=$commitmessagefile
+		#
+		# Display the new git log message and inquire if it needs more
+		# editing.
+		#
+		git log -n1
+		getyn "Edit this commit message?" yes
+
+		$yes && git commit --amend
+		#
+		# Wrirw the new commit into the backport commits file.
+		#
+		git log -n1 --oneline >> "$bpcommitsfile"
+	fi
+
+	[ "$commit" ] && let index++
+	getyn "Cherry-pick another commit?" ans
+	$ans || break
+done
+
+# Create the patch set
+#
+function getsubjectprefix {
+	local newpfx="$(git config format.subjectprefix)"
+	while true; do
+		echo -e "Current subject prefix: "$attr_bold""$newpfx""$attr_OFF""
+		getyn "Change subject prefix?" ans
+		if $ans; then
+			getuser "New prefix" newpfx
+			git config format.subjectprefix "$newpfx"
+		else
+			break
+		fi
+	done
+}
+
+function createpatchset {
+	local commitsfile="$1"
+	local destdir="$2"
+	local patchcount=$(cat "$commitsfile" | wc -l)
+
+	if [ $patchcount -eq 0 ]; then
+		echo
+		echo -e "\tSorry, but file "$attr_bold""$commitsfile""$attr_OFF" is empty."
+		echo
+		eval $3=$patchcount
+		return 1
+	fi
+
+	local lastcommit=$(tail -1 $commitsfile | cut -d' ' -f1)
+	git format-patch -s -n$patchcount "$lastcommit" -o "$destdir"
+	eval $3=$patchcount
+	return 0
+}
+
+getyn "Create a patch set from the new backported commits?" yes
+if $yes; then
+	echo
+	getsubjectprefix
+	createpatchset "$bpcommitsfile" "$outdir" bppatchcount
+	echo
+fi
+
+if [ $bppatchcount -gt 0 ]; then
+	git log --reverse -n$patchcount | grep "    commit" \
+		| cut -d' ' -f6 > $cpcommitsfile
+
+	echo
+	echo -e "\tFollowing are the commits you cherry-picked from upstream to create"
+	echo -e "\tthe backported patch set."
+	echo
+	cat "$cpcommitsfile"
+
+	getyn "Create patch set from cherry-picked commits?" yes
+	if $yes; then
+		createpatchset "$cpcommitsfile" "$indir" bp
+	fi
+fi
+
+ui_sh_backout $myshlvl
+echo
+echo "Done."
+echo

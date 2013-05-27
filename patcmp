@@ -1,0 +1,68 @@
+#!/bin/bash
+#
+# patcmp	- compare patches
+
+source ~/bin/lib/ui.source
+
+function usage () {
+	echo
+	echo "usage: patcmp <dir-1> <dir-2>"
+	echo
+	echo -e "\tCall vimdiff to compare the files in the two directories."
+	echo -e "\tThe two directories must have the same number of files."
+	echo -e "\tThe files considered for comparison must have ".patch""
+	echo -e "\tat the end of their filename."
+	echo
+	exit 1
+}
+
+[ $# -ne 2 ] && usage
+
+usdir=$1
+mldir=$2
+
+uscount=$(ls $usdir/*.patch | wc -l)
+mlcount=$(ls $mldir/*.patch | wc -l)
+
+# It is not really required that the two directories have the same number
+# of files, because we will simply stop processing when we run out of files
+# in one directory or the other. However, it could lead to confusion, since
+# we are comparing a patch set. Both directories containing the patch set
+# should therefore have the same number of files.
+#
+if ((mlcount != uscount)); then
+	echo
+	echo "The two directories must have the same number of files."
+	echo -e "\t$usdir has $uscount entries."
+	echo -e "\t$mldir has $mlcount entries."
+	echo "Exiting ..."
+	echo
+	exit 1
+fi
+
+echo
+echo "Patches in $usdir will be compared with patches in $mldir"
+echo
+
+
+index=0
+for i in $(ls "$mldir"/*.patch); do
+	mlfiles[index]="$i"
+	echo "${mlfiles[$index]}"
+	let index++
+done
+
+index=0
+for i in $(ls "$usdir"/*.patch); do
+	echo
+	read -n1 -p "Press \"q\" to quit, any other key to continue ..." answer
+	if [ "$answer" == "q" ]; then
+		echo
+		break
+	fi
+	echo
+	vimdiff "${mlfiles[$index]}" "$i"
+	let index++
+done
+
+exit 0

@@ -1,0 +1,399 @@
+#!/bin/bash
+#
+# ui.source
+#
+# v0.1
+#
+# bash library
+#
+# when adding routines to this library, be sure to declare local variables
+# as local. You may otherwise experience behavior that is difficult to debug.
+#
+
+# Text attributes
+#
+attr_bold="\033[1m"
+
+attr_OFF="\033[0m"
+
+#########################
+# Shell Routines
+#########################
+
+# ui_sh_backout
+# Back out of all shells until you are down to the one you want.
+# Takes one parameter, the shell you want to back out to.
+#
+function ui_sh_backout {
+	while [ $SHLVL -gt $1 ]; do
+		echo "Exiting shell level $SHLVL"
+		exit 0
+	done
+}
+
+# ui_sh_spawn
+# Spawns a new shell.
+# $1 - Additional message sent by caller
+# $2 - logfile to capture all session output. In this case,
+#      $1 would at least have to be an empty string.
+# Returns the value the user exited with.
+#
+function ui_sh_spawn {
+	local message="$1"
+	local logfile="$2"
+	local ret=0
+	echo "Leaving shell $SHLVL, spawning shell $(($SHLVL + 1))."
+	[ "$message" ] && echo -e ""$message""
+	echo "Type \"exit\" or \"ctrl-D\" to return to this point in the script."
+	if [ "$logfile" ]; then
+		bash 3>&2>&1 | tee $logfile
+		ret=$?
+	else
+		bash
+		ret=$?
+	fi
+
+	return $ret
+}
+
+function ui_sh_myshlvl {
+	echo "Shell level: $SHLVL"
+
+}
+
+function buhbye() {
+	local exitstr=$1
+	local exitfun=$2
+	echo -e "$exitstr"
+	exit 0
+}
+
+# END shell routines
+#####################
+
+#######################
+# User Input Routines
+#######################
+
+# getyn() $1 [$2]
+#
+# Takes $1 for a prompt string
+# Places true or false command into $2, which is an optional argument.
+# User is prompted for (y/n) answer at the end of the prompt string.
+#
+# On the very first call of this function in a script, the user is advised
+# that he may also pres "q" to quit the script immediately, or "x" to exit
+# the script to a child shell.
+#
+# If a child shell is chosen, the global variable ui_shexit is set upon
+# return, and if $2 was passed, it will be set to false.
+
+b_ui_int_first_getyn=true
+b_ui_int_firstpass=true
+
+function getyn {
+
+	local promptstring="$1"
+	local answer
+	local stat
+
+	$b_ui_int_firstpass && savedp2=$2
+
+	if $b_ui_int_first_getyn; then
+		echo -e "$attr_bold"
+		echo -e "Throughout this script, whenever you see the \"(y/n)\" prompt,"
+		echo -e "you may press \"q\" to quit, or \"x\" to spawn a new shell."
+		echo -e "$attr_OFF"
+		b_ui_int_first_getyn=false
+	fi
+	while true; do
+
+		echo -en "$attr_bold$promptstring (y/n): $attr_OFF"
+		read -n1 answer
+		echo
+		[ "$answer" == "q" ] && buhbye "$exitok"
+
+		if [ "$answer" == "y" ]; then
+			stat=true
+			break
+		fi
+
+		if [ "$answer" == "n" ]; then
+			stat=false
+			break
+		fi
+
+		if [ "$answer" == "x" ]; then
+			echo -e ""$attr_bold"Leaving shell $SHLVL, going to shell $(($SHLVL + 1))."
+			echo -e "Type \"ctrl-D\" or \"exit\" to return to shell $SHLVL."$attr_OFF""
+			bash
+			echo -e ""$attr_bold"Returned to shell $SHLVL."$attr_OFF""
+			getyn "$promptstring" ${!2}
+			b_ui_int_firstpass=false
+			break
+		fi
+	done
+	if $b_ui_int_firstpass; then
+		[ $# -eq 2 ] && eval $2=$stat
+	else
+		[ $# -eq 2 ] && eval $savedp2=$stat
+	fi
+	b_ui_int_firstpass=true
+}
+
+# doyn() $1 $2 [$3] [$4]
+#
+# $1 -	Calls getyn() with $1 for a prompt string.
+# $2 -	A string containing the command that will be executed if the user
+#	responded "y"
+# $3 -	Optional. A string containing the command that will be executed if
+#	the user responded "n"
+# $4 - 	Optional. Will contain the value of the user's response. If there is
+#	no action for $3 to do, then a null string "" must be passed for $3.
+#
+function doyn {
+	local promptstring=$1
+	local y_command=$2
+	local n_command=$3
+	local response
+
+	getyn "$promptstring" response
+	[ $# -lt 3 ] && n_command=""
+
+	if $response ; then
+		$y_command
+	fi
+
+	if ! $response ; then
+		$n_command
+	fi
+
+	[ $# -eq 4 ] && eval $4=$response
+}
+
+function getuser {
+	local promptstring="$1"
+	local var
+
+	echo -ne "$attr_bold$promptstring$attr_OFF"
+	read var
+	[ "$var" == "q" ] && buhbye "Exiting ..."
+	[ "$var" == "x" ] && ui_sh_spawn
+	eval $2=$var
+}
+
+#############################
+# Directory Routines
+#############################
+
+# ui_chkdir "$string"
+# where string is a string representation of a directory
+# returns
+#	0 if directory does not exist
+#	1 if the string exists as a file
+#	2 if the string exists as a directory
+#
+function ui_chkdir {
+	[ -d "$1" ] && return 2
+	[ -e "$1" ] && return 1
+	return 0
+}
+
+# ui_getnewdir prompt name
+# Prompts the user for a name to create a new directory and passes
+# it back to the caller in the "name" argument.
+# If the name already exists as a file, prompts for a new name.
+# If the name already exists as a directory, asks if user wants to
+# use that directory, warning that all its contents may be altered.
+#
+function ui_getnewdir {
+	local prompt="$1"
+	local newdir
+	local stat
+
+	while true; do
+		getuser "$prompt" newdir
+		ui_chkdir "$newdir"
+		local stat=$?
+
+		[ $stat -eq 1 ] && \
+			echo "\""$newdir"\" already exists as a file."
+
+		if [ $stat -eq 2 ]; then
+			echo "\""$newdir"\" already exists as a directory."
+			echo "If you use it, the contents will be altered."
+			getyn "Use it anyway?" ans
+			if "$ans"; then
+				# rm -f "$newdir"/*
+				eval $2="$newdir"
+				return $stat
+			fi
+		fi
+
+		if [ $stat -eq 0 ]; then
+			mkdir -p "$newdir"
+			eval $2="$newdir"
+			return $stat
+		fi
+	done
+}
+
+function ui_testdir {
+	local prompt="$1"
+	local tstdir
+	local stat
+	local createstr="Want to create it now?"
+	local shellstr="\nYou can exit to a shell by pressing \"x\" now."
+
+	while true; do
+		getuser "$prompt" tstdir
+		ui_chkdir "$tstdir"
+		stat=$?
+
+		if [ $stat -eq 0 ]; then
+			echo "$tstdir does not exist."
+			doyn "$createstr" "mkdir -p $tstdir"
+			eval $2="$tstdir"
+			return $stat
+		fi
+
+		if [ $stat -eq 1 ]; then
+			echo "$tstdir exists as a file. Try again."
+			continue;
+		fi
+
+		if [ $stat -eq 2 ]; then
+			eval $2="$tstdir"
+			return $stat
+		fi
+	done
+}
+
+# ui_getdirspec - extract directory name from a path to a file.
+#
+# NOTE: Must be a filename including a path to a file.
+#
+# Use command substitution for this function, i.e.
+# 	dirspec=$(getdirspec arg)
+#
+# $1 - filename including directory path
+#
+function ui_getdirspec() {
+	local str="$1"
+	local isdir=$(echo "$str" | grep "/")
+	if [ "$isdir" != "" ]; then
+		local rts=$(echo "$str" | rev)
+		local ds=$(echo "${rts#*/}" | rev)
+	else
+		ds="./"
+	fi
+	echo "$ds"
+}
+
+##########################
+# Miscellaneous
+##########################
+
+# ui_catoneline
+# cat the nth line of a file.
+# $1 - the file
+# $2 - one-based number of the line
+#
+function ui_catoneline {
+	echo $(cat $1 | head -$2 | tail -1)
+}
+
+# ui_replaceline
+# Replaces one line in a file, using only the line number instead of
+# pattern matching.
+# $1 - Line number
+# $2 - Text to write over the existing text in the line
+# $3 - File
+#
+# Returns 1 if the line number exceeds the number of lines in the file.
+#
+function ui_replaceline {
+
+	# local lc=$(cat $3 | wc -l)
+	# [ $1 -gt $lc ] && return 1
+
+	awk -v line=$1 -v new_content="$2" '{
+		if (NR == line) {
+			print new_content;
+		} else {
+			print $0;
+		}
+	}' $3 > temp
+	mv temp "$3"
+}
+
+# ui_readline
+# Reads one line in a file given the line number.
+# $1 - line number
+# $2 - file to read
+#
+# Returns 1 if the line number exceeds the number of lines in the file.
+#
+# call: line=$(ui_readline line file)
+#
+# "line" will contain the line of text
+# "$?" will contain the status
+#
+function ui_readline {
+
+	# local lc=$(cat $2 | wc -l)
+	# [ $1 -gt $lc ] && return 1
+
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+# ui_insertline
+# Insert a line into a file at the given line number.
+# If the line number is greater than the number of lines in the file,
+# the line is appended to the end of the file.
+#
+# $1 - line number
+# $2 - text to insert
+# $3 - file
+#
+function ui_insertline {
+	lc=$(cat $3 | wc -l)
+
+	if [ $1 -gt $lc ]; then
+		echo "$2" >> $3
+	else
+		awk -v line=$1 -v new_content="$2" '{
+			if (NR == line) {
+				print new_content;
+			}
+			print $0;
+		}' $3 > temp
+		mv temp "$3"
+	fi
+}
+
+# ui_deleteline
+# Delete a line in the file at the given line number.
+#
+# $1 - line number
+# $2 - file 
+#
+function ui_deleteline {
+
+	#lc=$(cat $2 | wc -l)
+	#
+	#[ $1 -gt $lc ] && exit 1
+
+	awk -v line=$1 '{
+		if (NR != line) {
+			print $0;
+		}
+	}' $2 > temp
+	mv temp $2
+}
+
+ui_source_loaded=true

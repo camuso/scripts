@@ -1,0 +1,23 @@
+#!/bin/bash
+#
+#
+
+function userexit() {
+	echo "You pressed \"q\" to exit"
+	echo
+	exit
+}
+
+response=""
+echo "This is a timed loop. "
+echo "Press \"q\" at any time to exit at the end of the current loop."
+
+while [ 1 ]; do
+	#
+	# The following line reads exactly one character without waiting
+	# for a carriage return or enter key.
+	#
+	read -n1 response
+	[ "$response" == "q" ] && userexit
+done
+

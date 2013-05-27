@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+str="$1"
+
+scratchfile=~/bin/.temp
+
+if [ -z $str ]; then
+	echo "You don't want to do that."
+	echo "You must enter a search string."
+	exit 1
+fi
+
+# str="$(echo "$@" | cut -d' ' -f1)"
+
+# proc=$(pgrep -lf "$str" | grep "$@" | head -1)
+# proc=$(pgrep -lf "$str" | grep "$@")
+
+echo -e "
+At the prompt, press \"y\" to kill, \"^c\" or \"q\" to quit,
+any other key to continue.
+"
+
+pgrep -lf $str | tee $scratchfile
+echo
+
+# Need to use "read -u1" in this function to be certain that input
+# comes from stdin (1), and not the open file in the while loop.
+#
+function getans {
+	local yes
+	local rv
+
+	echo -n "Kill this process? "
+	read -u1 -n1 yes
+	echo $ans
+	if [ "$yes" == "y" ]; then
+		kill $1
+		rv=$?
+		return $rv
+	fi
+	[ "$yes" == "q" ] && exit
+	return 0
+}
+
+while read line; do
+	pid=$(echo "$line" | cut -d' ' -f1)
+	echo "Process: "$line""
+	getans $pid
+	getans_status=$?
+	[ $getans_status -ne 0 ] && echo "Kill exited with status of $getans_status."
+done < $scratchfile
+
+rm -f $scratchfile

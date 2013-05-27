@@ -1,0 +1,16 @@
+#!/bin/bash
+#
+
+function usage() {
+	echo
+	echo "usage: gittag2commit TAG"
+	echo -e "\tcommand: tgit rev-list -1 TAG"
+	echo
+	exit
+}
+
+[ $# -ne 1 ] && usage
+
+echo "git rev-list -1 "$1""
+git rev-list -1 "$1"
+

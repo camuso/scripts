@@ -1,0 +1,1 @@
+for x in {28..40}; do export GREP_COLOR="1;$x;40"; grep Swap /proc/meminfo; echo "1;$x;40"; done

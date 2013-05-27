@@ -1,0 +1,135 @@
+#!/bin/bash
+#
+# gitutilities.src
+#
+# NOTE: ~/bin/ui.source must be included before this file.
+#
+
+# git_commit2patchset
+# 	creates a patchset from contiguous commits starting with the most
+#	recent.
+#
+# $1 - number of commits to format
+# $2 - destination directory for the patch set.
+# $3 - optional commit to start from (most recent of the set)
+#
+function git_commit2patchset {
+	local patchcount=$1
+	local destdir="$2"
+	local commit="$3"
+
+	git format-patch -s -n$patchcount "$commit" -o "$destdir"
+	return 0
+}
+
+# git_file2patchset
+# 	creates a patchset from a file containing a list of discontiguous
+#	commits.
+#
+# The commits list must be organized so that dwd the most recent commit is
+# the last line in the file and the oldest commit is at the top of the file.
+# git_createcommits can be used to generate such a file.
+#
+# Generated patches will be suitable for applying with "git am" or for
+# comparing to other patches.
+#
+# $1 - path of file containing the list of commits.
+# $2 - destination directory for the patch set.
+# $3 - optional - will return the number of patches formatted
+#
+function git_file2patchset {
+	local commitsfile="$1"
+	local destdir="$2"
+	local patchcount=$(cat "$commitsfile" | wc -l)
+	local commit=""
+
+	if [ $patchcount -eq 0 ]; then
+		echo
+		echo -e "\tSorry, but file "$attr_bold""$commitsfile""$attr_OFF" is empty."
+		echo
+		[ $# -eq 3 ] && eval $3=$patchcount
+		return 1
+	fi
+
+	index=1
+	while read line; do
+		commit=$(echo $line | cut -d' ' -f1)
+		git format-patch -1 -k --start-number $index "$commit" -o "$destdir"
+		let index++
+	done < $commitsfile
+
+	[ $# -eq 3 ] && eval $3=$patchcount
+	return 0
+}
+
+# git_subjectprefix - determine the subject prefix stored in .git/config
+#
+# no arguments
+#
+function git_subjectprefix {
+	local newpfx="$(git config format.subjectprefix)"
+	while true; do
+		echo -e "Current subject prefix: "$attr_bold""$newpfx""$attr_OFF""
+		getyn "Change subject prefix?" ans
+		if $ans; then
+			getuser "New prefix" newpfx
+			git config format.subjectprefix "$newpfx"
+		else
+			break
+		fi
+	done
+}
+
+# git_repo2commitsfile
+# 	create a file containing a list of commits from consecutive commits
+#	in a git repo.
+#
+# Unless the user supplies an option, only the short form hashes will be
+# written to the file.
+#
+# $1 - path to destination file
+# $2 - Number of commits to format, before and including the most recent.
+# $3 - Most recent commit in the set. Default is top of the tree, if empty.
+# $4 - optional argument - "long" for long hash, short is the default.
+#
+# returns - 128 if $2 is an invalid commit.
+#         -   1 if $3 is an invalid option
+#         -   0 if all is well.
+#
+function git_repo2commitsfile {
+	local file=$1
+	local count=$2
+	local lastcommit=$3
+	local hashfmt_option=$4
+	local hashfmt="short"
+
+	if [ "$hashfmt_option" ]; then
+		[ "$hashfmt_option" == "long" ] && hashfmt="long"
+	fi
+
+	[ "$hashfmt" == "short" ] && git log --reverse -n$2 --oneline $3 > $file
+	[ "$hashfmt" == "long" ] && git log --reverse -n$2 --pretty=oneline $3 > $file
+
+	return $?
+}
+
+# git_mail2commitsfile
+#	Create a file containing a list of commits from taken from the "commit"
+#	line in each patch in a directory. The patches were extracted from a
+#	mail client, like mutt.
+#
+# NOTE: The only files that will be parsed are those that have ".patch" at the
+#	end of their names.
+#
+# $1 - directory where the mailed patches were extracted
+# $2 - filename, including path, of the commits file.
+#
+function git_mail2commitsfile {
+	local srcdir="$1"
+	local commitsfile="$2"
+
+	grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
+}
+
+gitutilities_source_loaded=true
+

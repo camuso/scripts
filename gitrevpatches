@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# $1 - input file
+#
+
+err_noarg=1
+err_noexist=2
+err_noread=3
+
+file="$1"
+outfile="/tmp/rev-patches"
+
+function usage() {
+	echo
+	echo "usage: gitrevpatches commitsFile"
+	echo -e "\tcommitsFile - File created by invoking \"gitrevcommits\""
+	echo
+	exit $1
+}
+
+function errexit() {
+	local msg="$1"
+	local val=$2
+	echo
+	echo $msg
+	usage $val
+}
+
+# Use command substitution for this function, i.e.
+# 	filespec=$(getfilespec arg)
+#
+function getfilespec() {
+	local str="$1"
+	local fs="${str##*/}"
+	fs=$(echo $fs | awk 'BEGIN {FS = "-"} ; {print $1}')
+	echo "$fs"
+}
+
+[ -z $1 ] && usage $err_noarg
+
+# make sure file exists and is readable
+#
+if [ ! -f $file ]; then
+	errexit "$file : does not exist." $err_noexist
+elif [ ! -r $file ]; then
+	errexit "$file: cannot be read." $err_noread
+fi
+
+
+outfile="/tmp/$(getfilespec "$file")-patches"
+
+echo -n "" > $outfile
+
+while read line
+do
+	commit=$(echo $line | cut -d" " -f1)
+	echo "commit: $commit"
+	git show $commit >> $outfile
+done < $file
+
+echo
+echo "Your patches are in file: \"$outfile\""
+echo
+
+exit 0

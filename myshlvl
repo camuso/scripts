@@ -1,0 +1,3 @@
+#!/bin/bash
+myshlvl=$(($SHLVL - 1))
+echo "$myshlvl"

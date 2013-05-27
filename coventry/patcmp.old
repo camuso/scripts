@@ -1,0 +1,117 @@
+#!/bin/bash
+#
+# patcmp	- compare patches
+
+function usage () {
+	echo
+	echo "usage: patcmp <dir-1> <dir-2>"
+	echo
+	echo -e "\tCall vimdiff to compare the files in the two directories."
+	echo -e "\tThe two directories must have the same number of files."
+	echo
+	exit 1
+}
+
+# Only take "y" or "n" for an answer. There is no default.
+# You can make a default by putting the default answer after the non-default
+# answer in the while loop.
+#
+function getyn() {
+	local yn
+	while true; do
+		read -n1 -p "$1 (y/n): " yn
+		[ "$yn" == "y" ] && break
+		[ "$yn" == "n" ] && break
+	done
+	echo
+	eval $2=$yn
+}
+
+# doyn()
+# $1 - string containing the prompt
+# $2 - string containing the command to execute if the answer is "y"
+#
+# Only take "y" or "n" for an answer. There is no default.
+# You can make a default by putting the default answer after the non-default
+# answer in the while loop.
+#
+function doyn() {
+	local promptstring=$1
+	local commandstring=$2
+	local reply
+	getyn "$promptstring" reply
+	[ "$reply" == "y" ] && $commandstring
+	[ $# -eq 3 ] && eval $3=$reply
+}
+
+[ $# -ne 2 ] && usage
+
+usdir=$1
+mldir=$2
+
+uscount=$(ls $usdir | wc -l)
+mlcount=$(ls $mldir | wc -l)
+
+# It is not really required that the two directories have the same number
+# of files, because we will simply stop processing when we run out of files
+# in one directory or the other. However, it could lead to confusion, since
+# we are comparing a patch set. Both directories containing the patch set
+# should therefore have the same number of files.
+#
+if ((mlcount != uscount)); then
+	echo
+	echo "The two directories must have the same number of files."
+	echo -e "\t$usdir has $uscount entries."
+	echo -e "\t$mldir has $mlcount entries."
+	echo "Exiting ..."
+	echo
+	exit 1
+fi
+
+echo
+echo "Patches in $usdir will be compared with patches in $mldir"
+echo
+
+
+index=0
+for i in $(ls "$mldir"); do
+	mlfiles[index]="$i"
+	echo "${mlfiles[$index]}"
+	let index++
+done
+
+index=0
+for i in $(ls "$usdir"); do
+	vimdiff "$mldir/${mlfiles[$index]}" "$usdir/$i"
+	let index++
+	echo
+	read -n1 -p "Press \"q\" to quit, any other key to continue ..." answer
+	if [ "$answer" == "q" ]; then
+		echo
+		break
+	fi
+	echo
+done
+
+# doyn "Delete the files in \""$mldir"\"?" "rm -vf $mldir/*"
+# doyn "Delete the files in \""$usdir"\"?" "rm -vf $usdir/*"
+# echo
+# echo "The head of the git tree before you started patchreview was ..."
+# git log --pretty -n1 $(cat ../githead)
+# doyn "Reset the git head to the one you started with?" \
+#	"git reset --hard $(cat ../githead)"
+
+exit 0
+
+# The following is kept for historical reasons.
+#
+answer=$(getyn "Erase the files in \""$mldir"\" (y/n): ")
+echo
+[ "$answer" == "y" ] && rm -vf "$mkdir/*"
+
+answer=$(getyn "Erase the files in \""$usdir"\" (y/n): ")
+echo
+[ "$answer" == "y" ] && rm -vf "$usdir/*"
+
+echo
+exit 0

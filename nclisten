@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# nclisten
+#
+# This script listens on a port for traffic from a host somewhere
+# else on the network. The host can run the ncsend script, defined
+# in the file by the same name.
+#
+# The default listening port is 2222, but the user can specify a
+# port using the '-p' switch.
+#
+
+usage() {
+	echo
+	echo "Usage: nclisten <port>"
+	echo -e "\twhere \"port\" is an optional port number"
+	echo
+	exit 0
+}
+
+outstr="AAAAAAAAAAAAAAAA"
+
+echo "nclisten <port>, where \"port\" is an optional port number."
+echo -e "Writes \"$outstr\" forever while listening on a given or default port."
+
+if [ -n "$1" ];
+then port=$1
+else port=2222
+fi
+
+if ! [[ "$port" =~ ^[0-9]+$ ]];
+then
+	echo "$1 is not a number"
+	port=2222
+	echo "Using default port $port"
+fi
+
+echo "yes $outstr | nc -v -v -l $port > /dev/null"
+read -a answer -p "Will listen on port $port. Go? [Y/n]: "
+
+if [[ $answer =~ ^[yY] ]];
+then
+	yes $outstr | nc -vv -l $port > /dev/null
+else
+	echo "You answered \"$answer\", exiting ..."
+	echo
+	exit 0
+fi
+

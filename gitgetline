@@ -1,0 +1,16 @@
+#!/bin/bash
+#
+
+function usage() {
+	echo
+	echo "usage: gitgetline <FROM-COMMIT-OR-TAG> <TO-COMMIT-OR-TAG> <PATTERN>"
+	echo -e "\tcommand: git log COMMIT-OR-TAG..COMMIT-OR-TAG --oneline | grep --color PATTERN"
+	echo
+	exit
+}
+
+[ $# -ne 3 ] && usage
+
+echo "git log "$1".."$2" --oneline | grep --color "$3""
+git log "$1".."$2" --oneline | grep --color "$3"
+

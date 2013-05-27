@@ -1,0 +1,16 @@
+#!/bin/bash
+#
+
+function usage() {
+	echo
+	echo "usage: gitcommit2tag COMMIT"
+	echo -e "\tcommand: git tag --contains COMMIT"
+	echo
+	exit
+}
+
+[ $# -ne 1 ] && usage
+
+echo "git tag --contains "$1""
+git tag --contains "$1"
+

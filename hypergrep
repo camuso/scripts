@@ -1,0 +1,91 @@
+#!/bin/bash
+
+function usage {
+	echo
+	echo "hypergrep <-d directory> <-s> string <-f> filespec"
+	echo
+	echo -e "\tWhere filespec can be a regexp, like \"*.[hc]\""
+	echo
+	echo "The default directory is \"./\", or \$PWD, which is currently ..."
+	echo -e "\t$PWD".
+	echo
+	echo "To specify another directory, you must use the \"-d\" option."
+	echo
+	echo "The \"-s\" and \"-f\" options allow you to put the string and filespec"
+	echo "anywhere on the line, else the string must come before the filespec."
+	echo
+	echo "If you use \"-s\" to specify the string, you must use \"-f\" to specify"
+	echo "the filespec."
+	echo
+	exit
+}
+
+# If the number of arguments does not evaluate to greater-than-or-equal-to 1,
+# then print the usage and exit, else continue execution.
+#
+[ $# -ge 1 ] || usage
+
+# Default directory value
+#
+directory="./"
+string=""
+filespec=""
+
+# Walk through the argument list.
+# If the first character is a "-", we know its an option.
+# If the first character is NOT a "-", then it must be one of the
+# required arguments - filename first, and host name last.
+#
+while [ "$1" != "" ]; do
+
+        str="$1"
+        firstchr=${str:0:1}
+
+        if [ "$firstchr" = "-" ]; then
+
+                case $1 in
+                        -d	)	shift
+                                        directory=$1
+                                        ;;
+                        -f | --file )   shift
+                                        filespec=$1
+                                        ;;
+                        -s | --string ) shift
+                                        string=$1
+                                        ;;
+			-w | --word )   wordflag="w"
+					;;
+                        -? | --help )   usage
+                                        ;;
+                        * )             usage
+                                        ;;
+                esac
+
+	elif [ -z $string ]; then
+		string=$1
+
+	elif [ -z $filespec ]; then
+		filespec=$1
+
+        fi
+        shift
+done
+
+# Need to get the grep version, because earlier versions do not support
+# the '-T' option.
+#
+# The minimum version supporting the '-T' option is 2.6.0
+#
+mingrepversion=260
+
+# Get the first line of the grep version and trim out everything but the
+# version number.
+#
+grepversion=$(grep -V | head -1 | tr -cd '[[:digit:]]')
+
+# If the grepversion is 2.6.0 or greater, then it supports '-T'
+#
+if [ $grepversion -ge $mingrepversion ]; then tee='T'; else tee=''; fi
+
+echo -e "find $directory -type f -iname "$filespec" -exec grep -Hn$tee$wordflag --color "$string" '{}' \\;"
+find $directory -type f -iname "$filespec" -exec grep -Hn$tee$wordflag --color "$string" '{}' \;

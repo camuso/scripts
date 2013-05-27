@@ -1,0 +1,94 @@
+#!/bin/bash
+#
+# project.source
+#
+# Routines for managing project environment.
+#
+# Call prj_init_prjfile, then call prj_set_directory for each project
+# directory.
+
+
+# Project directories and data are stored in prjfile
+#
+prjfile=""
+prj_prjfile_size=2	# Number of lines in the file.
+
+# prj_init_prjfile
+#
+# $1 - path and name of prjfile
+# $2 - number of lines (size of) prjfile
+#
+# If the prjfile file does not exist, then create it and initialize it by
+# pumping as many empty lines in it as there will be entries in the
+# finished file.
+#
+function prj_init_prjfile {
+	prjfile=$1
+	prj_prjfile_size=$2
+
+prjstr_prjfile_created=\
+"\tProject file "$attr_bold""$prjfile""$attr_OFF" is being created.\n\
+\twith $prj_prjfile_size entries.\n"
+
+	if [ ! -f "$prjfile" ]; then
+		# echo -e "$prjstr_prjfile_created"
+		for ((i = 0; i < $2; i++)); do
+			echo " " >> $prjfile
+		done
+	fi
+}
+
+function prj_get_prjfile {
+	echo $prjfile
+}
+
+function prj_get_prjfile_size {
+	echo $prj_prjfile_size
+}
+
+# prj_set_directory - sets the directory for project files
+#
+# $1 - string containing name or type of the directory
+# $2 - offset into the prjfile where this directory's pathname is stored.
+# $3 - returns pathname of directory that contains project files
+#
+# With the user supplied offset, index into the prjfile to get the
+# desired directory string. If it doesn't exist, then prompt user for
+# a new directory path. In either case, copy the directory string into
+# the supplied dir argument. If the user wants to save the new dir, then
+# write it into its offset in the prjfile.
+#
+function prj_set_directory {
+	local name="$1"
+	local offset=$2		# offset to dir info in prjfile
+	local b_yes=false
+	local b_newdir=false
+	local dir
+
+	dir=$(ui_readline $offset $prjfile)
+
+	if [ -d "$dir" ]; then
+		echo -e "Current "$name" directory: "$attr_bold""$dir""$attr_OFF""
+		getyn "Change this directory?" b_yes
+
+		if ! $b_yes; then
+			echo -e "You have chosen to re-use "$attr_bold""$dir""$attr_OFF""
+			echo "Contents of the directory may be altered."
+		else
+			b_newdir=true
+		fi
+	else
+		b_newdir=true
+	fi
+
+	if $b_newdir; then
+		ui_getnewdir "New "$name" directory: " dir
+		# echo -e "New "$prompt" directory is "$attr_bold""$dir""$attr_OFF""
+		getyn "Remember this "$name" directory?" b_yes
+		$b_yes && ui_replaceline $offset "$dir" "$prjfile"
+	fi
+
+	eval $3=$dir
+}
+
+project_source_loaded=true

@@ -1,0 +1,54 @@
+#!/bin/bash
+
+cd $HOME
+
+for file in bin.tgz code.tgz hints.tgz; do
+	if [ ! -f $file ] && [ -d ark ]; then
+		if [ -e ark/$file ]; then
+			cp ark/$file .
+		else
+			echo "You are missing \"$file\"".
+		fi
+	fi
+done
+
+if [ -d ark ]; then
+	for file in bin.tgz code.tgz hints.tgz; do
+		if [ -e ark/$file ]; then
+			if [ $file -nt ark/$file ]; then
+				cp $file ark/.
+			else
+				cp ark/$file .
+			fi
+		else
+			cp $file ark/.
+		fi
+	done
+else
+	mkdir ark
+fi
+
+tar -xvf bin.tgz > ark.log 2>&1
+tar -xvf hints.tgz > ark.log 2>&1
+tar -xvf code.tgz > ark.log 2>&1
+
+mv .bashrc .bashrc.orig
+cp -vf bin/.bashrc ~/.
+cp -vf bin/.vimrc ~/.
+cp -vf hints/git/.gitconfig ~/.
+
+[ -d ark ] || mkdir ark
+mv bin.tgz ark/
+mv hints.tgz ark/
+mv code.tgz ark/
+
+if [ -f init-my-stuff ] && [ -f bin/init-my-stuff ]; then
+	if [ init-my-stuff -nt bin/init-my-stuff ]; then
+		mv init-my-stuff bin/.
+	else
+		rm -f init-my-stuff
+	fi
+fi
+
+cd -
+exit 0

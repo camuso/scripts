@@ -1,0 +1,12 @@
+#!/bin/bash
+
+function read_nth_line {
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+line="$(read_nth_line $1 $2)"
+echo "$line"
