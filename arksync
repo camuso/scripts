@@ -57,7 +57,7 @@ do
 	if [ "$answer" == "y" ]; then
 		echo "connecting with $remote..."
 		$rsyncmd ~/ark/$file $remote:ark/$file
-		runremote ~/bin/fixup-rsync $user $hos $user
+		runremote ~/bin/init-my-stuff $user $hos $user
 		echo
 	fi
 done
