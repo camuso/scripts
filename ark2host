@@ -1,0 +1,33 @@
+#!/bin/bash
+
+usage=$(
+cat <<EOF
+	$0 [OPTION]
+	-f file		- send only the named archive
+EOF
+)
+
+remote="$1"
+file=""
+user=""
+
+while getopts "cf:" OPTION; do
+	case "$OPTION" in
+		f )
+			file="$OPTARG"
+			;;
+		* )
+			echo "unrecognized option"
+			echo $(usage)
+			;;
+	esac
+done
+
+user="$(echo $remote | cut -d'@' -f1)"
+hos="$(echo $remote | cut -d'@' -f2)"
+
+echo "connecting with $remote..."
+rsync -vat ~/ark/$file $remote:ark/$file
+ssh $remote 'bash -s ' < ~/bin/fixup-rsync $user $hos $user
+echo
+
