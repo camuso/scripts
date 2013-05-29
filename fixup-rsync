@@ -10,4 +10,3 @@ else
 	chmod -v g-w /home/$1
 fi
 
-~/bin/init-my-stuff $remoteuser
