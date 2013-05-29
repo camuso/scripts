@@ -1,0 +1,9 @@
+#!/bin/bash
+
+cd /sys
+find ./ -type f -name "*msi_irq*" \
+	| while read value; do out=`cat $value`; \
+		echo "$value = $out" ; \
+		done \
+	| grep -v none
+cd -
