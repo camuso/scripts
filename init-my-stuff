@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# init-my-stuff 0.2
+# init-my-stuff 0.3
 # set -x
 
 [ -d ~/ark ] || mkdir ~/ark
@@ -9,15 +9,21 @@ cd ~/ark
 remotename="$1"
 owneropt=""
 
-[ "$remotename" ] && owneropt="--owner="$remotename""
+#[ "$remotename" ] && owneropt="--no-same-owner"
 
 # Unpack the archives and save them in the ~/ark directory
 #
 cat /dev/null > ~/.initmystuff.log
 echo
-for file in bin.tgz code.tgz etcbk.tgz hints.tgz; do
+
+for file in \
+bin.tgz \
+code.tgz \
+etcbk.tgz \
+hints.tgz
+do
 	echo "Unpacking $file"
-	tar -C $HOME $owneropt --keep-newer-files -xvf $file \
+	tar -C $HOME --no-same-owner --keep-newer-files -xvf $file \
 		>> ~/.initmystuff.log 2>&1
 done
 echo
@@ -40,16 +46,11 @@ if [ "$remotename" == "root" ]; then
 	[ ~/etcbk/krb5.conf -nt /etc/krb5.conf ] && cp -vf ~/etcbk/krb5.conf /etc/.
 fi
 
-# If the init-my-stuff script in $HOME is newer than in ~/bin, then
-# move it into bin, else just remove it from $HOME
+# If we have a "user" it's because were running remotely, so
+# do the remote cleanup.
 #
-if [ -f ~/init-my-stuff ] && [ -f ~/bin/init-my-stuff ]; then
-	if [ ~/init-my-stuff -nt ~/bin/init-my-stuff ]; then
-		mv ~/init-my-stuff ~/bin/.
-	else
-		rm -f ~/init-my-stuff
-	fi
+if [ "$remotename" ]; then
+	~/bin/fixup-rsync $remotename
 fi
-
 cd -
 exit 0
