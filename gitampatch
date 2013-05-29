@@ -61,7 +61,7 @@ echo "newcommitslog: "$newcommitslog""
 
 echo "Patches in "$indir""
 ls "$indir"/*.patch
-patchcount=$(ls "$indir" | wc -l)
+patchcount=$(ls "$indir"/*.patch | wc -l)
 if [ $patchcount -eq 0 ]; then
 	echo "There are no files in $indir."
 	doyn "Want to spawn a shell to deal with it now?" "ui_sh_spawn"
@@ -105,7 +105,7 @@ if $yn; then
 		fi
 
 		echo -e "Patch: "$attr_bold""$patch""$attr_OFF""
-		doyn "Apply this patch?" "git am "$indir/$patch"" "" b_apply
+		doyn "Apply this patch?" "git am "$patch"" "" b_apply
 
 		if $b_apply; then
 			chkconflicts
