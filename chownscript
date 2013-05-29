@@ -1,0 +1,28 @@
+#!/bin/bash
+
+usage=$(
+cat <<EOF
+$0 [OPTION]
+	-d path		- remote directory path
+	-u user		- remote user name
+EOF
+)
+
+remoteuser=""
+remotedir=""
+
+while getopts "u:d:" OPTION; do
+	case "$OPTION" in
+		d )
+			remotedir="$OPTARG"
+			;;
+		u )
+			remoteuser="$OPTARG"
+			;;
+		* )
+			echo "unrecognized option"
+			echo "$usage"
+			;;
+	esac
+done
+chown -R "$remoteuser"."$remoteuser" "$remotedir"
