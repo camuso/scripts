@@ -1,4 +1,8 @@
 #!/bin/bash
+# ark2host
+#
+# Copy one archive to a remote host and unpack it.
+#
 
 usage=$(
 cat <<EOF
@@ -30,6 +34,6 @@ hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
 rsync -vat ~/ark/$file $remote:ark/$file
-ssh $remote 'bash -s ' < ~/bin/fixup-rsync $user $hos $user
+runremote ~/bin/init-my-stuff $user $hos $user
 echo
-
+exit
