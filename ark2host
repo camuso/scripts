@@ -7,7 +7,9 @@ cat <<EOF
 EOF
 )
 
-remote="$1"
+argc=$#
+remote=${!argc}
+
 file=""
 user=""
 
@@ -23,7 +25,7 @@ while getopts "cf:" OPTION; do
 	esac
 done
 
-user="$(echo $remote | cut -d'@' -f1)"
+user="$(echo "$remote" | cut -d'@' -f1)"
 hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
