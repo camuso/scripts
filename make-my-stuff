@@ -13,7 +13,7 @@ for tarname in \
 "etcbk"
 do
 	echo "Packing archive "$tarname".tgz"
-	tar -C $HOME --no-same-owner -czvf ~/ark/$tarname.tgz $tarname/ \
+	tar -C $HOME --exclude-vcs -czvf ~/ark/$tarname.tgz $tarname/ \
 		>> ~/.makemystuff.log 2>&1
 done
 echo
