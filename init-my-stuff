@@ -1,52 +1,53 @@
 #!/bin/bash
+#
+# init-my-stuff 0.2
+# set -x
 
-cd $HOME
+[ -d ~/ark ] || mkdir ~/ark
+cd ~/ark
 
-for file in bin.tgz code.tgz hints.tgz; do
-	if [ ! -f $file ] && [ -d ark ]; then
-		if [ -e ark/$file ]; then
-			cp ark/$file .
-		else
-			echo "You are missing \"$file\"".
-		fi
-	fi
+remotename="$1"
+owneropt=""
+
+[ "$remotename" ] && owneropt="--owner="$remotename""
+
+# Unpack the archives and save them in the ~/ark directory
+#
+cat /dev/null > ~/.initmystuff.log
+echo
+for file in bin.tgz code.tgz etcbk.tgz hints.tgz; do
+	echo "Unpacking $file"
+	tar -C $HOME $owneropt --keep-newer-files -xvf $file \
+		>> ~/.initmystuff.log 2>&1
 done
+echo
 
-if [ -d ark ]; then
-	for file in bin.tgz code.tgz hints.tgz; do
-		if [ -e ark/$file ]; then
-			if [ $file -nt ark/$file ]; then
-				cp $file ark/.
-			else
-				cp ark/$file .
-			fi
-		else
-			cp $file ark/.
-		fi
-	done
-else
-	mkdir ark
+# set +x
+
+# Copy some files out of the unpacked archives into their respective
+# directories, but only if they're newer.
+#
+[ -f ~/.bashrc.orig ] || cp -vf ~/.bashrc ~/.bashrc.orig
+[ ~/bin/.bashrc -nt ~/.bashrc ] && cp -vf ~/bin/.bashrc .
+[ ~/bin/.vimrc -nt ~/.vimrc ] && cp -vf ~/bin/.vimrc .
+[ ~/bin/.gitconfig -nt ~/.gitconfig ] && cp -vf ~/hints/git/.gitconfig .
+
+# name=$(pwd | rev | cut -d'/' -f1 | rev)
+# motherdir=$(pwd | cut -d'/' -f2)
+
+if [ "$remotename" == "root" ]; then
+	[ -f /etc/krb5.orig ] || cp -vf /etc/krb5.conf /etc/krb5.orig
+	[ ~/etcbk/krb5.conf -nt /etc/krb5.conf ] && cp -vf ~/etcbk/krb5.conf /etc/.
 fi
 
-tar -xvf bin.tgz > ark.log 2>&1
-tar -xvf hints.tgz > ark.log 2>&1
-tar -xvf code.tgz > ark.log 2>&1
-
-mv .bashrc .bashrc.orig
-cp -vf bin/.bashrc ~/.
-cp -vf bin/.vimrc ~/.
-cp -vf hints/git/.gitconfig ~/.
-
-[ -d ark ] || mkdir ark
-mv bin.tgz ark/
-mv hints.tgz ark/
-mv code.tgz ark/
-
-if [ -f init-my-stuff ] && [ -f bin/init-my-stuff ]; then
-	if [ init-my-stuff -nt bin/init-my-stuff ]; then
-		mv init-my-stuff bin/.
+# If the init-my-stuff script in $HOME is newer than in ~/bin, then
+# move it into bin, else just remove it from $HOME
+#
+if [ -f ~/init-my-stuff ] && [ -f ~/bin/init-my-stuff ]; then
+	if [ ~/init-my-stuff -nt ~/bin/init-my-stuff ]; then
+		mv ~/init-my-stuff ~/bin/.
 	else
-		rm -f init-my-stuff
+		rm -f ~/init-my-stuff
 	fi
 fi
 
