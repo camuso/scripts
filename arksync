@@ -29,6 +29,7 @@ while getopts "cf:" OPTION; do
 		* )
 			echo "unrecognized option"
 			echo "$usage"
+			exit 1
 			;;
 	esac
 done
