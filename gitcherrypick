@@ -5,7 +5,7 @@
 # Provide some automation for cherrypicking.
 #
 
-VERSION="1.0"
+VERSION="1.0-01"
 
 # This script needs a bash library source file
 #
@@ -69,18 +69,33 @@ commitmessagefile=""$outdir"/commitmessage"
 bpcommitsfile=""$outdir"/backported-commits.log"
 cpcommitsfile=""$indir"/cherry-picked-commits.log"
 
-echo "bpcommitsfile: "$bpcommitsfile""
-echo "cpcommitsfile : "$cpcommitsfile""
-
 # Initialize logfiles and logic
 #
 b_use_cpcmtlog=false
 b_use_bpcmtlog=false
 b_shellcommit=false
 b_shellcommit_noauto=false
+b_default_cpcommitsfile=false
+b_other_cpcommitsfile=false
 
 if [ -e "$cpcommitsfile" ]; then
-	getyn ""$cpcommitsfile" exists. Use it?" yes
+	getyn ""$cpcommitsfile" exists. Use it?" b_default_cpcommitsfile
+fi
+
+if ! $b_default_cpcommitsfile; then
+	getyn "Use a file containing commits you want to cherry-pick?" b_other_cpcommitsfile
+fi
+
+if $b_other_cpcommitsfile; then
+	cpcommitsfile=""
+	while [ ! -e "$cpcommitsfile" ]; do
+		getuser "File path: " cpcommitsfile
+		[ -e "$cpcommitsfile" ] && break
+		echo "\"$cpcommitsfile\" does not exist."
+	done
+fi
+
+if $b_default_cpcommitsfile || $b_other_cpcommitsfile; then
 	$yes && b_use_cpcmtlog=true
 	n_lines_cpcommitsfile=$(cat "$cpcommitsfile" | wc -l)
 fi
@@ -90,6 +105,9 @@ if [ -e "$bpcommitsfile" ]; then
 	$yes && b_use_bpcmtlog=true
 	n_lines_bpcommitsfile=$(cat "$bpcommitsfile" | wc -l)
 fi
+
+echo "bpcommitsfile: "$bpcommitsfile""
+echo "cpcommitsfile : "$cpcommitsfile""
 
 $b_use_cpcmtlog || cat /dev/null > "$cpcommitsfile"
 $b_use_bpcmtlog || cat /dev/null > "$bpcommitsfile"
@@ -298,18 +316,18 @@ getyn "Create a patch set from the new backported commits?" yes
 if $yes; then
 	echo
 	git_getsubjectprefix
-	check_commitsfile $outdir bppatchcount
+	check_commitsfile $bpcommitsfile bppatchcount
 
 	# After applying all the patches, the git pointer should be
 	# at the last commit, so no commit hash is necessary, only
 	# the number of commits to format.
 	#
-	git format-patch -n$bppatchcount -o $outdir
+	git format-patch -$bppatchcount -o $outdir
 	echo
 fi
 
 if [ $bppatchcount -gt 0 ]; then
-	git log --reverse -n$patchcount | grep "    commit" \
+	git log --reverse -n$bppatchcount | grep "    commit" \
 		| cut -d' ' -f6 > $cpcommitsfile
 
 	echo
