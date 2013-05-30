@@ -66,7 +66,7 @@ function git_file2patchset {
 #
 # no arguments
 #
-function git_subjectprefix {
+function git_getsubjectprefix {
 	local newpfx="$(git config format.subjectprefix)"
 	while true; do
 		echo -e "Current subject prefix: "$attr_bold""$newpfx""$attr_OFF""
@@ -113,7 +113,7 @@ function git_repo2commitsfile {
 	return $?
 }
 
-# git_mail2commitsfile
+# git_comment2commitsfile
 #	Create a file containing a list of commits from taken from the "commit"
 #	line in each patch in a directory. The patches were extracted from a
 #	mail client, like mutt.
@@ -124,11 +124,45 @@ function git_repo2commitsfile {
 # $1 - directory where the mailed patches were extracted
 # $2 - filename, including path, of the commits file.
 #
-function git_mail2commitsfile {
+function git_comment2commitsfile {
+	local srcdir="$1"
+	local commitsfile="$2"
+	local srcfile=""
+	local line=""
+	local word=""
+	local b_found=false
+
+	cat /dev/null > $commitsfile
+	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
+
+	for srcfile in $(ls "$srcdir"/*.patch); do
+		b_found=false
+		line=$(grep "commit" "$srcfile")
+
+		for word in $line; do
+			$b_found && echo $word >> $commitsfile && break
+			[ "$word" == "commit" ] && b_found=true
+		done
+	done
+}
+
+# git_mailhead2commitsfile
+#	Create a file containing a list of commits from taken from the "From"
+#	line in each git-formatted patch in a directory. The patches were
+#	extracted from a mail client, like mutt.
+#
+# NOTE: The only files that will be parsed are those that have ".patch" at the
+#	end of their names.
+#
+# $1 - directory where the git-formatted patches were extracted
+# $2 - filename, including path, of the commits file.
+#
+function git_mailhead2commitsfile {
 	local srcdir="$1"
 	local commitsfile="$2"
 
-	grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
+	cat /dev/null > $commitsfile
+	grep "From " $srcdir/*.patch | cut -d' ' -f2 >> $commitsfile
 }
 
 gitutilities_source_loaded=true
