@@ -10,19 +10,10 @@
 
 VERSION="1.0"
 
-# This script needs a bash library source file
-#
-# functions in ~/bin/lib/ui.source
-#	buhbye	- exit function
-#	getyn	- prompt user for y or n
-#	doyn	- prompt user for y or n and execute a command
-#	getuser - prompt the user for a string
-#	chkdir	- check whether the passed string exists as a file or dir
-#	ui_getnewdir	- get a directory name
-#
-
 #bind 'TAB:dynamic-complete-history'
 
+# External source files
+#
 source ~/bin/lib/ui.source
 source ~/bin/lib/project.source
 source ~/bin/lib/gitutilities.source
@@ -62,14 +53,11 @@ echo "newcommitslog: "$newcommitslog""
 echo "Patches in "$indir""
 ls "$indir"/*.patch
 patchcount=$(ls "$indir"/*.patch | wc -l)
-if [ $patchcount -eq 0 ]; then
-	echo "There are no files in $indir."
+while [ $patchcount -eq 0 ]; do
+	echo "There are no \"*.patch\" files in $indir."
 	doyn "Want to spawn a shell to deal with it now?" "ui_sh_spawn"
-fi
-echo "There are $patchcount patches to apply."
-
-# Apply the patches from the first branch.
-#
+	patchcount=$(ls "$indir"/*.patch | wc -l)
+done
 
 function chkconflicts {
 	local conflicts=true
@@ -93,6 +81,8 @@ getyn "Apply these patches now?" yn
 
 if $yn; then
 
+	# Apply the patches from the first branch.
+	#
 	for patch in $( ls "$indir"/*.patch ); do
 
 		b_apply=false
