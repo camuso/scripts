@@ -18,6 +18,11 @@ user=""
 
 rsyncmd="rsync -vat --no-owner --no-group"
 
+function do_exit {
+	echo "$usage"
+	exit 1
+}
+
 while getopts "cf:" OPTION; do
 	case "$OPTION" in
 		c )
@@ -25,11 +30,10 @@ while getopts "cf:" OPTION; do
 			;;
 		f )
 			file="$OPTARG"
+			[ "$file" ] || do_exit
 			;;
 		* )
-			echo "unrecognized option"
-			echo "$usage"
-			exit 1
+			do_exit
 			;;
 	esac
 done

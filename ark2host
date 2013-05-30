@@ -6,12 +6,20 @@
 
 usage=$(
 cat <<EOF
-	$0 [OPTION]
-	-f file		- send only the named archive
+$0 [-f file]
+	-f file	- send only the named archive
+
 EOF
 )
 
+function do_usage {
+	echo "$usage"
+	exit 1
+}
+
 argc=$#
+[ $argc -lt 1 ] && do_usage
+
 remote=${!argc}
 
 file=""
@@ -21,10 +29,10 @@ while getopts "cf:" OPTION; do
 	case "$OPTION" in
 		f )
 			file="$OPTARG"
+			[ "$file" ] || do_usage
 			;;
 		* )
-			echo "unrecognized option"
-			echo $(usage)
+			do_usage
 			;;
 	esac
 done
