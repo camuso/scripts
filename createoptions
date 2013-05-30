@@ -1,0 +1,122 @@
+#####################################################################
+#!/bin/bash
+#
+# createoptions v0.1
+#
+# Appends the lines required to implement parsing an options list in
+# a bash script.
+#
+# $1 - file to append the lines to
+# $2 - string containing list of space separated option flags with their
+#	corresponding arguments.
+#
+# usage creatoptions file "opt opt opt:arg opt"
+#####################################################################
+
+
+# Declarations are unnecessary, but they are helpful
+#
+file="$1"	#
+optstr="$2"	# string containing the options
+
+declare -i index
+declare -i optcount
+declare -i sz_arg
+declare -i sz_prevarg
+declare -a optflgarray
+declare -a opgargarray
+optflg=""
+optarg=""
+
+# Create an array of options flags and arguments for those options
+# flags. For example, a command line like this:
+#
+# 	createoptions optfile "a b c d:directory f:file e g"
+#
+# will create arrays like this:
+#
+#	optflg = a  optarg = 
+#	optflg = b  optarg = 
+#	optflg = c  optarg = 
+#	optflg = d: optarg = directory
+#	optflg = f: optarg = file
+#	optflg = e  optarg = 
+#	optflg = g  optarg = 
+#
+index=0
+sz_prevarg=0
+for opt in $optstr; do
+	optarg=${opt:2}
+	optflg=${opt:0:2}
+	optflgarray[index]=$optflg
+	optargarray[index]=$optarg
+	sz_arg=${#optarg}
+	[ $sz_arg -gt $sz_prevarg ] && sz_prevarg=$sz_arg
+	let index++
+done
+optcount=$index
+
+# Now that we've created the options flags and args arrays, lets start
+# writing stuff into the file.
+#
+echo "" >> $file
+echo "usage=\$(
+cat <<EOF
+\$0 [OPTION]" >> $file
+
+index=0
+while [ $index -lt $optcount ]; do
+	optflg=${optflgarray[$index]}
+	optflg=${optflg:0:1}
+	printf "  -%-2s" $optflg >> $file
+	#
+	# The following line puts the optional argument in a fixed
+	# width field determined by sz_prevarg in the previous loop.
+	#
+	printf "%-${sz_prevarg}s - \n" ${optargarray[$index]}  >> $file
+	echo "optflg = ${optflgarray[$index]} optarg = ${optargarray[$index]}"
+	let index++
+done
+
+echo "EOF
+)" >> $file
+echo "" $file
+
+# Create the internal options string before writing it out to the file.
+# We will re-use the "optstr" variable that was set to an inpug arg
+# at the beginning.
+#
+index=0
+optstr=""
+tmpstr=""
+while [ $index -lt $optcount ]; do
+	optstr="$optstr${optflgarray[$index]}"
+	let index++
+done
+echo $optstr
+
+echo "
+while getopts "$optstr" OPTION; do
+    case \"\$OPTION\" in
+" >> $file
+
+index=0
+
+while [ $index -lt $optcount ]; do
+	optflg=${optflgarray[$index]}
+	optflg=${optflg:0:1}
+	optarg=${optargarray[$index]}
+	printf "        %s )\n" $optflg >> $file
+	printf "            %s=\n" $optarg >> $file
+	printf "            ;;\n" >> file
+	let index++
+done
+
+echo "        * )" >> $file
+echo "            echo \"unrecognized option\"" >> $file
+echo "            echo \"\$usage\"" >> $file
+echo "            exit 1" >> $file
+echo "    esac" >> $file
+echo "done" >> $file
+echo "" >> $file
+
