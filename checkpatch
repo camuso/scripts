@@ -1,0 +1,18 @@
+#!/bin/bash
+
+[ $# -ne 1 ] && echo -e "\nMust supply a patch file!\n" && exit 1
+patch=$1
+
+echo
+
+for parm in \
+"bugzilla" \
+"brew" \
+"commit" \
+"Tested-by:" \
+"Signed-off-by:"
+do
+	grep -i "$parm" $patch
+	[ $? -eq 0 ] || echo -e "***\n*** No "$parm"!\n***\n"
+done
+echo
