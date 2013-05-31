@@ -88,8 +88,9 @@ fi
 
 # Generate a patch set from the original upstream patches.
 #
+git_comment2commitsfile $indir "$outdir/commits.log"
 getyn "Generate a patch set from the upstream commits?" yes
-$yes && git_createpatchset "$outdir"
+$yes && git_file2patchset "$outdir/commits.log" "$outdir"
 
 # Compare the upstream and RHEL patches.
 #
