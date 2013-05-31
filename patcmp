@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# patcmp	- compare patches
+# patcmp v1.0	- compare patches
 
 source ~/bin/lib/ui.source
 
@@ -51,18 +51,22 @@ for i in $(ls "$mldir"/*.patch); do
 	echo "${mlfiles[$index]}"
 	let index++
 done
+echo
 
 index=0
 for i in $(ls "$usdir"/*.patch); do
+	echo "Comparing: ${mlfiles[$index]}"
+	grep "Subject  : " "${mlfiles[$index]}"
+	echo " With    : $i"
+	grep "Subject  : " "$i"
+	read -n1 -p "Press \"q\" to quit, \"s\" to skip, any other key to continue ..." answer
 	echo
-	read -n1 -p "Press \"q\" to quit, any other key to continue ..." answer
-	if [ "$answer" == "q" ]; then
-		echo
-		break
-	fi
-	echo
+	if [ "$answer" == "q" ] || [ "$answer" == "s" ]; then echo; let index++; fi
+	[ "$answer" == "q" ] && break
+	[ "$answer" == "s" ] && continue
 	vimdiff "${mlfiles[$index]}" "$i"
 	let index++
+	echo
 done
-
+echo
 exit 0
