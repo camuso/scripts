@@ -55,10 +55,12 @@ echo
 
 index=0
 for i in $(ls "$usdir"/*.patch); do
+	echo "-----------------------------------------------------------------"
 	echo "Comparing: ${mlfiles[$index]}"
-	grep "Subject  : " "${mlfiles[$index]}"
-	echo " With    : $i"
-	grep "Subject  : " "$i"
+	grep "Subject: " "${mlfiles[$index]}"
+	echo
+	echo "With     : $i"
+	grep "Subject: " "$i"
 	read -n1 -p "Press \"q\" to quit, \"s\" to skip, any other key to continue ..." answer
 	echo
 	if [ "$answer" == "q" ] || [ "$answer" == "s" ]; then echo; let index++; fi
