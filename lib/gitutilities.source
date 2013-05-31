@@ -26,9 +26,10 @@ function git_commit2patchset {
 # 	creates a patchset from a file containing a list of discontiguous
 #	commits.
 #
-# The commits list must be organized so that dwd the most recent commit is
-# the last line in the file and the oldest commit is at the top of the file.
-# git_createcommits can be used to generate such a file.
+# The commits list must be organized so that the most recent commit is the
+# last line in the file and the oldest commit is at the top of the file.
+# git_comments2commitsfile() and git_mailhead2commitsfile() can be used to
+# generate such a file.
 #
 # Generated patches will be suitable for applying with "git am" or for
 # comparing to other patches.
