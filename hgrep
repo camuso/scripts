@@ -1,4 +1,7 @@
 #!/bin/bash
+#
+# hgrep 0.2
+#
 
 function usage {
 	echo
@@ -13,78 +16,46 @@ function usage {
 	exit
 }
 
-# Use command substitution for this function, i.e.
-# 	filespec=$(getfilespec arg)
+argstr="$@"	# The entire command line as a string
+pathspec="./*"	# Last space-separated token in the command line
+filespec="*"	# Last '/' separated token in the command line
+dirspec="./"	# '/' separated tokens excluding the filespec
+grepspec=""	# grep options and search string
+# argspec=""	# Space-separated tokens excluding the pathspec
+# string=""	# The string we want to search for
+
+# Delete everything up to the last space-separated token in argstr.
+# e.g "-iwe --option searchstring this/is/a/path/name"
+# will return "this/is/a/path/name"
 #
-function getfilespec() {
-	local str="$1"
-	local fs="${str##*/}"
-	if [ "$fs" = "" ]; then fs="*"; fi
-	echo "$fs"
-}
+pathspec="${argstr##* }"
+# echo "pathspec $pathspec"
 
-# Use command substitution for this function, i.e.
-# 	dirspec=$(getdirspec arg)
+# Delete everything up to the last '/' separated token in patspec.
+# e.g "this/is/a/path/name" will return "name"
 #
-function getdirspec() {
-	local str="$1"
-	local isdir=$(echo "$str" | grep "/")
-	if [ "$isdir" != "" ]; then
-		local rts=$(echo "$str" | rev)
-		local ds=$(echo "${rts#*/}" | rev)
-	else
-		ds="./"
-	fi
-	echo "$ds"
-}
+filespec="${pathspec##*/}"
+# echo "filespec $filespec"
 
-# Default values
+# Delete everything back from the last '/' separated token in pathspec.
+# e.g. "this/is/a/path/name" will return "this/is/a/path"
 #
-string=""i
-filespec="*"
-dirspec="./"
+dirspec="${pathspec%/*}/"
+# echo "dirspec $dirspec"
 
-# If the first argument is an option list (begins with '-'), then we
-# must have at least two arguments.
-# else
-# we must have at least two arguments.
-
-# echo "number of args: $#"
-# echo "arg1: $1"
-# echo "arg2: $2"
-# echo "arg3: $3"
-
-arg1="$1"
-
-# See if we have an options argument
+# Delete everything back from the last space-separated token in argstr.
+# e.g "-abc --option --another-option this/is/a/path/name"
+# will return "-abc --option searchstring"
 #
-if [ "${arg1:0:1}" = "-" ];
-then
-	# echo "we have options"
-	[ $# -gt 3 ] && usage
-	[ $# -lt 2 ] && usage
-	grepopts="$arg1"
-	string=$2
-	if [ $# -eq 3 ]; then
-		filespec=$(getfilespec "$3")
-		dirspec=$(getdirspec "$3")
-	fi
-else
-	# echo "we do not have options"
-	[ $# -le 2 ] || usage
-	[ $# -ge 1 ] || usage
-	grepopts=""
-	string="$1"
-	if [ $# -eq 2 ]; then
-		filespec=$(getfilespec "$2")
-		dirspec=$(getdirspec "$2")
-	fi
-fi
+grepspec="${argstr% *}"
+# echo "grepspec "$grepspec""
 
-# echo "string:   $string"
-# echo "grepopts: $grepopts"
-# echo "filespec: "$filespec""
-# echo "dirspec:  "$dirspec""
+# Delete everything back from the last space-separated token in grepspec.
+# e.g "-abc --option searchstring this/is/a/path/name"
+# will return "searchstring"
+#
+# string="${argstr% *}"
+# echo "string $string"
 
 # Need to get the grep version, because earlier versions do not support
 # the '-T' option.
@@ -102,5 +73,8 @@ grepversion=$(grep -V | head -1 | tr -cd '[[:digit:]]')
 #
 if [ $grepversion -ge $mingrepversion ]; then tee='T'; else tee=''; fi
 
-echo -e "find $dirspec -type f -iname "$filespec" -exec grep -Hn"$tee" "$grepopts" --color "$string" '{}' \\;"
-find "$dirspec" -type f -iname "$filespec" -exec grep -Hn$tee $grepopts --color "$string" '{}' \;
+execstr="find "$dirspec" -type f -iname "$filespec" -exec grep -Hn"$tee" --color $grepspec '{}' \\;"
+echo $execstr
+# $("$execstr")
+
+find "$dirspec" -type f -iname "$filespec" -exec grep -Hn$tee --color $grepspec '{}' \;
