@@ -28,29 +28,32 @@ do
 done
 echo
 
-# set +x
+# Return to $HOME
+#
+cd
 
 # Copy some files out of the unpacked archives into their respective
 # directories, but only if they're newer.
 #
-[ -f ~/.bashrc.orig ] || cp -vf ~/.bashrc ~/.bashrc.orig
-[ ~/bin/.bashrc -nt ~/.bashrc ] && cp -vf ~/bin/.bashrc .
-[ ~/bin/.vimrc -nt ~/.vimrc ] && cp -vf ~/bin/.vimrc .
-[ ~/bin/.gitconfig -nt ~/.gitconfig ] && cp -vf ~/hints/git/.gitconfig .
+[ -f .bashrc.orig ] || cp -vf .bashrc .bashrc.orig >> .initmystuff.log 2>&1
+[ bin/.bashrc -nt .bashrc ] && cp -vf bin/.bashrc . >> .initmystuff.log 2>&1
+[ bin/.vimrc -nt .vimrc ] && cp -vf bin/.vimrc . >> .initmystuff.log 2>&1
+[ bin/.gitconfig -nt .gitconfig ] && cp -vf hints/git/.gitconfig . >> .initmystuff.log 2>&1
 
 # name=$(pwd | rev | cut -d'/' -f1 | rev)
 # motherdir=$(pwd | cut -d'/' -f2)
 
 if [ "$remotename" == "root" ]; then
-	[ -f /etc/krb5.orig ] || cp -vf /etc/krb5.conf /etc/krb5.orig
-	[ ~/etcbk/krb5.conf -nt /etc/krb5.conf ] && cp -vf ~/etcbk/krb5.conf /etc/.
+	[ -f /etc/krb5.orig ] || cp -vf /etc/krb5.conf /etc/krb5.orig >> .initmystuff.log 2>&1
+	[ etcbk/krb5.conf -nt /etc/krb5.conf ] && cp -vf etcbk/krb5.conf /etc/. >> .initmystuff.log 2>&1
 fi
 
 # If we have a "user" it's because were running remotely, so
 # do the remote cleanup.
 #
 if [ "$remotename" ]; then
-	~/bin/fixup-rsync $remotename
+	bin/fixup-rsync $remotename >> .initmystuff.log 2>&1
 fi
 cd -
+# set +x
 exit 0
