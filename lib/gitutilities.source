@@ -43,6 +43,9 @@ function git_file2patchset {
 	local destdir="$2"
 	local patchcount=$(cat "$commitsfile" | wc -l)
 	local commit=""
+	local commitnum=0
+	local index=1
+	local pfx=""
 
 	if [ $patchcount -eq 0 ]; then
 		echo
@@ -52,10 +55,16 @@ function git_file2patchset {
 		return 1
 	fi
 
-	index=1
 	while read line; do
-		commit=$(echo $line | cut -d' ' -f1)
-		git format-patch -1 -k --start-number $index "$commit" -o "$destdir"
+		commit=$(echo $line | cut -d' ' -f1 | tr -dc [:xdigit:])
+		commitnum=$(echo $commit | tr -s 0)
+		pfx=$(printf "%04d" $index)
+		if [ ${#commitnum} -gt 1 ]; then
+			git format-patch -1 -k --start-number $index $commit -o $destdir
+			[ $? -eq 0 ] || echo "invalid commit: $commit" > $destdir/"$pfx-inv.patch"
+		else
+			$b_validcommit || echo -n "" > $destdir/"$pfx-no.patch"
+		fi
 		let index++
 	done < $commitsfile
 
@@ -132,6 +141,8 @@ function git_comment2commitsfile {
 	local line=""
 	local word=""
 	local b_found=false
+	local index=1
+	local filecount=$(ls $srcdir/*.patch | wc -l)
 
 	cat /dev/null > $commitsfile
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
@@ -140,10 +151,21 @@ function git_comment2commitsfile {
 		b_found=false
 		line=$(grep "commit" "$srcfile")
 
+		# Get the word after the word "commit". That will be the
+		# actual commit number.
+		#
 		for word in $line; do
-			$b_found && echo $word >> $commitsfile && break
+			if $b_found; then
+				echo "$word $index/$filecount" >> $commitsfile
+				break
+			fi
 			[ "$word" == "commit" ] && b_found=true
 		done
+
+		# If we didn't get a commit in this srcfile, then indicate
+		# that in the commitsfile.
+		#
+		$b_found || printf "%040d $index/$filecount\n" 0 >> $commitsfile
 	done
 }
 
