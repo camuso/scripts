@@ -19,7 +19,7 @@ count=1
 total=$(ls | wc -l)
 prefix=$2
 
-for filename in $(ls); do
+for filename in $(ls | sort -t'_' -k2 -h); do
 	newname=$(printf "%s-%02d.%02d.patch" $prefix $count $total)
 	echo "mv $filename -> $newname"
 	mv $filename $newname
