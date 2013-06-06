@@ -69,7 +69,7 @@ fi
 
 # Save the starting githead.
 #
-doyn "Save the current git head to restore later?" "~/bin/githead"
+doyn "Save the current git head to restore later?" ~/bin/githead
 
 # Apply the patches ...
 # If something goes wrong, spawn a shell.
@@ -118,7 +118,7 @@ echo "The head of the git tree before you started patchreview was ..."
 echo
 git log --pretty -n1 $(cat ../githead)
 echo
-doyn "Reset the git head to the one you started with?" "~/bin/gitreset"
+doyn "Reset the git head to the one you started with?" ~/bin/gitreset
 
 # Backout of any residual child shells.
 #
