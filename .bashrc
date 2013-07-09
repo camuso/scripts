@@ -32,7 +32,7 @@ function today {
 	date +"%A, %B %-d, %Y"
 }
 alias alf='ls -alFch'
-alias lsd='ls -ald  */ .*/'
+# alias lsd='ls -ald  */ .*/'
 alias searchdown='perl /usr/bin/searchdown.pl'
 alias mntiso='mount -o loop -t iso9660'
 alias gitampatch='rlwrap gitampatch'
@@ -65,10 +65,15 @@ alias grip='grep -iIHr -D skip --color'
 alias ssh="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
 # No ttyctl, so we need to save and then restore terminal settings
-vim()
-{
+vim(){
     local STTYOPTS="$(stty --save)"
     stty stop '' -ixoff
     command vim "$@"
     stty "$STTYOPTS"
+}
+
+lsd(){
+    [ "$1" ] && cd $1;
+    ls --color=auto -ald */ .*/;
+    [ "$1" ] && cd -
 }
