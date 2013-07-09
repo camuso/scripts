@@ -56,7 +56,7 @@ function git_file2patchset {
 	fi
 
 	while read line; do
-		commit=$(echo $line | cut -d' ' -f1 | tr -dc [:xdigit:])
+		commit=$(echo $line | cut -d' ' -f1 | tr -dc [[:xdigit:]])
 		commitnum=$(echo $commit | tr -s 0)
 		pfx=$(printf "%04d" $index)
 		if [ ${#commitnum} -gt 1 ]; then
@@ -150,7 +150,6 @@ function git_comment2commitsfile {
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
 
 	for srcfile in $(ls "$srcdir"/*.patch); do
-		b_found=false
 
 		# We're going to assume that the commit number consists of 40
 		# hexadecimal digits. Use egrep for extended regex capabilities
