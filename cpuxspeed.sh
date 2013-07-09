@@ -37,8 +37,8 @@ function dump_freq {
 	echo -e " CPU: KHz\n ---- -------"
 	for (( i = 0; i < cpu_count; i++ )); do
 		khz=$(cat /sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_$1_freq)
-		printf " %3d: $khz\n" $i 
-	done	
+		printf " %3d: $khz\n" $i
+	done
 	echo
 }
 
