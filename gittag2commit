@@ -4,7 +4,8 @@
 function usage() {
 	echo
 	echo "usage: gittag2commit TAG"
-	echo -e "\tcommand: tgit rev-list -1 TAG"
+	echo
+	echo -e "\tcommand: git rev-list -1 TAG"
 	echo
 	exit
 }
