@@ -33,8 +33,8 @@ mlcount=$(ls $mldir/*.patch | wc -l)
 if ((mlcount != uscount)); then
 	echo
 	echo "The two directories must have the same number of files."
-	echo -e "\t$usdir has $uscount entries."
-	echo -e "\t$mldir has $mlcount entries."
+	echo -e "\t$usdir has $uscount entries.\n"
+	echo -e "\t$mldir has $mlcount entries.\n"
 	echo "Exiting ..."
 	echo
 	exit 1
@@ -55,18 +55,75 @@ echo
 
 index=0
 for i in $(ls "$usdir"/*.patch); do
+	usfiles[index]="$i"
+	echo "${usfiles[$index]}"
+	let index++
+done
+echo
+
+getpatchnumber() {
+	index=-1
+	while true; do
+		getuser "Patch number: " index
+		if [ $index -lt 0 ] && [ $index -ge $mlcount ]; then
+			echo -e "$attr_bold"
+			printf "Patch number %04d is not in this set" $index
+			echo -e "$attr_OFF"
+			continue
+		else
+			index=$((index - 1 ))
+			break
+		fi
+	done
+}
+
+index=0
+while true; do
 	echo "-----------------------------------------------------------------"
 	echo "Comparing: ${mlfiles[$index]}"
 	grep "Subject: " "${mlfiles[$index]}"
 	echo
-	echo "With     : $i"
-	grep "Subject: " "$i"
-	read -n1 -p "Press \"q\" to quit, \"s\" to skip, any other key to continue ..." answer
+	echo "With     : ${usfiles[$index]}"
+	grep -m1 "Subject: " "${usfiles[$index]}"
 	echo
-	if [ "$answer" == "q" ] || [ "$answer" == "s" ]; then echo; let index++; fi
-	[ "$answer" == "q" ] && break
-	[ "$answer" == "s" ] && continue
-	vimdiff "${mlfiles[$index]}" "$i"
+	if [ $index -eq $mlcount ]; then
+		echo -e "$attr_bold"
+		printf "Patch %04d is the last patch in the set." $((index))
+		echo -e "$att_OFF"
+		index=$((mlcount - 1))
+	fi
+	if [ $index -lt 0 ] || [ $index -gt $mlcount ]; then
+		echo -e ""$attr_bold"There is no patch number: $((index + 1))."$att_OFF""
+		index=0
+	fi
+	echo -e "$attr_bold"
+	echo "Press \"q\" to quit comparing patches, \"s\" to skip forward, \"b\" to skip back,"
+	echo "\"n\" to enter a number for a spgecific patch,"
+	echo -en "or any other key to continue ..."$attr_OFF""
+	read -n1 answer
+	echo
+
+	case $answer in
+		"q" )	echo
+			break
+			;;
+
+		"s" )	echo
+			[ $index -lt $mlcount ] && index=$((index + 1))
+			continue
+			;;
+
+		"b" )	echo
+			[ $index -gt 0 ] && index=$((index - 1))
+			continue
+			;;
+
+		"n" )	getpatchnumber
+			continue
+			;;
+	esac
+
+	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
 	let index++
 	echo
 done
