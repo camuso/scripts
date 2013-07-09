@@ -6,7 +6,7 @@
 
 usage=$(
 cat <<EOF
-$0 [-f file]
+$0 <user@host> [-f file]
 	-f file	- send only the named archive
 
 EOF
@@ -42,6 +42,6 @@ hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
 rsync -vat ~/ark/$file $remote:ark/$file
-runremote ~/bin/init-my-stuff $user $hos $user
+runremote $user $hos ~/bin/init-my-stuff $user
 echo
 exit

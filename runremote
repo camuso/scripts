@@ -1,10 +1,10 @@
 #!/bin/bash
-# runremote.sh (revised, not dependent upon /dev/stdin)
-# usage: runremote.sh localscript remoteuser remotehost arg1 arg2 ...
+# runremote (revised, not dependent upon /dev/stdin)
+# usage: runremote.sh <remoteuser> <remotehost> <localscript> arg1 arg2 ...
 
-realscript=$1
-user=$2
-host=$3
+user=$1
+host=$2
+realscript=$3
 shift 3
 
 # escape the arguments
