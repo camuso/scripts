@@ -24,6 +24,7 @@ pathspec="./*"	# Last space-separated token in the command line
 filespec="*"	# Last '/' separated token in the command line
 dirspec="./"	# '/' separated tokens excluding the filespec
 grepspec=""	# grep options and search string
+optstr=""
 
 [ "$1" == "?" ] && usage
 
@@ -31,7 +32,7 @@ grepspec=""	# grep options and search string
 # tokens that have a leading hyphen.
 #
 n_opts=0
-for token in $argstr; do
+for token in "$argstr"; do
 	[ "${token:0:1}" == "-" ] && let n_opts++
 done
 
@@ -41,6 +42,7 @@ done
 # Also, that makes the grepspec, which consists of the grep options
 # and the search string, the entire argument list.
 #
+set -x
 if [ $(( argc - n_opts )) == 1 ]; then
 	dirspec="./"
 	filespec="*"
@@ -52,7 +54,7 @@ else
 	# to the "*" wildcard.
 	# Else, do pattern matching to extract the dirspec and filespec.
 	#
-	if [ -d $pathspec ]; then
+	if [ -d "$pathspec" ]; then
 		dirspec="$pathspec"
 		filespec="*"
 	else
@@ -63,14 +65,33 @@ else
 	# If there was a pathspec, then the entire argument string upto
 	# the pathspec is the grepspec, consisting of grep options and
 	# search string.
+
+	# Search string is always the second to last argument in the
+	# argument list.
 	#
+	searchstrpos=$(( argc - 1 ))
+	searchstr="$(echo "${!searchstrpos}")"
+	[[ "$searchstr" == *" "* ]] && searchstr="$(echo \""${!searchstrpos}"\")"
+	echo "$searchstr"
+
+	# Options string is all the space separated strings upto the
+	# number of options we counted.
+	#
+	[ $n_opts -gt 0 ] && optstr="$(echo "$@" | cut ' ' -f-$n_opts)"
+
+	# grepspec is comprised of the string of options and the search
+	# string. We do it this way for search strings comprised of
+	# more than one space separated item.
+	#
+	grepspec=""$optstr" "$searchstr""
+
 	# Delete everything back from the last space-separated token in argstr.
 	# e.g "-abc --option searchstring this/is/a/path/name" returns
 	# "-abc --option searchstring"
 	#
-	grepspec="${argstr% *}"
+	# grepspec="${argstr% *}"
 fi
-
+set +x
 # Need to get the grep version, because earlier versions do not support
 # the '-T' option.
 #
