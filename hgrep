@@ -5,7 +5,7 @@
 
 function usage {
 	echo
-	echo "hgrep [options] string [[dir/file] | [dir]]"
+	echo "hgrep [options] string dir/file | dir"
 	echo -e "\tWhere filespec can include a regexp, like \"drivers/*.[hc]\""
 	echo -e "\tOptions must come first and can be any valid grep options."
 	echo -e "\tIf you omit the \"dir/file\" argument, the grep will be done for"
@@ -18,80 +18,63 @@ function usage {
 	exit
 }
 
-argstr="$@"	# The entire command line as a string
 argc=$#		# The number of arguments
 pathspec="./*"	# Last space-separated token in the command line
 filespec="*"	# Last '/' separated token in the command line
 dirspec="./"	# '/' separated tokens excluding the filespec
-grepspec=""	# grep options and search string
-optstr=""
+
+declare -a optstr=""
+declare -i index=0
+declare -i n_opts=0
+declare -i n_nonopts=0
+declare -a grepstr
+declare -i gpos
 
 [ "$1" == "?" ] && usage
 
-# Count the number of options in the argument string by counting the
-# tokens that have a leading hyphen.
-#
-n_opts=0
-for token in "$argstr"; do
-	[ "${token:0:1}" == "-" ] && let n_opts++
-done
-
-# If there is only one more token after the options, then its the
-# search string, and there is no pathspec or filespec, so use the
-# defaults, else the pathspec is the last argument.
-# Also, that makes the grepspec, which consists of the grep options
-# and the search string, the entire argument list.
-#
-set -x
-if [ $(( argc - n_opts )) == 1 ]; then
-	dirspec="./"
-	filespec="*"
-	grepspec="$@"
-else
-	pathspec="${!argc}"
-	#
-	# If the entire path is a directory, then the filespec defaults
-	# to the "*" wildcard.
-	# Else, do pattern matching to extract the dirspec and filespec.
-	#
-	if [ -d "$pathspec" ]; then
-		dirspec="$pathspec"
-		filespec="*"
+echo "Number of args: $argc"
+for (( index = 1; index <= $argc; index++ )); do
+	arg="${!index}"
+	echo -n "arg_$index: "$arg""
+	if [ "${arg:0:1}" == "-" ]; then
+		optstr="$optstr $arg"
+		echo " options: $optstr"
+		let n_opts++
 	else
-		dirspec="${pathspec%/*}/"
-		filespec="${pathspec##*/}"
+		echo
 	fi
+done
+echo "Number of opts: $n_opts, Options: $optstr"
 
-	# If there was a pathspec, then the entire argument string upto
-	# the pathspec is the grepspec, consisting of grep options and
-	# search string.
+n_nonopts=$(( $argc - $n_opts))
+echo "Non-option args: $n_nonopts"
 
-	# Search string is always the second to last argument in the
-	# argument list.
-	#
-	searchstrpos=$(( argc - 1 ))
-	searchstr="$(echo "${!searchstrpos}")"
-	[[ "$searchstr" == *" "* ]] && searchstr="$(echo \""${!searchstrpos}"\")"
-	echo "$searchstr"
+case $n_nonopts in
+	1 ) 	grepstr="${!argc}"
+		;;
+	2 ) 	pathspec="${!argc}"
+		gpos=$((argc - 1))
+		grepstr="${!gpos}"
+		;;
+	* )	usage
+		;;
+esac
+echo "pathspec: $pathspec, grepstr: $grepstr"
 
-	# Options string is all the space separated strings upto the
-	# number of options we counted.
-	#
-	[ $n_opts -gt 0 ] && optstr="$(echo "$@" | cut ' ' -f-$n_opts)"
-
-	# grepspec is comprised of the string of options and the search
-	# string. We do it this way for search strings comprised of
-	# more than one space separated item.
-	#
-	grepspec=""$optstr" "$searchstr""
-
-	# Delete everything back from the last space-separated token in argstr.
-	# e.g "-abc --option searchstring this/is/a/path/name" returns
-	# "-abc --option searchstring"
-	#
-	# grepspec="${argstr% *}"
+# If the entire path is a directory, then the filespec defaults
+# to the "*" wildcard.
+# Else, do pattern matching to extract the dirspec and filespec.
+#
+if [ -d "$pathspec" ]; then
+	dirspec="$pathspec"
+	filespec="*"
+else
+	dirspec="${pathspec%/*}/"
+	filespec="${pathspec##*/}"
 fi
-set +x
+
+echo "dirspec: $dirspec, filespec: $filespec"
+
 # Need to get the grep version, because earlier versions do not support
 # the '-T' option.
 #
@@ -108,8 +91,12 @@ grepversion=$(grep -V | head -1 | tr -cd '[[:digit:]]')
 #
 if [ $grepversion -ge $mingrepversion ]; then tee='T'; else tee=''; fi
 
-execstr="find "$dirspec" -type f -iname "$filespec" -exec grep -Hn"$tee" --color $grepspec '{}' \\;"
+execstr="find "$dirspec" -type f -iname "$filespec" \
+	-exec grep -Hns"$tee" --color $optstr "$grepstr" '{}' \\;"
 echo $execstr
-# $("$execstr")
 
-find "$dirspec" -type f -iname "$filespec" -exec grep -Hn$tee --color $grepspec '{}' \;
+# $optstr cannot be in quotes, or grep will search for the null string
+# and will assume that the $grepstr is the directory specification.
+#
+find "$dirspec" -type f -iname "$filespec" \
+	-exec grep -Hns$tee --color $optstr "$grepstr" '{}' \;
