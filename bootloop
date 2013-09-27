@@ -1,0 +1,118 @@
+#!/bin/bash
+#
+# bootloop
+#
+#	This file should be located in /root/bin.
+#
+#	With the help of a kernel parameter, puts the system in
+#	an infinite boot loop only terminated when the kernel
+#	param is removed from the kernel line, or when a different
+#	kernel image is booted.
+#
+#	In order to implement a bootloop, add the following line
+#	to the end of the /etc/rc.local script, assuming that this
+#	bootloop script is in the /root directory.
+#
+#		/root/bootloop
+#
+#	You can also use this bootloop script to call another
+#	script, for example, to troll dmesg for a specific string.
+#
+#		/root/bootloop <script> <script-parameters>
+#
+#	If the script called by bootloop returns status of 1, then
+#	a reboot ensues. If the action returns a status of 0, then
+#	the "bootloop" kernel parameter is removed from every kernel
+#	line in the grub.conf file and no reboot occurs.
+#
+#	You may want to check that this line also appears in rc2.d
+#	through rc5.d. It should, since these files are all linked
+#	back to /etc/rc.local -> rc.d/rc.local, as shown below.
+#
+#	/etc/rc2.d/S99local -> ../rc.local*
+#	/etc/rc3.d/S99local -> ../rc.local*
+#	/etc/rc4.d/S99local -> ../rc.local*
+#	/etc/rc5.d/S99local -> ../rc.local*
+#	/etc/rc.local -> rc.d/rc.local*
+#
+#	Once you have edited to /etc/rc.local script to include a
+#	call to this bootloop script, you can initiate a boot loop
+#	by adding the following kernel parameter to the end of the
+#	kernel line in grub.conf.
+#
+#		bootloop
+#
+#	To stop the loop, simply boot a kernel line that does not
+#	have the bootloop parameter in it, or edit the kernel line
+#	while in grub before booting the OS.
+#
+
+action="$@"	# action consists of all the parameters
+stat=1
+bootloopfile="/tmp/bootloop.log"
+cmdline=$(cat /proc/cmdline)
+cmdtoks=$(echo $cmdline | wc -w)
+last=$(echo $cmdline | cut -d' ' -f $cmdtoks)
+echo "Command Line:"
+echo "$cmdline"
+echo
+echo "Last token in Command Line: $last"
+
+if [ "$last" != "bootloop" ]; then
+#	[ -e $bootloopfile ] && rm -f $bootloopfile
+	exit 0
+fi
+
+if [ -f $bootloopfile ]; then
+	bootcount=$(cat $bootloopfile | cut -d':' -f2)
+	bootcount=$(( bootcount + 1 ))
+else
+	bootcount=0
+fi
+
+# First write to the bootloopfile clears any preexisting contents.
+#
+echo "" 			| tee $bootloopfile
+echo "boot count: $bootcount" 	| tee -a $bootloopfile
+echo "" 			| tee -a $bootloopfile
+
+if [ "$action" ]; then
+	echo "Executing ..."
+	$action
+	stat=$?
+fi
+
+# If "action" returns error status, or if there was no "action"
+# passed, then reboot. Default value of stat is 1, so it can
+# only be 0 if an "action" was executed and it returned a 0.
+#
+echo "***************************************************************"
+if [ $stat -ne 0 ]; then
+	echo "Starting countdown for bootloop ..."
+
+	for (( i=0; i < 10; i++ )); do
+		countdown=$(( 10 - $i ))
+		echo  " $countdown"
+		sleep 1
+	done
+
+	countdown=$(( 10 - $i ))
+	echo " $countdown"
+	echo "Rebooting now ..."
+	echo "***************************************************************"
+	# init 6
+	shutdown -r now
+else
+	echo "\""$action"\" ..." 		| tee -a $bootloopfile
+	echo "Successfully executed." 		| tee -a $bootloopfile
+	echo "Boot loop halted." 		| tee -a $bootloopfile
+	echo "Number of boot loops: $bootcount" | tee -a $bootloopfile
+	echo "" >> $bootloopfile
+
+	# Stop the bootloop by removing the "bootloop" kernel parameter
+	# from the kernel command line.
+	#
+	cp -f /boot/grub/grub.conf /boot/grub/grub.save
+	sed -i 's/bootloop//g' /boot/grub/grub.conf
+	echo "***************************************************************"
+fi
