@@ -20,109 +20,452 @@
 # ~/bin/githead
 # ~/bin/gitreset
 # ~/bin/renpat
-# ~/bin/genpatset
+# ~/bin/patcmp
 
-
-# This script needs a bash library source file
-#
+#######################################
+# External Source Files
+#######################################
 source ~/bin/lib/ui.source
 source ~/bin/lib/project.source
 source ~/bin/lib/gitutilities.source
 
-b_ui_int_first_getyn=false
+########################################
+# Function Return Codes
+########################################
+declare rc_continue=0	# Continue for another pass
+declare rc_run=1	# Run patchreview
+
+#########################################
+# Functions
+#########################################
+
+function exit_patchreview {
+	set_booleans
+	exit $1
+}
+
+function get_gitbranch {
+	echo $(git branch --list | egrep \* | cut -d' ' -f2)
+}
+
+function set_gitbranch {
+	local index=1
+	git branch --list > $outdir/branchlist
+	echo -e "$attr_bold"
+
+	while read line; do
+		printf "%2d  $line\n" $index
+		let index++
+	done < $outdir/branchlist
+
+	echo -e  "$attr_bold"
+	echo -e  "The following commands will be issued before a new branch is checked out."
+	echo -en "$attr_OFF"
+	echo -e  "\tgit am --abort      # Abort any pending git am ops"
+	echo -e  "\tgit checkout        # Discard any changes"
+	echo -e  "\tgit clean           # Clean out uncommitted files and directories"
+	echo -e 
+	echo -en "$attr_bold"
+	echo -en "Enter the number corresponding to the branch you want: "
+	echo -en "$attr_OFF"
+	read  linenumber
+	[ "$linenumber" == "q" ] && exit_patchreview 1
+	[ "$linenumber" == "x" ] && ui_sh_spawn
+	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
+	echo "git checkout "$gitbranch""
+	git am --abort --quiet
+	git checkout .
+	git clean -df
+	git checkout "$gitbranch" 2>&1
+	~/bin/gitlog1
+}
+
+function init_booleans {
+	for ((index=boolindex; index <= prj_entries; index++)); do
+		prj_set_item $index true
+	done
+}
+
+# exec_boolean
+#
+# Execute a command string and pass the boolean that was
+# used to determine whether the command should be executed.
+# The boolean will be given the value passed by the caller.
+#
+# $1 - The boolean
+# $2 - The boolean's new value
+# $3 - The command line as a strng.
+#
+# Returns the status of the executed command string.
+#
+function exec_boolean {
+	argc=$#
+	argv="$@"
+	local stat
+	local boolean=$1
+	local b_newval=$2
+	local cmdstr="$(echo "$@" | cut -d' ' -f$argc-)"
+	local offset=prj_${boolean}
+	# echo ${!offset}
+	$cmdstr
+	stat=$?
+	# echo "$cmdstr status: $stat"
+	if [ $stat -eq 0 ]; then
+		if [ $argc -eq 3 ]; then
+			$b_newval && boolean=true || boolean=false
+		fi
+		[ $argc -ge 2 ] && prj_set_item ${!offset} $boolean
+	else
+		echo "$cmdstr"
+		echo -e "\tDid not execute successfully"
+		echo
+	fi
+	return $stat
+}
+
+# get_booleans
+#
+# Read the values of the program flow control booleans from the
+# project file.
+#
+function get_booleans {
+	index=$boolindex
+	for bool in \
+	b_rename_infiles \
+	b_save_githead \
+	b_apply_patches \
+	b_fmt_upstream \
+	b_patcmp \
+	b_restore_githead \
+	b_clean_indir \
+	b_clean_outdir \
+	b_gitam_err_abort
+	do
+		eval $bool=$(prj_get_item $index)
+		ui_digit2bool $bool
+		let index++
+	done
+}
+
+# set_booleans
+#
+# Write the current values of the program flow booleans into the
+# project file.
+#
+function set_booleans {
+	index=$boolindex
+	for bool in \
+	b_rename_infiles \
+	b_save_githead \
+	b_apply_patches \
+	b_fmt_upstream \
+	b_patcmp \
+	b_restore_githead \
+	b_clean_indir \
+	b_clean_outdir \
+	b_gitam_err_abort
+	do
+		prj_set_item $index ${!bool}
+		let index++
+	done
+	return 0
+}
+
+# replace_patch
+# $1 - total patches
+#
+function replace_patch {
+	local patnum
+	local commit
+	local patcnt=$(cat $outdir/commits.log | wc -l)
+
+	getuser "Patch Number to replace: " patnum
+	getuser "Correct commit ID: " commit
+	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir"/commits.log
+	rm -f "$outdir"/*.patch
+	git_file2patchset "$outdir"/commits.log "$outdir"
+}
+
+function show_settings {
+	settingstr=$(
+cat <<EOF
+$attr_bold
+    $attr_under\0Environment        $attr_OFF$attr_bold
+ b  Current git branch		: $gitbranch
+ m  Mail directory		: $indir has $infilecount files
+ w  Work directory		: $outdir
+
+    $attr_under\0Parameters         $attr_OFF$attr_bold
+ 1  Rename input files		: $b_rename_infiles
+ 2  Save git head		: $b_save_githead
+ 3  Apply patches (git am)	: $b_apply_patches
+ 4  git am abort on error  	: $b_gitam_err_abort
+ 5  Format upstream patches	: $b_fmt_upstream
+ 6  Compare patchsets		: $b_patcmp
+ 7  Restore git head		: $b_restore_githead
+ 8  Clean input directory	: $b_clean_indir
+ 9  Clean work directory	: $b_clean_outdir
+
+    $attr_under\0Control            $attr_OFF$attr_bold
+ i  Init to defaults
+ c  Clean directories
+ p  Patch Replace
+ q  Quit this script
+ x  Exit to a shell
+ r  Run patch review
+$attr_OFF
+EOF
+)
+	echo -e "$settingstr"
+}
+
+function menu_parser {
+	infilecount=$(ls $indir | wc -l)
+	show_settings
+	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
+
+	case $setting in
+
+		b )	set_gitbranch
+			;;
+		m )	prj_set_directory "source" $prj_indir indir quiet
+			;;
+		w )	prj_set_directory "destination" $prj_outdir outdir quiet
+			;;
+		1 )	ui_toggle b_rename_infiles
+			;;
+		2 )	ui_toggle b_save_githead
+			;;
+		3 )	ui_toggle b_apply_patches
+			;;
+		4 )	ui_toggle b_gitam_err_abort
+			;;
+		5 )	ui_toggle b_fmt_upstream
+			;;
+		6 )	ui_toggle b_patcmp
+			;;
+		7 )	ui_toggle b_restore_githead
+			;;
+		8 )	ui_toggle b_clean_indir
+			;;
+		9 )	ui_toggle b_clean_outdir
+			;;
+		c )	rm -vf "$indir"/*
+			rm -vf "$outdir"/*
+			;;
+		i )	init_booleans
+			get_booleans
+			;;
+		p )	replace_patch
+			;;
+		q )	exit_patchreview 0
+			;;
+		x )	set_booleans
+			ui_sh_spawn
+			;;
+		r )	set_booleans
+			return $rc_run
+			;;
+	esac
+	return $rc_continue
+}
+
+function menu_loop {
+	get_booleans
+	indir=$(prj_get_item $prj_indir)
+	outdir=$(prj_get_item $prj_outdir)
+	local stat=0
+
+	while $true; do
+		menu_parser
+		stat=$?
+		# echo "menu_parser_stat: $stat"
+		[ $stat -eq $rc_run ] && break
+	done
+	return $stat
+}
+
+
+function check_gitam {
+	echo -n "Patch failed to apply. "
+	$b_gitam_err_abort && echo "Aborting git am." || echo
+	promptgetchar "Press any key to continue ..."
+	echo
+	$b_gitam_err_abort && git am --abort
+	if $b_restore_githead; then
+		~/bin/gitreset
+		git log --pretty -n1
+	fi
+	echo
+}
+
+function apply_patches {
+	local stat=0
+	for patch in $(ls $indir/*.patch); do
+		echo "$patch"
+		git am $patch
+		stat=$?
+		# echo "git am stat: $stat"
+		[ $stat -ne 0 ] && return $stat
+	done
+	return $stat
+}
+
+#############################
+# Start of Script Execution
+#############################
+
+b_ui_int_first_getyn=false	# For lib/ui.source
 
 # Save our current shell level.
 #
 myshlvl=$SHLVL
 
-# Herald
+# Print the Herald
 #
-echo
-echo "Patch Review v0.1 - compare two patch sets"
-echo
-echo "Press \"q\" to quit or \"x\" to spawn a new shell at any \"(y/n)\" prompt."
-echo
+echo -e ""$attr_bold""$attr_under""
+echo "Patch Review v1.0 - Review patches extracted from mail"
+echo -e "$attr_OFF"
 
-# Project file parameters.
+# Determine if we're at the top of a git tree. If not, exit.
 #
-prj_indir=1	# Offset in prjfile to name of directory for source patches
-prj_outdir=2	# Offset in prjfile to name of directory for destination patches
-prj_entries=2
-
-prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
-prj_set_directory "source" $prj_indir indir
-prj_set_directory "destination" $prj_outdir outdir
-
-echo -e ""$attr_bold"These are the files in "$indir""$attr_OFF"."
-ls $indir
-
-# Rename the files in source directory to something-xx.yy.patch
-#
-# NOTE: Makes a call to external script ~/bin/renpat
-#
-getyn "Rename files in "$indir"?" yes
-if $yes; then
-	getuser "Prefix to rename files in "$indir": " pfx
-	echo "Renaming files ..."
-	~/bin/renpat $indir "$pfx"
+if ! [ -d .git ]; then
+	echo -e "The current directory... "$attr_bold" "$PWD""$attr_OFF""
+	echo -e "\t ...is not the top of a git tree."
+	echo "Please cd to the top of a git tree."
+	echo
+	exit 1
 fi
 
-# Save the starting githead.
-#
-doyn "Save the current git head to restore later?" ~/bin/githead
+echo -en "$attr_bold"
+echo -en "Press \"q\" to quit or \"x\" to spawn a new shell "
+echo -e  "at any \"(y/n)\" prompt."
+echo -en "$attr_OFF"
 
-# Apply the patches ...
-# If something goes wrong, spawn a shell.
+###########################################
+# Parameter Initialization
+###########################################
+
+# Create indexes into the project file and count the number of booleans
+# used in program flow control.
 #
-getyn "Apply the patches?" yes
-if $yes; then
-	git am $indir/*.patch
-	getyn "Do you have conflicts to fix?" conflicts
-	if $conflicts; then
-		doyn "Do you want to abort the git-am?" "git am --abort"
-		echo "Spawning a new shell so you can edit conflicts."
-		echo "Type \"exit\" or \"ctrl-D\" to return here."
-		bash
+declare prj_entries=0
+declare index=0
+declare boolcount=0
+declare boolindex=0
+declare b_found_first_bool=false
+declare infilecount=0
+declare gitbranch=$(get_gitbranch)
+
+for offset in \
+prj_indir \
+prj_outdir \
+prj_b_rename_infiles \
+prj_b_save_githead \
+prj_b_apply_patches \
+prj_b_fmt_upstream \
+prj_b_patcmp \
+prj_b_restore_githead \
+prj_b_clean_indir \
+prj_b_clean_outdir \
+prj_b_exit_on_error
+do
+	let index++
+	let $offset=$index
+	if [ "${offset:3:3}" == "_b_" ]; then
+		let boolcount++
+		if ! $b_found_first_bool; then
+			boolindex=$index
+			b_found_first_bool=true
+		fi
 	fi
+done
+
+prj_entries=$index
+prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
+
+# If we get nonzero from initing the project file, it means that a new
+# project file has been created and its values must be initialized.
+#
+if [ $? -ne 0 ]; then
+	prj_set_directory "source" $prj_indir indir
+	prj_set_directory "destination" $prj_outdir outdir
+	init_booleans
 fi
 
-# Generate a patch set from the original upstream patches.
-#
-git_comment2commitsfile $indir "$outdir/commits.log"
-getyn "Generate a patch set from the upstream commits?" yes
-$yes && git_file2patchset "$outdir/commits.log" "$outdir"
+##############################################
+# Main Program Loop
+##############################################
 
-# Compare the upstream and RHEL patches.
-#
-# calls external script ~/bin/patcmp
-#
-getyn "\nCompare the patchset in "$indir"\n\
-with the patchset in "$outdir" now?" yes
-$yes && ~/bin/patcmp $indir $outdir
+while true; do
+	menu_loop
+	menu_stat=$?
+	# echo "menu_loop_stat: $menu_stat"
+
+	if $b_rename_infiles; then
+		exec_boolean b_rename_infiles false "renpat $indir"
+		[ $? -ne 0 ] && continue
+	fi
+
+	if $b_save_githead; then
+		exec_boolean b_save_githead false "githead"
+		[ $? -ne 0 ] && continue
+	fi
+
+	if $b_apply_patches; then
+		exec_boolean b_apply_patches false "apply_patches"
+		st=$?
+		if [ $st -ne 0 ]; then 
+			check_gitam
+		fi
+	fi
+
+	# Generate a patch set from the original upstream patches.
+	#
+	if $b_fmt_upstream; then
+		rm -f $outdir/*
+		echo
+		git_comment2commitsfile $indir "$outdir/commits.log"
+		echo
+		cat $outdir/commits.log
+		echo
+		exec_boolean b_fmt_upstream false \
+			"git_file2patchset ${outdir}/commits.log ${outdir}"
+	fi
+
+	if $b_patcmp; then
+		patcmp $indir $outdir 'return to main menu'
+		stat=$?
+		[ $stat -eq 1 ] && continue
+		[ $stat -eq 2 ] && exit
+	fi
+
+	if [ $menu_stat -eq $rc_run ]; then
+
+		if $b_clean_indir; then
+			echo
+			rm -vf $indir/*
+			echo
+		fi
+
+		if $b_clean_outdir; then
+			echo
+			rm -vf $outdir/*
+			echo
+		fi
+
+		if $b_restore_githead; then
+			~/bin/gitreset
+			git log --pretty -n1
+			echo
+		fi
+
+		# Backout of any residual child shells.
+		#
+		ui_sh_backout $myshlvl
+	fi
+done
 
 # Done with the patch review
 #
-echo
-echo "Patch review completed."
-echo
-echo "Contents of "$indir"."
-ls $indir
-echo
-doyn "Delete contents of "$indir"?" "rm -vf $indir/*"
-echo
-ls $outdir
-echo
-doyn "Delete contents of "$outdir"?" "rm -vf $outdir/*"
-echo
-echo "The head of the git tree before you started patchreview was ..."
-echo
-git log --pretty -n1 $(cat ../githead)
-echo
-doyn "Reset the git head to the one you started with?" ~/bin/gitreset
-
-# Backout of any residual child shells.
-#
-ui_sh_backout $myshlvl
-echo
-echo "patchreview exiting ..."
-echo
+exit_patchreview 0
