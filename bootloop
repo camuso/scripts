@@ -11,7 +11,7 @@
 #
 #	In order to implement a bootloop, add the following line
 #	to the end of the /etc/rc.local script, assuming that this
-#	bootloop script is in the /root directory.
+#	bootloop script is in the /root/bin directory.
 #
 #		/root/bin/bootloop
 #
