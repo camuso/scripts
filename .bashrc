@@ -36,6 +36,8 @@ alias alf='ls -alFch'
 alias searchdown='perl /usr/bin/searchdown.pl'
 alias mntiso='mount -o loop -t iso9660'
 alias gitampatch='rlwrap gitampatch'
+alias rold='pushd +1'
+alias rord='pushd -1'
 
 # Need to get the grep version, because earlier versions do not support
 # the '-T' option.
@@ -76,4 +78,11 @@ lsd(){
     [ "$1" ] && cd $1;
     ls --color=auto -ald */ .*/;
     [ "$1" ] && cd -
+}
+
+comment2commits(){
+	echo "comment2commits source-dir dest-file"
+	source ~/bin/lib/ui.source;
+	source ~/bin/lib/gitutilities.source;
+	git_comment2commitsfile "$1" "$2";
 }

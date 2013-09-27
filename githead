@@ -2,6 +2,15 @@
 #
 # Save the commit number of the HEAD of the tree to a file.
 #
-git log --pretty=oneline -n1 | cut -d " " -f1 > ../githead
-git log --pretty -n1 $(cat ../githead)
-echo "git head $(cat ../githead) is stored in file ../githead."
+
+function git_getbranch {
+	echo $(git branch | egrep \* | cut -d' ' -f2)
+}
+
+declare headdir="../headdir"
+declare gitbranch="$(git_getbranch)"
+
+[ -d "$headdir" ] || mkdir "$headdir"
+git log --pretty=oneline -n1 | cut -d " " -f1 > "$headdir"/"$gitbranch"
+git log --pretty -n1 $(cat "$headdir"/"$gitbranch")
+echo "git head $(cat $headdir/$gitbranch) is stored in file "$headdir"/"$gitbranch"."

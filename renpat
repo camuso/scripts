@@ -1,5 +1,4 @@
 #!/bin/bash
-
 function usage {
 	echo
 	echo "renpat <directory> <prefix>"
@@ -10,19 +9,46 @@ function usage {
 	echo
 	exit
 }
-
-[ $# -eq 2 ] || usage
+[ $# -ge 1 ] || usage
 
 cd $1
 echo "Changing directory to "$PWD""
 count=1
 total=$(ls | wc -l)
 prefix=$2
+declare subject
+
+echo "$PWD has $total files."
+
+if [ $total -eq 0 ]; then
+	echo "No files to rename. Exiting ..."
+	echo
+	exit 1
+fi
 
 for filename in $(ls | sort -t'_' -k2 -h); do
-	newname=$(printf "%s-%04d.%03d.patch" $prefix $count $total)
-	echo "mv $filename -> $newname"
-	mv $filename $newname
+	# newname=$(printf "%s-%04d.%03d.patch" $prefix $ddcount $total)
+	#
+	# Extract the subject line.
+	#
+	subject=$(grep -m1 "Subject: " $filename)
+	#
+	# Remove the word "Subject: " from the line
+	#
+	subject=$(echo "$subject" | cut -d' ' -f2-)
+	#
+	# Remove any brackets, parentheses, and quotes
+	#
+	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
+	subject=$(echo "$subject" | sed "s/'//g")
+	#
+	# Replace spaces, slashes, colons and semicolons with hyphens
+	#
+	subject=$(echo "$subject" | sed "s\[/:; ]\-\g")
+	newname=$(printf "%s.patch" "$subject")
+	echo "mv "$filename" -> "$newname""
+	mv "$filename" "$newname"
 	count=$((count+1))
 done
 cd -
+exit 0

@@ -1,2 +1,10 @@
 #!/bin/bash
-git reset --hard $(cat ../githead)
+
+function git_getbranch {
+	echo $(git branch --list | egrep \* | cut -d' ' -f2)
+}
+
+declare headdir="../headdir"
+declare gitbranch="$(git_getbranch)"
+
+git reset --hard $(cat "$headdir"/"$gitbranch")

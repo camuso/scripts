@@ -4,31 +4,48 @@
 
 source ~/bin/lib/ui.source
 
+declare code_ok=0
+declare code_special_action=1
+declare code_special_exit=2
+declare code_parmcount_err=126
+declare code_filecount_neq=127
+
+declare usdir=$1
+declare mldir=$2
+declare spclstr=$3
+declare argc=$#
+
 function usage () {
 	echo
-	echo "usage: patcmp <dir-1> <dir-2>"
+	echo "usage: patcmp dir-1 dir-2 [special action string]"
 	echo
 	echo -e "\tCall vimdiff to compare the files in the two directories."
 	echo -e "\tThe two directories must have the same number of files."
-	echo -e "\tThe files considered for comparison must have ".patch""
+	echo -e "\tThe files considered for comparison must have \".patch\""
 	echo -e "\tat the end of their filename."
+	echo -e "\tThe \"special action string\" is an optional string displayed"
+	echo -e "\twhen the caller has a special action to perform for the"
+	echo -e "\t\"z\" menu item."
+	echo -e "\texit codes:"
+	echo -e "\t\t  0 - normal exit"
+	echo -e "\t\t  1 - user pressed the \"z\" option in the menu"
+	echo -e "\t\t126 - wrong number of parameters"
+	echo -e "\t\t127 - directories don't contain same number of files"
 	echo
-	exit 1
+	exit $code_parmcount_err
 }
 
-[ $# -ne 2 ] && usage
+[ $argc -lt 2 ] && usage
 
-usdir=$1
-mldir=$2
 
-uscount=$(ls $usdir/*.patch | wc -l)
-mlcount=$(ls $mldir/*.patch | wc -l)
+uscount=$(ls "$usdir"/*.patch | wc -l)
+mlcount=$(ls "$mldir"/*.patch | wc -l)
 
 # It is not really required that the two directories have the same number
 # of files, because we will simply stop processing when we run out of files
 # in one directory or the other. However, it could lead to confusion, since
 # we are comparing a patch set. Both directories containing the patch set
-# should therefore have the same number of files.
+# must therefore have the same number of files.
 #
 if ((mlcount != uscount)); then
 	echo
@@ -37,7 +54,7 @@ if ((mlcount != uscount)); then
 	echo -e "\t$mldir has $mlcount entries.\n"
 	echo "Exiting ..."
 	echo
-	exit 1
+	exit $code_filecount_neq
 fi
 
 echo
@@ -79,6 +96,14 @@ getpatchnumber() {
 
 index=0
 while true; do
+
+	if [ $index -eq $((mlcount - 1)) ]; then
+		echo -e "$attr_bold"
+		printf "Patch %04d is the last patch in the set." $((index + 1))
+		echo -e "$att_OFF"
+		index=$((mlcount - 1))
+	fi
+
 	echo "-----------------------------------------------------------------"
 	echo "Comparing: ${mlfiles[$index]}"
 	grep "Subject: " "${mlfiles[$index]}"
@@ -86,46 +111,49 @@ while true; do
 	echo "With     : ${usfiles[$index]}"
 	grep -m1 "Subject: " "${usfiles[$index]}"
 	echo
-	if [ $index -eq $mlcount ]; then
-		echo -e "$attr_bold"
-		printf "Patch %04d is the last patch in the set." $((index))
-		echo -e "$att_OFF"
-		index=$((mlcount - 1))
-	fi
-	if [ $index -lt 0 ] || [ $index -gt $mlcount ]; then
+	if [ $index -lt 0 ] || [ $index -ge $mlcount ]; then
 		echo -e ""$attr_bold"There is no patch number: $((index + 1))."$att_OFF""
 		index=0
 	fi
-	echo -e "$attr_bold"
-	echo "Press \"q\" to quit comparing patches, \"s\" to skip forward, \"b\" to skip back,"
-	echo "\"n\" to enter a number for a spgecific patch,"
-	echo -en "or any other key to continue ..."$attr_OFF""
+	echo -en "$attr_bold"
+	echo -e  "\ts - skip forward one patch"
+	echo -e  "\tb - skip back one patch"
+	echo -e  "\tn - prompt for a number for a specific patch"
+	echo -e  "\tx - exit to a shell"
+	echo -e  "\td - done comparing patches"
+	echo -e  "\tq - quit execution"
+	[ $argc -eq 3 ] && echo -e  "\tz - "$spclstr""
+	echo -en "\tor any other key to continue ..."$attr_OFF""
 	read -n1 answer
 	echo
 
 	case $answer in
-		"q" )	echo
-			break
+		d )	break
 			;;
-
-		"s" )	echo
+		q )	echo
+			exit $code_special_exit
+			;;
+		s )	echo
 			[ $index -lt $mlcount ] && index=$((index + 1))
 			continue
 			;;
-
-		"b" )	echo
+		b )	echo
 			[ $index -gt 0 ] && index=$((index - 1))
 			continue
 			;;
-
-		"n" )	getpatchnumber
+		n )	getpatchnumber
 			continue
+			;;
+		x )	ui_sh_spawn
+			continue
+			;;
+		z )	[ $argc -eq 3 ] && exit $code_special_action || continue
 			;;
 	esac
 
 	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
-	let index++
+	[ $index -lt $((mlcount -1)) ] && let index++
 	echo
 done
 echo
-exit 0
+exit $code_ok

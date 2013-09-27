@@ -265,8 +265,8 @@ function! HyperWrap ()
 	endif
 endfunction
 
-inoremap <F5> <c-o>:call HyperWrap()<CR>
-noremap <F5> :call HyperWrap()<CR>
+inoremap <F6> <c-o>:call HyperWrap()<CR>
+noremap <F6> :call HyperWrap()<CR>
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 " Change PreProc color for easier viewing in dark background
@@ -286,7 +286,7 @@ set ignorecase smartcase
 inoremap <c-s> <c-o>:update<CR>
 noremap <c-s> :update<CR>
 
-" Use ctrl-q to quit from insert mode.
+" Use ctrl-x to quit from insert mode.
 inoremap <c-x> <esc>:quit<CR>
 noremap <c-x> :quit<CR>
 
@@ -307,4 +307,25 @@ match WhitespaceEOL /\s\+$/
 
 " Make it easier to see matches on a dark background.
 hi search term=reverse term=bold ctermbg=5 ctermfg=2
+
+" List buffers to choose for editing
+:nnoremap <F5> :buffers<CR>:buffer<Space>
+:inoremap <c-o><F5> :buffers<CR>:buffer<Space>
+
+" My signature
+noremap <F12>a<CR>Acked-by: Tony Camuso <tcamuso@redhat.com><CR>
+inoremap <F12> <c-o>a<CR>Acked-by: Tony Camuso <tcamuso@redhat.com><CR>
+
+noremap <F9>a<CR>Series<CR>Acked-by: Tony Camuso <tcamuso@redhat.com><CR>
+inoremap <F9> <c-o>a<CR>Series<CR>Acked-by: Tony Camuso <tcamuso@redhat.com><CR>
+
+com! -nargs=1 -range Sbak call MoveSelectedLinesToFile(<f-args>)
+fun! MoveSelectedLinesToFile(filename)
+    exec "'<,'>w! >>" . a:filename
+    norm gvd
+endfunc
+":noremap <F7>Sbak<CR>
+":inoremap <F7><c-o>Sbak<CR>
+
+nnoremap <F8> :setl noai nocin nosi inde=<CR>
 

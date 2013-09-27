@@ -1,2 +1,11 @@
 #!/bin/bash
-git log -S"$1" -- $2
+
+usage () {
+	echo
+	echo "giblame1 "string" file"
+	echo
+	exit
+}
+
+[ $# -ne 2 ] && usage
+git log --follow -S"$1" -- $2

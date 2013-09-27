@@ -35,7 +35,9 @@ prjstr_prjfile_created=\
 		for ((i = 0; i < $2; i++)); do
 			echo " " >> $prjfile
 		done
+		return 1
 	fi
+	return 0
 }
 
 function prj_get_prjfile {
@@ -46,11 +48,29 @@ function prj_get_prjfile_size {
 	echo $prj_prjfile_size
 }
 
+# prj_get_item
+#
+# $1 - one-based offset in prjfile to item
+#
+function prj_get_item {
+	echo $(ui_readline $1 $prjfile)
+}
+
+# prj_set_item
+#
+# $1 - item to set
+# $2 - new value of item
+#
+function prj_set_item {
+	ui_replaceline $1 $2 $prjfile
+}
+
 # prj_set_directory - sets the directory for project files
 #
 # $1 - string containing name or type of the directory
 # $2 - offset into the prjfile where this directory's pathname is stored.
 # $3 - returns pathname of directory that contains project files
+# $4 - optional argument to disable querying if equal to "quiet"
 #
 # With the user supplied offset, index into the prjfile to get the
 # desired directory string. If it doesn't exist, then prompt user for
@@ -61,15 +81,25 @@ function prj_get_prjfile_size {
 function prj_set_directory {
 	local name="$1"
 	local offset=$2		# offset to dir info in prjfile
+	local rtnval=$3
+	local quietstr=""	# No queries, just do it.
 	local b_yes=false
 	local b_newdir=false
 	local dir
 
+	[ $# -eq 4 ] && quiet=$4
+	[ "$quietstr" == "quiet" ] && b_quiet=true
+
 	dir=$(ui_readline $offset $prjfile)
 
 	if [ -d "$dir" ]; then
-		echo -e "Current "$name" directory: "$attr_bold""$dir""$attr_OFF""
-		getyn "Change this directory?" b_yes
+
+		if $b_quiet; then
+			b_yes=true
+		else
+			echo -e "Current "$name" directory: "$attr_bold""$dir""$attr_OFF""
+			getyn "Change this directory?" b_yes
+		fi
 
 		if ! $b_yes; then
 			echo -e "You have chosen to re-use "$attr_bold""$dir""$attr_OFF""
@@ -84,8 +114,9 @@ function prj_set_directory {
 	if $b_newdir; then
 		ui_getnewdir "New "$name" directory: " dir
 		# echo -e "New "$prompt" directory is "$attr_bold""$dir""$attr_OFF""
-		getyn "Remember this "$name" directory?" b_yes
+		! $b_quiet && getyn "Remember this "$name" directory?" b_yes
 		$b_yes && ui_replaceline $offset "$dir" "$prjfile"
+		ui_replaceline $offset "$dir" "$prjfile"
 	fi
 
 	eval $3=$dir

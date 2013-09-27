@@ -13,7 +13,7 @@
 # Text attributes
 #
 attr_bold="\033[1m"
-
+attr_under="\033[4m"
 attr_OFF="\033[0m"
 
 #########################
@@ -87,6 +87,9 @@ function buhbye() {
 #
 # If a child shell is chosen, the global variable ui_shexit is set upon
 # return, and if $2 was passed, it will be set to false.
+#
+# Optionally, $2 can be passed as the default answer. It will be over-
+# written with the boolean answer upon return.
 
 b_ui_int_first_getyn=true
 b_ui_int_firstpass=true
@@ -108,9 +111,10 @@ function getyn {
 	fi
 	while true; do
 
-		echo -en "$attr_bold$promptstring (y/n): $attr_OFF"
+		echo -en "$attr_bold$promptstring (y/n) : $attr_OFF"
 		read -n1 answer
 		echo
+
 		[ "$answer" == "q" ] && buhbye "$exitok"
 
 		if [ "$answer" == "y" ]; then
@@ -189,7 +193,8 @@ function getuser {
 function getchar {
 	local char
 	read -n1 char
-	eval $1=$char
+	echo
+	[ $# -gt 0 ] && eval $1=$char
 }
 
 # promptgetchar()
@@ -200,9 +205,8 @@ function promptgetchar {
 	local char
 	local prompt=$1
 	echo -ne "$prompt"
-	getchar char
+	getchar $2
 }
-
 
 #############################
 # Directory Routines
@@ -232,6 +236,7 @@ function ui_getnewdir {
 	local prompt="$1"
 	local newdir
 	local stat
+	local ans=true
 
 	while true; do
 		getuser "$prompt" newdir
@@ -242,10 +247,11 @@ function ui_getnewdir {
 			echo "\""$newdir"\" already exists as a file."
 
 		if [ $stat -eq 2 ]; then
-			echo "\""$newdir"\" already exists as a directory."
-			echo "If you use it, the contents will be altered."
-			getyn "Use it anyway?" ans
-			if "$ans"; then
+			# echo "\""$newdir"\" already exists as a directory."
+			# echo "If you use it, the contents will be altered."
+			# ans="yes"
+			# getyn "Use it anyway?" ans
+			if $ans; then
 				# rm -f "$newdir"/*
 				eval $2="$newdir"
 				return $stat
@@ -394,7 +400,7 @@ function ui_insertline {
 			}
 			print $0;
 		}' $3 > temp
-		mv temp "$3"
+		mv -f temp "$3"
 	fi
 }
 
@@ -415,7 +421,7 @@ function ui_deleteline {
 			print $0;
 		}
 	}' $2 > temp
-	mv temp $2
+	mv -f temp $2
 }
 
 # ui_isdigit
@@ -438,4 +444,19 @@ function ui_isxdigit {
 	return $?
 }
 
+# ui_toggle - toggle a boolean value
+#
+function ui_toggle {
+	local boolean=${!1}
+	$boolean && eval $1=false || eval $1=true
+}
+
+# ui_digit2bool - convert 0 and 1 to true and false
+#
+# $1 digit to convert to boolean, must be 0 or 1
+#
+function ui_digit2bool {
+	local boolean=${!1}
+	$boolean && eval $1=true || eval $1=false
+}
 ui_source_loaded=true
