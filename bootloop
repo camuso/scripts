@@ -13,12 +13,12 @@
 #	to the end of the /etc/rc.local script, assuming that this
 #	bootloop script is in the /root directory.
 #
-#		/root/bootloop
+#		/root/bin/bootloop
 #
 #	You can also use this bootloop script to call another
 #	script, for example, to troll dmesg for a specific string.
 #
-#		/root/bootloop <script> <script-parameters>
+#		/root/bin/bootloop <script> <script-parameters>
 #
 #	If the script called by bootloop returns status of 1, then
 #	a reboot ensues. If the action returns a status of 0, then
@@ -35,10 +35,11 @@
 #	/etc/rc5.d/S99local -> ../rc.local*
 #	/etc/rc.local -> rc.d/rc.local*
 #
-#	Once you have edited to /etc/rc.local script to include a
+#	Once you have edited the /etc/rc.local script to include a
 #	call to this bootloop script, you can initiate a boot loop
 #	by adding the following kernel parameter to the end of the
-#	kernel line in grub.conf.
+#	kernel line in grub.conf. It must be the last token in the
+#	kernel line.
 #
 #		bootloop
 #
@@ -67,7 +68,7 @@ if [ -f $bootloopfile ]; then
 	bootcount=$(cat $bootloopfile | cut -d':' -f2)
 	bootcount=$(( bootcount + 1 ))
 else
-	bootcount=0
+	bootcount=1
 fi
 
 # First write to the bootloopfile clears any preexisting contents.
