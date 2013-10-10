@@ -1,0 +1,20 @@
+#!/bin/bash
+tree=~/git/vanilla
+if [[ -z $1 ]]; then
+	echo "Usage: FILE [GIT_TREE]"
+	echo
+	echo "  FILE		file with commit ids"
+	echo "  GIT_TREE	$tree by default"
+	exit 1
+fi
+[[ -n $2 ]] && tree=$2
+if [[ -e patches/series ]]; then
+	echo "Won't overwrite patches/series."
+	exit 1
+fi
+mkdir -p patches
+while read commit; do
+	patch=$(cd $tree ; git-get-patch $commit)
+	mv $tree/$patch patches/
+	echo $patch >> patches/series
+done < "$1"

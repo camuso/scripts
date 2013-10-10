@@ -1,0 +1,21 @@
+#!/bin/bash
+#
+# replacetext
+#
+#
+
+declare curstr="$1"
+declare newstr="$2"
+declare file=$3
+
+function usage {
+	echo "replacetext current new file"
+	echo -e "\tcurrent - text to be replaced"
+	echo -e "\tnew     - new text"
+	echo -e "\tfile    - file in which to make the replacement\n"
+	exit
+}
+
+[ $# -ne 3 ] && usage
+
+sed -i "s/"$curstr"/"$newstr"/g" $file

@@ -1,0 +1,15 @@
+#!/bin/bash
+cores=$(cpucount)
+
+echo "make -j$cores"
+make -j$cores
+makestat=$?
+[ $makestat -eq 0 ] || exit $makestat
+
+echo "make -j$cores modules_install"
+make -j$cores modules_install
+makestat=$?
+[ $makestat -eq 0 ] || exit $makestat
+
+echo "make -j$cores install"
+make -j$cores install

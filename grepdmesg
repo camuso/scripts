@@ -1,0 +1,11 @@
+#!/bin/bash
+# 
+# grepdmesg : Look for a string within dmesg
+#
+
+str="$@"
+lin="$(dmesg | grep -in "$str")";
+stat=$?;
+[ $stat -eq 0 ] && echo "$lin";
+exit $stat
+

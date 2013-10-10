@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# renumfile
+#
+# This script renumbers files so that leading zeroes are inserted
+# to allow other parsing code, like git-am, to correctly sequence
+# through the files.
+#
+# An example of the problem is having patches numbered 1-50. What
+# happens is that git-am will process patches 10 through 19 before
+# it processes patch 1. The leading zeroes help to fix it.
+#
+
+declare pre=$1	# prefix string fragment
+declare suf=$2  # sufix string fragment
+declare pad     # Number of zeroes to pad
+declare argc=$#
+declare index=1
+
+[ $argc -eq 3 ] && pad=$3 || pad=1	# default is pad with one zero
+
+usagestr=$(
+cat <<EOF
+
+renumfile prefix suffix [number-of-zeroes]
+
+	prefix - string fragment that precedes the number, no leading -
+	suffix - string fragment that follows the number
+	number-of-zeroes - optional argument, default is one
+EOF
+)
+
+function usage {
+	echo -e "$usagestr"
+	echo
+	exit
+}
+
+[ $argc -lt 2 ] && usage
+
+padstr=$(printf "%0"$pad"d" 0)
+
+for file in $(ls *"$pre"?"$suf"*); do
+	newfile="$(echo "$file" | sed "s/$pre$index$suf/$pre$padstr$index$suf/")"
+	mv $file $newfile
+	let index++
+done

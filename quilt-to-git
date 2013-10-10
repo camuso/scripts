@@ -1,0 +1,51 @@
+#!/bin/bash
+if [[ ! -e patches/series ]]; then
+	echo "quilt repository not found." >&2
+	exit 1
+fi
+read -p "Really apply quilt to git (y/N)?"
+[[ $REPLY == "y" ]] || exit 0
+cnt=$(quilt applied | wc -l)
+if (( cnt > 0 )); then
+	quilt pop -a || exit
+fi
+
+shopt -s extglob
+author="$(git config user.name) $(git config user.email)"
+
+function get_subject()
+{
+	subj=$(head -n 1 "$1")
+	if [[ $subj == [+-]* ]]; then
+		echo "No name"
+		return
+	fi
+	if [[ $subj == commit* ]]; then
+		getit=
+		while IFS= read -r line; do
+			if [[ $line && $getit ]]; then
+				echo "${line##*([ 	])}"
+				return
+			fi
+			[[ -z $line ]] && getit=1
+		done < "$1"
+	fi
+}
+
+tmpf=__tmp_patch__.$$
+while IFS= read -r pn; do
+	[[ $pn == \#* || -z $pn ]] && continue
+	subj=$(get_subject "patches/$pn")
+	{
+	echo "From: $author"
+	if [[ $subj ]]; then
+		echo "Subject: $subj"
+		echo
+	else
+		echo -n "Subject: "
+	fi
+	cat "patches/$pn"
+	} > $tmpf
+	git am $tmpf || exit
+done < patches/series
+rm -f $tmpf

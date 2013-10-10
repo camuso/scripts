@@ -1,0 +1,14 @@
+#!/bin/bash
+
+function usage() {
+	echo "filelist directory"
+	echo -e "\tIf directory is omitted, the pwd will be used"
+	echo
+	exit
+}
+
+[ $# -lt 1 ] && dr=$1 || dr="./"
+
+for filename in $(ls); do
+	
+
