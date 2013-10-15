@@ -1,0 +1,97 @@
+#!/bin/bash
+#
+# html2patch
+#
+# Strips html code from patches downloaded from web sites and
+# renames them according to their subject line.
+#
+
+usage=$(
+cat <<EOF
+usage: $0 <directory>
+EOF
+)
+
+function do_usage {
+	echo "$usage"
+	exit 1
+}
+
+argc=$#
+[ $argc -lt 1 ] && do_usage
+
+declare directory="$1"
+declare file
+declare outfile
+declare filename
+declare newname
+declare filecount
+
+# Enter the working directory and get the number of files.
+#
+cd "$directory"
+filecount=$(ls | wc -l)
+
+# Create new filenames from all the files.
+#
+for filename in $(ls)
+do
+	# Create a temp file containing only the contents between the <pre>
+	# and </pre> html tags, which is html-speak for pre-formatted text.
+	#
+	~/bin/extract-html-pre $filename temp.txt
+
+	# Cleanup any html embedded in the extracted text.
+	#
+	sed -i 's/&gt;/>/g;s/&lt;/</g;s/&amp;/\&/g;s/&quot;/"/g' temp.txt
+
+	# cat temp.txt		# debug stuff
+	# read			# :
+
+	# Extract the subject line.
+	#
+	subject="$(grep -m1 "<li><em>Subject</em>: " $filename)"
+
+	# Remove the word "Subject: " from the line
+	#
+	subject=$(echo "$subject" | cut -d' ' -f2-)
+
+	# Strip off the </li> tag at the end of the subject line
+	#
+	subject="${subject%</li>}"
+	subjectline="$subject"
+	echo $subjectline
+
+	# Remove any brackets, parentheses, and quotes
+	#
+	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
+	subject=$(echo "$subject" | sed "s/'//g")
+
+	# Replace tabs, spaces, slashes, colons and semicolons with hyphens
+	#
+	subject=$(echo "$subject" | sed "s\[\t/:; ]\-\g")
+	newname=$(printf "%s.patch" "$subject")
+	echo $newname
+
+	# Open the new file and add the from, to, date, and subject
+	# lines. The only one that's from the original patch is the
+	# subject line.
+	#
+	echo "From: $LOGNAME <$LOGNAME@redhat.com>" >> "$newname"
+	echo "To: rhkernel-list@redhat.com" >> "$newname"
+	echo "Date: $(date)" >> "$newname"
+	echo "Subject: "$subjectline"" >> "$newname"
+	echo "" >> $newname
+
+	# Append the text extracted between the <pre> and </pre> tags.
+	#
+	cat temp.txt >> $newname
+done
+
+# delete the html and temp files
+#
+rm -vf *.htm*
+rm temp.txt
+
+# Return from whence we came
+cd -
