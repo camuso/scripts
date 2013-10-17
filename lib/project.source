@@ -62,7 +62,7 @@ function prj_get_item {
 # $2 - new value of item
 #
 function prj_set_item {
-	ui_replaceline $1 $2 $prjfile
+	ui_replaceline $1 "$2" $prjfile
 }
 
 # prj_set_directory - sets the directory for project files
