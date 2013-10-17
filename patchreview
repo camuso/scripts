@@ -62,8 +62,8 @@ function set_gitbranch {
 	echo -e  "The following commands will be issued before a new branch is checked out."
 	echo -en "$attr_OFF"
 	echo -e  "\tgit am --abort      # Abort any pending git am ops"
-	echo -e  "\tgit checkout        # Discard any changes"
-	echo -e  "\tgit clean           # Clean out uncommitted files and directories"
+	echo -e  "\tgit checkout -f     # Discard any changes"
+	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
 	echo -e 
 	echo -en "$attr_bold"
 	echo -en "Enter the number corresponding to the branch you want: "
@@ -74,10 +74,39 @@ function set_gitbranch {
 	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git am --abort --quiet
-	git checkout .
-	git clean -df
-	git checkout "$gitbranch" 2>&1
+	# git checkout .
+	# git clean -df
+	git checkout -f "$gitbranch" 2>&1
 	~/bin/gitlog1
+}
+
+function get_mailclient {
+	echo $(prj_get_item $prj_mailclient)
+}
+
+function set_mailclient {
+	echo -e "$attr_bold"
+	echo -e "Select your mail client from the following list."
+	echo -e " 1 - ThunderBird"
+	echo -e " 2 - Mutt"
+	promptgetchar "Your choice: " choice
+
+	while true; do
+		case $choice in
+
+			1 )	mailclient="Mozilla ThunderBird"
+				renameagent=rentbpat
+				prj_set_item $prj_mailclient "$mailclient"
+				break
+				;;
+
+			2)	mailclient="Mutt"
+				renameagent=renmutpat
+				prj_set_item $prj_mailclient "$mailclient"
+				break
+				;;
+		esac
+	done
 }
 
 function init_booleans {
@@ -192,7 +221,8 @@ cat <<EOF
 $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
  b  Current git branch		: $gitbranch
- m  Mail directory		: $indir has $infilecount files
+ m  Mail client                 : $mailclient
+ d  Mail directory		: $indir has $infilecount files
  w  Work directory		: $outdir
 
     $attr_under\0Parameters         $attr_OFF$attr_bold
@@ -228,7 +258,9 @@ function menu_parser {
 
 		b )	set_gitbranch
 			;;
-		m )	prj_set_directory "source" $prj_indir indir quiet
+		m )	set_mailclient
+			;;
+		d )	prj_set_directory "source" $prj_indir indir quiet
 			;;
 		w )	prj_set_directory "destination" $prj_outdir outdir quiet
 			;;
@@ -274,6 +306,7 @@ function menu_loop {
 	get_booleans
 	indir=$(prj_get_item $prj_indir)
 	outdir=$(prj_get_item $prj_outdir)
+	mailclient=$(prj_get_item $prj_mailclient)
 	local stat=0
 
 	while $true; do
@@ -356,10 +389,17 @@ declare boolindex=0
 declare b_found_first_bool=false
 declare infilecount=0
 declare gitbranch=$(get_gitbranch)
+declare mailclient="Thunderbird"
+declare renameagent=rentbpat
 
+# This loop enumerates and counts the items in the project file.
+# Add new booleans to the end of the list.
+# Add new non-boolean parameters to the top of the list.
+#
 for offset in \
 prj_indir \
 prj_outdir \
+prj_mailclient \
 prj_b_rename_infiles \
 prj_b_save_githead \
 prj_b_apply_patches \
@@ -384,14 +424,16 @@ done
 prj_entries=$index
 prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
 
-# If we get nonzero from initing the project file, it means that a new
-# project file has been created and its values must be initialized.
+# If the above call to prj_init_prjfile returns nonzero, it means that a
+# new project file has been created and its values must be initialized.
 #
 if [ $? -ne 0 ]; then
 	prj_set_directory "source" $prj_indir indir
 	prj_set_directory "destination" $prj_outdir outdir
 	init_booleans
 fi
+
+prj_set_item $prj_mailclient $mailclient
 
 ##############################################
 # Main Program Loop
@@ -403,7 +445,7 @@ while true; do
 	# echo "menu_loop_stat: $menu_stat"
 
 	if $b_rename_infiles; then
-		exec_boolean b_rename_infiles false "renpat $indir"
+		exec_boolean b_rename_infiles false "$renameagent $indir"
 		[ $? -ne 0 ] && continue
 	fi
 
