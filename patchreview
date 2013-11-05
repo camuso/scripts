@@ -45,12 +45,12 @@ function exit_patchreview {
 }
 
 function get_gitbranch {
-	echo $(git branch --list | egrep \* | cut -d' ' -f2)
+	echo $(git branch | egrep \* | cut -d' ' -f2)
 }
 
 function set_gitbranch {
 	local index=1
-	git branch --list > $outdir/branchlist
+	git branch > $outdir/branchlist
 	echo -e "$attr_bold"
 
 	while read line; do
@@ -94,7 +94,7 @@ function set_mailclient {
 	while true; do
 		case $choice in
 
-			1 )	mailclient="Mozilla ThunderBird"
+			1 )	mailclient="ThunderBird"
 				renameagent=rentbpat
 				prj_set_item $prj_mailclient "$mailclient"
 				break
@@ -389,8 +389,8 @@ declare boolindex=0
 declare b_found_first_bool=false
 declare infilecount=0
 declare gitbranch=$(get_gitbranch)
-declare mailclient="Thunderbird"
-declare renameagent=rentbpat
+declare mailclient="Mutt"
+declare renameagent=renmutpat
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
@@ -457,7 +457,7 @@ while true; do
 	if $b_apply_patches; then
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
-		if [ $st -ne 0 ]; then 
+		if [ $st -ne 0 ]; then
 			check_gitam
 		fi
 	fi
