@@ -29,14 +29,16 @@ while read line; do
 	echo "================================================================="
 	echo "git checkout -f "$branch""
 	git checkout -f "$branch"
+	stat=$?
 	echo "-----------------------------------------------------------------"
+	[ $stat -ne 0 ] && continue
 	echo "git pull"
 	git pull
 	echo
 	git log -1 "$branch" | head -6
 	branchcommit="$(git log -1 --oneline "$branch")"
 	testbranch="$branch"".test"
-	testcommit="$(git log -1 --oneline --ignore-missing "$testbranch")"
+	testcommit="$(git log -1 --oneline "$testbranch")"
 	git branch | grep "$testbranch"
 	if [ $? -eq 0 ] && [ "$testcommit" != "$branchcommit" ]; then
 		echo "-----------------------------------------------------------------"
