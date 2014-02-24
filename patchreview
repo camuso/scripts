@@ -64,7 +64,7 @@ function set_gitbranch {
 	echo -e  "\tgit am --abort      # Abort any pending git am ops"
 	echo -e  "\tgit checkout -f     # Discard any changes"
 	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
-	echo -e 
+	echo -e
 	echo -en "$attr_bold"
 	echo -en "Enter the number corresponding to the branch you want: "
 	echo -en "$attr_OFF"
@@ -334,7 +334,8 @@ function check_gitam {
 
 function apply_patches {
 	local stat=0
-	for patch in $(ls $indir/*.patch); do
+	# for patch in $(ls $indir/*.patch); do
+	for patch in $(ls $indir/*.patch | sort -t'-' -k3 -h); do
 		echo "$patch"
 		git am $patch
 		stat=$?
@@ -379,8 +380,7 @@ echo -en "$attr_OFF"
 # Parameter Initialization
 ###########################################
 
-# Create indexes into the project file and count the number of booleans
-# used in program flow control.
+# Declare the variables we will be using
 #
 declare prj_entries=0
 declare index=0
