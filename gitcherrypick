@@ -5,7 +5,7 @@
 # Provide some automation for cherrypicking.
 #
 
-VERSION="1.0-01"
+VERSION="2.0"
 
 # This script needs a bash library source file
 #
@@ -13,101 +13,393 @@ source ~/bin/lib/ui.source
 source ~/bin/lib/project.source
 source ~/bin/lib/gitutilities.source
 
+# Herald
+#
+str_herald="\n"$attr_bold"gitcherrypick "$VERSION" - Automates cherrypicking"
+
+########################################
+# Function Return Codes
+########################################
+declare rc_continue=0	# Continue for another pass
+declare rc_run=1	# Run gitcherrypick
+
+#########################################
+# Functions
+#########################################
+
+function print_herald {
+	echo -e "$str_herald"
+	# promptgetchar "Press any key to continue ..."
+	# echo -e "$str_herald_2"
+	# promptgetchar "press any key to continue ..."
+}
+
+function exit_gitcherrypick {
+	set_booleans
+	exit $1
+}
+
+function get_gitbranch {
+	echo $(git branch | egrep \* | cut -d' ' -f2)
+}
+
+function set_gitbranch {
+	local index=1
+	git branch > $outdir/branchlist
+	echo -e "$attr_bold"
+
+	while read line; do
+		printf "%2d  $line\n" $index
+		let index++
+	done < $outdir/branchlist
+
+	echo -e  "$attr_bold"
+	echo -e  "The following commands will be issued before a new branch is checked out."
+	echo -en "$attr_OFF"
+	echo -e  "\tgit am --abort      # Abort any pending git am ops"
+	echo -e  "\tgit checkout -f     # Discard any changes"
+	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
+	echo -e 
+	echo -en "$attr_bold"
+	echo -en "Enter the number corresponding to the branch you want: "
+	echo -en "$attr_OFF"
+	read  linenumber
+	[ "$linenumber" == "q" ] && exit_patchreview 1
+	[ "$linenumber" == "x" ] && ui_sh_spawn
+	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
+	echo "git checkout "$gitbranch""
+	git am --abort --quiet
+	# git checkout .
+	# git clean -df
+	git checkout -f "$gitbranch" 2>&1
+	~/bin/gitlog1
+}
+
+function init_booleans {
+	for ((index=boolindex; index <= prj_entries; index++)); do
+		prj_set_item $index true
+	done
+}
+
+# exec_boolean
+#
+# Execute a command string and pass the boolean that was
+# used to determine whether the command should be executed.
+# The boolean will be given the value passed by the caller.
+#
+# $1 - The boolean
+# $2 - The boolean's new value
+# $3 - The command line as a strng.
+#
+# Returns the status of the executed command string.
+#
+function exec_boolean {
+	argc=$#
+	argv="$@"
+	local stat
+	local boolean=$1
+	local b_newval=$2
+	local cmdstr="$(echo "$@" | cut -d' ' -f$argc-)"
+	local offset=prj_${boolean}
+	# echo ${!offset}
+	$cmdstr
+	stat=$?
+	# echo "$cmdstr status: $stat"
+	if [ $stat -eq 0 ]; then
+		if [ $argc -eq 3 ]; then
+			$b_newval && boolean=true || boolean=false
+		fi
+		[ $argc -ge 2 ] && prj_set_item ${!offset} $boolean
+	else
+		echo "$cmdstr"
+		echo -e "\tDid not execute successfully"
+		echo
+	fi
+	return $stat
+}
+
+function init_booleans {
+	local index=$boolindex
+	for bool in $ui_bools; do
+		prj_set_item $index false
+	done
+}
+
+# get_booleans
+#
+# Read the values of the program flow control booleans from the
+# project file. If the value has not been initialized, then init
+# to false.
+#
+function get_booleans {
+	local index=$boolindex
+	local val
+	local emptyline="$(prj_get_emptyline)"
+
+	for bool in $ui_bools; do
+		val=$(prj_get_item $index)
+		eval $bool=$val
+		[ "${!bool}" == "$emptyline" ] && eval $bool=false
+		let index++
+	done
+	return 0
+}
+
+# set_booleans
+#
+# Write the current values of the program flow booleans into the
+# project file.
+#
+function set_booleans {
+	local index=$boolindex
+	for bool in $ui_bools; do
+		prj_set_item $index ${!bool}
+		let index++
+	done
+	return 0
+}
+
+function init_default_parameters {
+	outdir="../cpout/"
+	indir="../cpin/"
+	[ -d "$outdir" ] || mkdir -p "$outdir"
+	[ -d "$indir"  ] || mkdir -p "$indir"
+}
+
+function show_settings {
+	subjectprefix="$(git config format.subjectprefix)"
+	settings=$(
+cat <<EOF
+$attr_bold
+    $attr_under\0Environment        $attr_OFF$attr_bold
+ b  Current git branch		: $gitbranch
+ p  Current subject prefix	: $subjectprefix
+ s  Source directory		: $indir
+ d  Destination directory	: $outdir
+ I  Cherry-pick commits file	: $cpcommitsfile
+ O  Backport commits file	: $bpcommitsfile
+
+    $attr_under\0Options            $attr_OFF$attr_bold
+ 1  User supplied cherries	: $b_use_cpcmtlog
+ 2  User supplied backports 	: $b_use_bpcmtlog
+ 3  Automate commits		: $b_autocommit
+ 4  Create a patchset		: $b_create_patchset
+
+    $attr_under\0Control            $attr_OFF$attr_bold
+ i  Init to defaults
+ S  Clean Source directory
+ D  Clean Destination directory
+ C  Clean both directories
+ q  Quit this script
+ x  Exit to a shell
+ h  Help
+ r  Run gitcherrypick
+$attr_OFF
+EOF
+)
+	echo -e "$settings"
+}
+
+function menu_parser {
+	infilecount=$(ls $indir | wc -l)
+	show_settings
+	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
+
+	case $setting in
+
+		b )	set_gitbranch
+			;;
+		p )	git_getsubjectprefix
+			;;
+		s )	prj_set_directory "source" $prj_indir indir quiet
+			;;
+		d )	prj_set_directory "destination" $prj_outdir outdir quiet
+			;;
+		I )	getuser \
+			"File containing the commits to be cherry-picked: " \
+			cpcommitsfile
+			;;
+		O )	getuser \
+			"File to contain the backported commits: " \
+			bpcommitsfile
+			;;
+		1 )	ui_toggle b_use_cpcmtlog
+			;;
+		2 )	ui_toggle b_use_bpcmtlog
+			;;
+		3 )	ui_toggle b_autocommit
+			;;
+		4 )	ui_toggle b_create_patchset
+			;;
+		5 )	ui_toggle b_clean_indir
+			;;
+		6 )	ui_toggle b_clean_outdir
+			;;
+		C )	rm -vf "$indir"/*
+			rm -vf "$outdir"/*
+			;;
+		D )	rm -vf "$outdir"/*
+			;;
+		S )	rm -vf "$indir"/*
+			;;
+		i )	init_booleans
+			get_booleans
+			;;
+		h )	less ~/bin/.data/help-gitcherrypick.txt
+			;;
+		q )	exit_gitcherrypick 0
+			;;
+		x )	set_booleans
+			ui_sh_spawn
+			;;
+		r )	set_booleans
+			return $rc_run
+			;;
+	esac
+	return $rc_continue
+}
+
+function menu_loop {
+	# get_booleans
+	indir=$(prj_get_item $prj_indir)
+	outdir=$(prj_get_item $prj_outdir)
+	commitmessagefile=""$outdir"commitmessage"
+	bpcommitsfile=""$outdir"/backported-commits.log"
+	cpcommitsfile=""$indir"/cherry-picked-commits.log"
+	# mailclient=$(prj_get_item $prj_mailclient)
+	local stat=0
+
+	while $true; do
+		menu_parser
+		stat=$?
+		# echo "menu_parser_stat: $stat"
+		[ $stat -eq $rc_run ] && break
+	done
+	return $stat
+}
+
+
+#############################
+# Start of Script Execution
+#############################
+
+# Print the herald
+#
+print_herald
+
 # Disable the herald from the first call to ui.source::getyn
 #
 b_ui_int_first_getyn=false
 
 myshlvl=$SHLVL
 
-# Herald
+# Determine if we're at the top of a git tree. If not, exit.
 #
-str_herald="
-gitcherrypick "$VERSION" - Automates cherrypicking
+if ! [ -d .git ]; then
+	echo -e "The current directory... "$attr_bold" "$PWD""$attr_OFF""
+	echo -e "\t ...is not the top of a git tree."
+	echo "Please cd to the top of a git tree."
+	echo
+	exit 1
+fi
 
-	\"Cherry-picked\" commits are those you are attempting to backport.
-	\"Backported\" commits are those you have committed after having
-	cherry-picked and resolved any conflicts.
+###########################################
+# Parameter Initialization
+###########################################
 
-	To capture all input and output from this session, quit now and
-	restart with the following command.
+declare prj_entries=0
+declare index=0
+declare boolcount=0
+declare boolindex=0
+declare b_found_first_bool=false
+declare infilecount=0
+declare gitbranch=$(get_gitbranch)
+declare ui_bools=""
 
-		gitcherrypick script.sh 3>&2>&1 | tee gitcherrypick.log
-
-	You can also use \"script\" to capture your session. This will
-	capture all activity, including activity in spawned shells.
-
-		script -c gitcherrypick gitcherrypick.log
-
-	To enjoy enhanced input editing capabilities, use \"rlwrap\".
-
-		rlwrap gitcherrypick
-
-	"$attr_bold"Press 'x' to spawn a shell or 'q' to quit at any prompt.\
-"$attr_OFF"\n"
-
-echo -e "$str_herald"
-
-# Query for a project directory
+# Init ui items
+# -------------
+# This loop enumerates and counts the items that will be stored in the
+# project file. It also declares the boolean names whose values are stored
+# in the project file and assigns values to them.
 #
-#printenv | grep -q PRJDIR
-#bPrjDirExists=$?
-#bNewPrj=false
-
-# Project directories and file parameters
+# Add new booleans to the end of the list.
+# Add new non-boolean parameters to the top of the list.
 #
-prj_indir=1	# Offset in prjfile to name of directory for cherry-picked patches
-prj_outdir=2	# Offset in prjfile to name of directory for backported cherry-picked patches
-prj_maxline=2	# Number of lines in the file. Must be updated if you add more data.
+for offset in \
+prj_indir \
+prj_outdir \
+prj_mailclient \
+prj_b_use_cpcmtlog \
+prj_b_use_bpcmtlog \
+prj_b_autocommit \
+prj_b_create_patchset \
+; do
+	# The prj_set_item() function uses 1-based line numbers for indexing
+	# into the project file. We inited the index variable to zero, so
+	# lets start the loop by incrementing the index variable.
+	#
+	let index++
 
-prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_maxline
-prj_set_directory "cherry-picked" $prj_indir indir
-prj_set_directory "destination" $prj_outdir outdir
+	# Assign the the value of the current loop counter (index) to the
+	# prj file index variable referenced by the offset parameter defined
+	# at the top of the for loop.
+	#
+	let $offset=$index
 
-# Create the project files
+	if [ "${offset:3:3}" == "_b_" ]; then
+
+		# The name of the boolean variable is the same as the project
+		# file index variable, but with the leading "prj_" removed.
+		#
+		boolname="$(echo ${offset} | cut -d'_' -f2-)"
+		declare $boolname
+
+		# Create a string that contains all the names of the program's
+		# booleans.
+		#
+		ui_bools=""$ui_bools" "$boolname"" # basically a strcat()
+
+		[ "${!boolname}" == " " ] && eval $boolname=false
+		let boolcount++
+		if ! $b_found_first_bool; then
+			boolindex=$index
+			b_found_first_bool=true
+		fi
+	fi
+done
+
+# Initialize the prj_entries with the number of ui parameters counted in the
+# above for-loop and init the project file.
 #
-commitmessagefile=""$outdir"/commitmessage"
-bpcommitsfile=""$outdir"/backported-commits.log"
-cpcommitsfile=""$indir"/cherry-picked-commits.log"
+prj_entries=$index
+prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_entries
 
-# Initialize logfiles and logic
+# Init the source and destination directories
 #
-b_use_cpcmtlog=false
-b_use_bpcmtlog=false
+#prj_set_directory "source" $prj_indir indir quiet
+#prj_set_directory "destination" $prj_outdir outdir quiet
+
+# Initialize booleans that are not presented in the ui.
+#
 b_shellcommit=false
-b_shellcommit_noauto=false
-b_default_cpcommitsfile=false
+b_default_cpcommitsfile=true
 b_other_cpcommitsfile=false
 
-if [ -e "$cpcommitsfile" ]; then
-	getyn ""$cpcommitsfile" exists. Use it?" b_default_cpcommitsfile
-fi
+# Retrieve the saved boolean values, or defaults if they've not been saved
+# before.
+#
+get_booleans
 
-if ! $b_default_cpcommitsfile; then
-	getyn "Use a file containing commits you want to cherry-pick?" b_other_cpcommitsfile
-fi
+##############################################
+# Main Program
+##############################################
 
-if $b_other_cpcommitsfile; then
-	cpcommitsfile=""
-	while [ ! -e "$cpcommitsfile" ]; do
-		getuser "File path: " cpcommitsfile
-		[ -e "$cpcommitsfile" ] && break
-		echo "\"$cpcommitsfile\" does not exist."
-	done
-fi
+# Present the ui and get the parameters for the cherry-picks.
+#
+menu_loop
 
-if $b_default_cpcommitsfile || $b_other_cpcommitsfile; then
-	$yes && b_use_cpcmtlog=true
-	n_lines_cpcommitsfile=$(cat "$cpcommitsfile" | wc -l)
-fi
-
-if [ -e "$bpcommitsfile" ]; then
-	getyn ""$bpcommitsfile" exists. Leave it?" yes
-	$yes && b_use_bpcmtlog=true
-	n_lines_bpcommitsfile=$(cat "$bpcommitsfile" | wc -l)
-fi
-
-echo "bpcommitsfile: "$bpcommitsfile""
-echo "cpcommitsfile : "$cpcommitsfile""
+echo "backported commits file:    "$bpcommitsfile""
+echo "cherry-picked commits file: "$cpcommitsfile""
 
 $b_use_cpcmtlog || cat /dev/null > "$cpcommitsfile"
 $b_use_bpcmtlog || cat /dev/null > "$bpcommitsfile"
@@ -136,8 +428,9 @@ Spawning a new shell so you can edit conflicts.
 
 	Type \"exit 2\" if you use different upstream commits and already
 	committed your backports and commit messages before exiting the
-	shell. In that case, be sure to manually update these commit files
-	with the cherry-picked and backported commits.
+	shell. In that case, be sure to manually update the following commit
+	file with the cherry-picked and backported commits.
+
 	"$attr_bold""$cpcommitsfile"
 	"$bpcommitsfile""$attr_OFF"
 "
@@ -156,7 +449,6 @@ recheck your work, press \"x\" now, or any other key to continue. "
 
 while true; do
 
-	b_autocommit=false
 	b_shellcommit=false
 	b_shellcommit_noauto=false
 
@@ -187,6 +479,7 @@ while true; do
 
 		if $conflicts; then
 			echo -e "$str_shellmsg"
+			git status
 			# bash 3>&2>&1 | tee $outdir/shell_$shell_index
 			bash
 			retval=$?
@@ -230,17 +523,17 @@ while true; do
 	# shell, then prompt him for b_autocommit.
 	# Print the instructions on the first pass.
 	#
-	if [ "$commit" ]; then
-		if [ $index -eq 1 ]; then
-			echo
-			echo -e "\tIf you have not already commited your changes,"
-			echo -e "\tthey can be committed for you automatically,"
-			echo -e "\tincluding the commit message. You will be given"
-			echo -e "\tan opportunity to edit the commit message."
-			echo
-		fi
-		getyn "Want to automatically commit your changes?" b_autocommit
-	fi
+	#if [ "$commit" ]; then
+	#	if [ $index -eq 1 ]; then
+	#		echo
+	#		echo -e "\tIf you have not already commited your changes,"
+	#		echo -e "\tthey can be committed for you automatically,"
+	#		echo -e "\tincluding the commit message. You will be given"
+	#		echo -e "\tan opportunity to edit the commit message."
+	#		echo
+	#	fi
+	#	getyn "Want to automatically commit your changes?" b_autocommit
+	#fi
 
 	if $b_autocommit; then
 
@@ -285,7 +578,7 @@ while true; do
 
 		$yes && git commit --amend
 		#
-		# Wrirw the new commit into the backport commits file.
+		# Write the new commit into the backport commits file.
 		#
 		git log -n1 --oneline >> "$bpcommitsfile"
 	fi
@@ -312,10 +605,8 @@ function check_commitsfile {
 	return 0
 }
 
-getyn "Create a patch set from the new backported commits?" yes
-if $yes; then
+if $b_create_patchset; then
 	echo
-	git_getsubjectprefix
 	check_commitsfile $bpcommitsfile bppatchcount
 
 	# After applying all the patches, the git pointer should be
