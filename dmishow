@@ -1,4 +1,4 @@
 #!/bin/bash
 
-echo "# dmidecode | grep -e Date -e Vendor -e Version -e Product | head -n 4"
-dmidecode | grep -e Date -e Vendor -e Version -e Product | head -n 4
+echo "# dmidecode | grep -e Date -e Vendor -e Version -e Product -e \"BIOS Revision\" | head -5"
+dmidecode | grep -e Date -e Vendor -e Product -e Firmare -e Version -e "BIOS Revision" | head -5
