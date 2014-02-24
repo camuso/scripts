@@ -1,15 +1,15 @@
 #!/bin/bash
 cores=$(cpucount)
 
-echo "make -j$cores"
-make -j$cores
+echo "make -j$cores 2>&1 | tee ../make.log"
+make -j$cores 2>&1 | tee ../make.log
 makestat=$?
 [ $makestat -eq 0 ] || exit $makestat
 
-echo "make -j$cores modules_install"
-make -j$cores modules_install
+echo "make -j$cores modules_install 2>&1 | tee -a ../make.log"
+make -j$cores modules_install 2>&1 | tee -a ../make.log
 makestat=$?
 [ $makestat -eq 0 ] || exit $makestat
 
-echo "make -j$cores install"
-make -j$cores install
+echo "make -j$cores install 2>&1 | tee -a ../make.log"
+make -j$cores install 2>&1 | tee -a ../make.log
