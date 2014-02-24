@@ -1,0 +1,11 @@
+#!/bin/bash
+#
+# Find all the partitions and mount them in /mnt
+
+for part in $(ls /dev/sd??); do
+	echo -n "$part "
+	name=$(echo $part | cut -d'/' -f3)
+	echo $name
+	[ -d /mnt/"$name" ] || mkdir -p /mnt/$name
+	mount $part /mnt/$name
+done

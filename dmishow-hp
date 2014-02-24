@@ -1,0 +1,4 @@
+#!/bin/bash
+
+echo "# dmidecode | grep -e Date -e Vendor -e Version -e Product -e \"Firmware Revision\" | head -5"
+dmidecode | grep -e Date -e Vendor -e Product -e Firmare -e Version -e "Firmware Revision" | head -5

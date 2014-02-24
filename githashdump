@@ -1,0 +1,28 @@
+#!/bin/bash
+
+usagestr=$(
+cat <<EOF
+
+githasdump file-of-hashes
+
+	where \"file-of-hashes\" is a file containing commit
+	hashes to be processed.
+
+EOF
+)
+
+function usage {
+	echo "$usagestr"
+	exit 1
+}
+
+file=$1
+
+while read line
+do
+        commit=$(echo $line | cut -d" " -f1)
+        git log --format=format:"%h %ct %ci %s" -1 $commit
+        echo
+done < $file | sort -k2 -n -t' ' -o ""$file".sort"
+
+

@@ -1,0 +1,47 @@
+#!/bin/bash
+# init-new-system
+#
+# Replicate my environment on a new system.
+#
+
+usage=$(
+cat <<EOF
+$0 <user@host> [-f file]
+	-f file	- send only the named archive
+
+EOF
+)
+
+function do_usage {
+	echo "$usage"
+	exit 1
+}
+
+argc=$#
+[ $argc -lt 1 ] && do_usage
+
+remote=${!argc}
+
+file=""
+user=""
+
+while getopts "cf:" OPTION; do
+	case "$OPTION" in
+		f )
+			file="$OPTARG"
+			[ "$file" ] || do_usage
+			;;
+		* )
+			do_usage
+			;;
+	esac
+done
+
+user="$(echo "$remote" | cut -d'@' -f1)"
+hos="$(echo $remote | cut -d'@' -f2)"
+
+echo "connecting with $remote..."
+rsync -vat ~/ark/$file $remote:ark/$file
+runremote $user $hos ~/bin/init-my-stuff $user
+echo
+exit

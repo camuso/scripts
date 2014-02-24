@@ -1,0 +1,33 @@
+#!/bin/bash
+#
+
+# swapfiles
+#
+# Swap the locations of two files
+#
+
+function usage {
+	echo
+	echo "swapfiles path-A/file-A path-B/file-B"
+	echo
+	echo -e "Swaps file in path-A/file-A with the file in path-B/file-B"
+	echo
+	exit 1
+}
+
+[ $# -ne 2 ] && usage
+
+p1=$1
+p2=$2
+
+f1="${p1##*/}"
+f2="${p2##*/}"
+
+d1="${p1%/*}"
+d2="${p2%/*}"
+
+echo "Swapping $p1 with $p2..."
+mv $d1/$f1 $d1/p1_temp
+mv $d2/$f2 $d1/$f2
+mv $d1/p1_temp $d2/$f1
+

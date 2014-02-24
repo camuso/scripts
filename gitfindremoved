@@ -1,0 +1,13 @@
+#!/bin/bash
+
+usage () {
+	echo
+	echo git log -1 -- [file path]
+	echo
+	exit
+}
+
+[ $# -lt 1 ] && usage
+
+echo "git log -1 -- $1"
+git log -1 -- $1

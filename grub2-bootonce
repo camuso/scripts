@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# Function that sets grub2 boot parameter to entry number $1
+# - if no parameter passed, defaults to 0
+#
+#
+
+function usage() {
+	echo "$0: bootonce [grub2 # of entry to boot]"
+	echo "If no parameter is passed in, defaults to 0"
+}
+
+grubvalue=0
+
+if [ $# -gt 1 ]; then
+	usage
+	exit 1
+fi
+
+if [ $# -eq 1 ]; then
+	# is $1 a number?
+	if [ $1 -eq $1 2> /dev/null ]; then
+		grubvalue=$1
+	else
+		usage
+		exit 1
+	fi
+fi
+
+value=0
+cat /boot/grub2/grub.cfg | grep 'menuentry ' | awk -F "'" ' { print $2 } ' | while read ENTRY
+do
+	if [ ! -z "$ENTRY" ]; then
+		echo $value " " $ENTRY
+		value=`expr $value + 1`
+	else
+		echo "empty?"
+	fi
+done
+grub2-reboot $grubvalue

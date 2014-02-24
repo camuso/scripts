@@ -1,0 +1,12 @@
+#!/bin/bash
+#lc=$(cat $2 | wc -l)
+#
+#[ $1 -gt $lc ] && exit 1
+
+awk -v line=$1 '{
+        if (NR != line) {
+                print $0;
+        }
+}' $2 > temp
+mv temp $2
+

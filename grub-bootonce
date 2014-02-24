@@ -1,0 +1,37 @@
+#!/bin/bash
+#
+# Function that sets grub boot parameter to $1
+# - if no parameter passed, defaults to 0
+#
+
+function usage() {
+	echo "$0: bootonce [grub # of entry to boot]"
+	echo "If no parameter is passed in, defaults to 0"
+}
+
+grubvalue=0
+
+if [ $# -gt 1 ]; then
+	usage
+	exit 1
+fi
+
+if [ $# -eq 1 ]; then
+	# is $1 a number?
+	if [ $1 -eq $1 2> /dev/null ]; then
+		grubvalue=$1
+	else
+		usage
+		exit 1
+	fi
+fi
+
+count=0
+cat /boot/grub/menu.lst | grep title | while read LINE
+do
+	echo -n $count
+	echo $LINE | awk -F "title" ' { print $2 } '
+	count=` expr $count + 1 `
+done
+echo "savedefault --default=$grubvalue --once" | grub --batch
+
