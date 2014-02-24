@@ -6,24 +6,32 @@
 
 # Log file
 LOG_FILE=/var/tmp/S3_Suspend_message.log
-echo "The log file S3_Suspend_message.log is created in /var/tmp folder."
+sleep_time=60
+wake_after=30
+
+echo "The log file $LOG_FILE will be created."
+echo "" > $LOG_FILE
 
 read -p "Number of iterations: " count
+echo "************************************************************************" | tee -a $LOG_FILE
+echo " START" | tee -a $LOG_FILE
+echo "************************************************************************" | tee -a $LOG_FILE
+echo "" | tee -a $LOG_FILE
 
 for((loop=1;loop<=$count;loop++))
 do
 #record the suspend and resume log
-	echo "#######################################################################" >> $LOG_FILE
-	echo $loop_time" times" >> $LOG_FILE
-	date >> $LOG_FILE
-	dmesg >> $LOG_FILE
-    	echo "The system will suspend after 30 second and resume after 60 second when it's in S3."
-	sleep 30
-	rtcwake --mode=mem --second=60
-
+	date | tee -a $LOG_FILE
+	dmesg | tee -a $LOG_FILE
+	echo "The system will suspend after $sleep_time seconds and resume after $wake_after seconds when it's in S3."
+	sleep $sleep_time
+	rtcwake --mode=mem --second=$wake_after
+	echo "#######################################################################" | tee -a $LOG_FILE
+	echo "Wake up: $loop of: $count" | tee -a $LOG_FILE
+	echo "#######################################################################" | tee -a $LOG_FILE
 done
 #Change mod of log file
-chmod 777 /var/tmp/S3_Suspend_message.log
-echo "Please check the log file in /var/tmp folder."
+chmod 777 $LOG_FILE
+echo "Please check $LOG_FILE."
 exit 0
 
