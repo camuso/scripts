@@ -58,12 +58,13 @@ if ((mlcount != uscount)); then
 fi
 
 echo
-echo "Patches in $usdir will be compared with patches in $mldir"
+echo "Patches in $mldir will be compared with patches in $usdir"
 echo
 
 
 index=0
-for i in $(ls "$mldir"/*.patch); do
+# for i in $(ls "$mldir"/*.patch); do
+for i in $(ls "$mldir"/*.patch  | sort -t'-' -k1 -h); do
 	mlfiles[index]="$i"
 	echo "${mlfiles[$index]}"
 	let index++
@@ -71,7 +72,8 @@ done
 echo
 
 index=0
-for i in $(ls "$usdir"/*.patch); do
+#for i in $(ls "$usdir"/*.patch); do
+for i in $(ls "$usdir"/*.patch  | sort -t'-' -k3 -h); do
 	usfiles[index]="$i"
 	echo "${usfiles[$index]}"
 	let index++
