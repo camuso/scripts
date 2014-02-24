@@ -10,8 +10,9 @@ for tarname in \
 "bin" \
 "code" \
 "hints" \
-"etcbk"
-do
+"etcbk" \
+"rcbak" \
+; do
 	echo "Packing archive "$tarname".tgz"
 	tar -C $HOME --exclude-vcs -czvf ~/ark/$tarname.tgz $tarname/ \
 		>> ~/.makemystuff.log 2>&1
