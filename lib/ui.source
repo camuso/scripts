@@ -226,6 +226,7 @@ function ui_chkdir {
 }
 
 # ui_getnewdir prompt name
+#
 # Prompts the user for a name to create a new directory and passes
 # it back to the caller in the "name" argument.
 # If the name already exists as a file, prompts for a new name.
@@ -260,6 +261,8 @@ function ui_getnewdir {
 
 		if [ $stat -eq 0 ]; then
 			mkdir -p "$newdir"
+			stat=$?
+			[ $stat -ne 0 ] && continue
 			eval $2="$newdir"
 			return $stat
 		fi
