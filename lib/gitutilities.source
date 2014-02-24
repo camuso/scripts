@@ -78,16 +78,20 @@ function git_file2patchset {
 
 # git_subjectprefix - determine the subject prefix stored in .git/config
 #
-# no arguments
+# $1 - query, ask user if he wants to change the prefix
 #
 function git_getsubjectprefix {
 	local newpfx="$(git config format.subjectprefix)"
+	local b_ans=true
+	local b_query=false
+	[ "$1" == "query" ] && b_query=true
 	while true; do
 		echo -e "Current subject prefix: "$attr_bold""$newpfx""$attr_OFF""
-		getyn "Change subject prefix?" ans
-		if $ans; then
-			getuser "New prefix" newpfx
+		$b_query && getyn "Change subject prefix?" b_ans
+		if $b_ans; then
+			getuser "New prefix: " newpfx
 			git config format.subjectprefix "$newpfx"
+			$b_query || break
 		else
 			break
 		fi
@@ -161,7 +165,7 @@ function git_comment2commitsfile {
 	cat /dev/null > $commitsfile
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
 
-	for srcfile in $(ls "$srcdir"/*.patch); do
+	for srcfile in $(ls "$srcdir"/*.patch  | sort -t'-' -k3 -h); do
 
 		# We're going to assume that the commit number consists of 40
 		# hexadecimal digits, using egrep for extended regex
