@@ -92,7 +92,7 @@ function buhbye() {
 # written with the boolean answer upon return.
 
 b_ui_int_first_getyn=true
-b_ui_int_firstpass=true
+b_ui_int_firstpass=false
 
 function getyn {
 
