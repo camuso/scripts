@@ -1,0 +1,535 @@
+#!/bin/bash
+
+###########################################
+# Variable Declarations and Initialization
+###########################################
+
+# Text attributes
+#
+attr_bold="\033[1m"
+attr_under="\033[4m"
+attr_OFF="\033[0m"
+
+digits='^[0-9]+$'	# regular expression for digits
+			# [[ $var =~ $digits ]] to test
+
+alphanum='^[a-z0-9]+$'	# regular expression for alphanum
+			# [[ $var =~ alphanum ]] to test
+
+## quotes='^[\'\"]+$'
+
+declare topdir
+
+# The various debug parameters will be stored as words in a bash array
+# as follows.
+#
+# NOTE WELL:
+# ==========
+# In order to correctly index into a bash array, every member of the array
+# must have a value. If there are any members with empty values, i.e. "",
+# then you will be disappointed when trying to access or change the value
+# in the array passed by "reference" and indexed with the predefined indexes.
+#
+# FLD
+# ---
+#  0	kmod		- the kernel module name
+#  1	mask_name   	- the first debug parameter is a bit mask of the debug options
+#  2	mask_value	- the value of the bitmask read out from the directory
+#  3	thold_name	- name of the debug message burst rate kmod parameter
+#  4	thold_value	- value of the debug message burst rate
+#  5	wait_name	- name of the debug message burst interval
+#  6	wait_value	- value of the debug message burst interval
+#  7	timer_name	- if it exists, a timer name
+#  8	timer_value	- if it exists, a timer value
+#  9	reset_name  	- if it exists, a reset, typically for state counters
+# 10	mask bit0	- the state of each individual bit in the debug options bitmask
+#  :        :
+#  :        :
+# 17	mask bit 7
+#
+declare bt_debug=(
+"ipmi_si"
+"bt_debug"
+"3"
+"na"
+"na"
+"na"
+"na"
+"na"
+"na"
+"na"
+"enable"
+"messages"
+"states"
+"na"
+"na"
+"na"
+"na"
+"na"
+)
+#bt_debug=( $bt_debug )	# tokenize the strings
+
+declare -a smic_debug=(
+"ipmi_si"
+"smic_debug"
+"7"
+"na"
+"na"
+"na"
+"na"
+"na"
+"na"
+"na"
+"enable"
+"messages"
+"states"
+"na"
+"na"
+"na"
+"na"
+"na"
+)
+
+declare -a kcs_debug=(
+"ipmi_si"
+"kcs_debug"
+"15"
+"kcs_dbg_thold"
+"20"
+"kcs_dbg_wait"
+"30"
+"na"
+"na"
+"kcs_dbg_reset"
+"enable"
+"messages"
+"states"
+"count"
+"na"
+"na"
+"na"
+"na"
+)
+
+declare -a si_debug=(
+"ipmi_si"
+"si_debug"
+"31"
+"si_dbg_thold"
+"20"
+"si_dbg_wait"
+"30"
+"kipmid_max_busy_us"
+"0"
+"na"
+"enable"
+"messages"
+"states"
+"na"
+"na"
+"na"
+"na"
+"na"
+)
+
+declare -a msg_debug=(
+"ipmi_msghandler"
+"msg_debug"
+"12"
+"msg_dbg_thold"
+"20"
+"msg_dbg_wait"
+"30"
+"na"
+"na"
+"na"
+"enable"
+"messages"
+"states"
+"na"
+"na"
+"na"
+"na"
+"na"
+)
+
+# Indexes into the bash array containing the debug parameters
+#
+kmod_name=0
+mask_name=1
+mask_value=2
+thold_name=3
+thold_value=4
+wait_name=5
+wait_value=6
+timer_name=7
+timer_value=8
+reset=9
+bits_offset=$(( reset + 1 ))
+bit0=$(( bits_offset ))
+bit1=$(( bits_offset + 1 ))
+bit2=$(( bits_offset + 2 ))
+bit3=$(( bits_offset + 3 ))
+bit4=$(( bits_offset + 4 ))
+bit5=$(( bits_offset + 5 ))
+bit6=$(( bits_offset + 6 ))
+bit7=$(( bits_offset + 7 ))
+
+
+###########################################
+# Functions
+###########################################
+
+# getyn() $1 [$2]
+#
+# Takes $1 for a prompt string
+# Places true or false command into $2, which is an optional argument.
+# User is prompted for (y/n) answer at the end of the prompt string.
+#
+# Optionally, $2 can be passed as the default answer. It will be over-
+# written with the boolean answer upon return.
+#
+function getyn {
+
+	local promptstring="$1"
+	local answer
+	local stat
+
+	while true; do
+
+		echo -en "$attr_bold$promptstring (y/n) : $attr_OFF"
+		read -n1 answer
+		echo
+
+		[ "$answer" == "q" ] && buhbye "$exitok"
+
+		if [ "$answer" == "y" ]; then
+			stat=true
+			break
+		fi
+
+		if [ "$answer" == "n" ]; then
+			stat=false
+			break
+		fi
+	done
+	[ $# -eq 2 ] && eval $2=$stat
+}
+
+# getchar()
+#
+# Returns character in $1
+#
+function getchar {
+	local char=""
+	read -n1 char
+	echo
+	if [[ "$char" =~ $alphanum ]]; then
+		eval $1=$char
+		return 1
+	else
+		eval $1=""
+		return 0
+	fi
+	#[ $# -gt 0 ] && eval $1=$char
+}
+
+# promptgetchar()
+#
+# Prints a prompt passed in $1 and returns the char in $2
+#
+function promptgetchar {
+	local char
+	local prompt=$1
+	echo -ne "$prompt"
+	getchar $2
+}
+
+function getuser {
+	local promptstring="$1"
+	local var
+
+	echo -ne "$attr_bold$promptstring$attr_OFF"
+	read var
+	eval $2=$var
+}
+
+function load_ipmi {
+        if $test_only; then
+                if ! [ -d ~/sys/module/ipmi_si/parameters ]; then
+                        mkdir -p  ~/sys/module/ipmi_si/parameters
+                        echo  0 > ~/sys/module/ipmi_si/parameters/bt_debug
+                        echo  0 > ~/sys/module/ipmi_si/parameters/smic_debug
+                        echo  0 > ~/sys/module/ipmi_si/parameters/kcs_debug
+			echo 40 > ~/sys/module/ipmi_si/parameters/kcs_dbg_thold
+			echo 30 > ~/sys/module/ipmi_si/parameters/kcs_dbg_wait
+                        echo  0 > ~/sys/module/ipmi_si/parameters/si_debug
+			echo 20 > ~/sys/module/ipmi_si/parameters/si_dbg_thold
+			echo 30 > ~/sys/module/ipmi_si/parameters/si_dbg_wait
+			echo  0 > ~/sys/module/ipmi_si/parameters/si_event_tmo
+
+                fi
+                if ! [ -d ~/sys/module/ipmi_msghandler/parameters ]; then
+			topdir="/sys/module"
+			mkdir -p  ~/sys/module/ipmi_msghandler/parameters
+                        echo  0 > ~/sys/module/ipmi_msghandler/parameters/msg_debug
+			echo 30 > ~/sys/module/ipmi_msghandler/parameters/msg_dbg_thold
+			echo 20 > ~/sys/module/ipmi_msghandler/parameters/msg_dbg_wait
+                fi
+        else
+                modprobe -v ipmi_si
+                modprobe -v ipmi_devintf
+        fi
+}
+
+function exitmsg {
+        local response
+        echo
+        echo "It appears the ipmi driver kmods are not loaded."
+        getyn "Do want to load them now?" response
+        if $response; then
+                load_ipmi
+        else
+                echo "OK. Load it yerself. :)"
+                echo
+                exit 0
+        fi
+}
+
+function val2bits {
+	local bits=$1
+	bits=$(echo "obase=2; $bits;" | bc)
+	bits=$(printf "%08d" $bits)
+	echo $bits
+}
+
+function pwr {
+	temp=1
+	for (( i = 0; i < $2 ; i++ )); do
+		temp=$(( $temp * $1 ))
+	done
+	echo $temp
+}
+
+function checkbit {
+	local foo=$1 bar=$2
+	## "echo "chkbit: $(chkbit $foo $bar)"
+	[ $(chkbit $foo $bar) -eq 1 ] && echo "on" || echo "off"
+}
+
+function toggle_onoff {
+	[ "$1" == "on" ] && echo "off" || echo "on"
+}
+
+function reset_counters {
+	local parm=( "${!1}" )
+	mydir="/sys/module/${parm[$kmod_name]}/parameters"
+	echo 1 > $mydir/${parm[$reset]}
+}
+
+function show_bitmask_menu {
+	declare -a options=( "${!1}" )
+	local mask_bits=$(val2bits ${options[$mask_value]})
+	local mydir="$topdir/${options[$kmod_name]}/parameters"
+
+	echo -e "$attr_bold
+  $attr_under\0${options[$mask_name]}\0$attr_OFF : $mask_bits$attr_OFF"
+
+	bit=0
+	for (( index = $bit0; $index < ${#options[@]}; index++ )); do
+		if [ "${options[$index]}" != "na" ]; then
+			printf "  %d  %-10s : %s\n"  $(( index - $bits_offset )) \
+				${options[$index]} \
+				$(checkbit $bit ${options[$mask_value]})
+			fi
+		let bit++
+	done
+
+	if [ "${options[$thold_value]}" != "na" ]; then
+		options[$thold_value]=$(cat $mydir/${options[$thold_name]})
+		options[$wait_value]=$(cat $mydir/${options[$wait_name]})
+		local burststr=$(
+cat <<EOF
+
+  $attr_bold$attr_under${options[$mask_name]} message burst settings$attr_OFF
+  s  burst size	    : ${options[$thold_value]}
+  i  burst interval : ${options[$wait_value]}
+EOF
+)
+		echo -e "$burststr"
+	fi
+
+	[ "${options[$reset]}" != "na" ] && echo "  r  reset counters"
+	if [ "${options[$timer_value]}" != "na" ]; then
+		options[$timer_value]=$(cat $mydir/${options[$timer_name]})
+		echo "  t  event busy/wait timeout uS: ${options[$timer_value]}"
+	fi
+
+	echo "  q  Quit and return to main menu"
+	echo
+}
+
+function parse_bitmask_menu {
+	declare -a options=( "${!1}" )
+	local ch
+	local val
+	local mydir="$topdir/${options[$kmod_name]}/parameters"
+	local fn
+
+	while true; do
+		show_bitmask_menu options[@]
+		promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" ch
+
+		if [[ $ch =~ $digits ]]; then
+			fn="$mydir/${options[$mask_name]}"
+			eval options[$mask_value]=$(cat $fn)
+			options[$mask_value]=$(togglebit $ch ${options[$mask_value]})
+			echo ${options[$mask_value]} > $fn
+			eval options[$mask_value]=$(cat $fn)
+		fi
+
+		case "$ch" in
+		s ) getuser "New burst size: " val
+			fn=$mydir/${options[$thold_name]}
+			echo $val > $fn
+			options[$thold_value]=$(cat $fn)
+			;;
+		i ) getuser "New burst interval: " val
+			fn=$mydir/${options[$wait_name]}
+			echo $val > $fn
+			options[$wait_value]=$(cat $fn)
+			;;
+		r ) reset_counters options[@]
+			fn=$mydir/${options[$reset]}
+			echo 1 > $fn
+			;;
+		t ) getuser "New Event Busy/Wait Timeout uS: " val
+			fn=$mydir/${options[$timer_name]}
+			echo $val > $fn
+			options[$timer_value]=$(cat $fn)
+			;;
+		q ) break
+			;;
+		esac
+	done
+}
+
+function show_menu {
+	bt_debug[$mask_value]=$(cat $topdir/ipmi_si/parameters/bt_debug)
+	smic_debug[$mask_value]=$(cat $topdir/ipmi_si/parameters/smic_debug)
+	kcs_debug[$mask_value]=$(cat $topdir/ipmi_si/parameters/kcs_debug)
+	si_debug[$mask_value]=$(cat $topdir/ipmi_si/parameters/si_debug)
+	msg_debug[$mask_value]=$(cat $topdir/ipmi_msghandler/parameters/msg_debug)
+
+	local menustr=$(
+cat <<EOF
+$attr_bold
+  $attr_under\0Debug Parameter$attr_OFF   \
+$attr_bold$attr_under\0Binary Value$attr_OFF
+  1  bt_debug     :  $(val2bits ${bt_debug[$mask_value]})
+  2  smic_debug   :  $(val2bits ${smic_debug[$mask_value]})
+  3  kcs_debug    :  $(val2bits ${kcs_debug[$mask_value]})
+  4  si_debug     :  $(val2bits ${si_debug[$mask_value]})
+  5  msg_debug    :  $(val2bits ${msg_debug[$mask_value]})
+  q  quit
+\0
+EOF
+)
+	echo -e "$menustr"
+}
+
+function parse_menu {
+	local stat=0
+	local sidir="$topdir/ipmi_si/parameters"
+	local msdir="$topdir/ipmi_msghandler/parameters"
+
+	show_menu
+	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" debug
+
+
+	case $debug in
+		1 ) 	parse_bitmask_menu bt_debug[@]
+			;;
+		2 )	parse_bitmask_menu smic_debug[@]
+			;;
+		3 )	parse_bitmask_menu kcs_debug[@]
+			;;
+		4 )	parse_bitmask_menu si_debug[@]
+			;;
+		5 )	parse_bitmask_menu msg_debug[@]
+			;;
+		q )	exit 0
+			;;
+	esac
+}
+
+function loop_menu {
+	while $true; do
+		parse_menu
+	done
+}
+
+function get_parm {
+	eval parm=( "${!1}" )
+	local si="ipmi_si/parameters"
+	local msg="ipmi_msghandler/parameters"
+	mydir="$2"
+
+	case "$parm" in
+	bt_debug )
+			eval $parm[$mask_value]=$(cat $mydir/$parm)
+			;;
+	smic_debug )	eval $parm[$mask_value]=$(cat $mydir/$parm)
+			;;
+	kcs_debug )	eval $parm[$mask_value]=$(cat $mydir/$parm)
+			eval $parm[$thold_value]=$(cat $mydir/kcs_dbg_thold)
+			eval $parm[$wait_value]=$(cat $mydir/kcs_dbg_wait)
+			;;
+	si_debug )	eval $parm[$mask_value]=$(cat $mydir/$parm)
+			eval $parm[$thold_value]=$(cat $mydir/si_dbg_thold)
+			eval $parm[$wait_value]=$(cat $mydir/si_dbg_wait)
+			;;
+	msg_debug )	eval $parm[$mask_value]=$(cat $mydir/$parm)
+			eval $parm[$thold_value]=$(cat $mydir/msg_dbg_thold)
+			eval $parm[$wait_value]=$(cat $mydir/msg_dbg_wait)
+			;;
+	esac
+}
+
+#######################################
+# Execution
+#######################################
+
+declare test_arg="$1"
+
+if [ "$test_arg" == "test"  ]; then
+	echo "test version"
+	test_only=true
+else
+	test_only=false
+fi
+
+if $test_only; then
+	topdir="$HOME/sys/module"
+	[ -d ~/sys/module/ipmi_si/parameters ] || exitmsg
+	[ -d ~/sys/module/ipmi_msghandler/parameters ] || exitmsg
+else
+	topdir="/sys/module"
+	[ -d /sys/module/ipmi_si/parameters ] || exitmsg ipmi_si
+	[ -d /sys/module/ipmi_msghandler/parameters ] || exitmsg
+fi
+
+# Read the current values out of the sysfs files
+#
+mydir="$topdir/ipmi_si/parameters"
+for p in $(ls $mydir); do
+	get_parm p $mydir
+done
+mydir="$topdir/ipmi_msghandler/parameters"
+for p in $(ls $topdir/ipmi_msghandler/parameters); do
+        ## printf "%60s: %d\n" "$mydir/$p" "$(cat $mydir/$p)"
+	get_parm p $mydir
+done
+
+# Execute the menu loop
+loop_menu
