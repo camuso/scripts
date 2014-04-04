@@ -72,7 +72,7 @@ function set_gitbranch {
 	# git checkout .
 	# git clean -df
 	git checkout -f "$gitbranch" 2>&1
-	~/bin/gitlog1
+	~/bin/gitlog1					# ~/bin/gitlog1
 }
 
 function init_booleans {
@@ -245,7 +245,7 @@ function menu_parser {
 		i )	init_booleans
 			get_booleans
 			;;
-		h )	less ~/bin/.data/help-gitcherrypick.txt
+		h )	less ~/bin/.data/help-gitcherrypick.txt		# ~/bin
 			;;
 		q )	exit_gitcherrypick 0
 			;;
@@ -372,7 +372,7 @@ done
 # above for-loop and init the project file.
 #
 prj_entries=$index
-prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_entries
+prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_entries	# ~/bin
 
 # Init the source and destination directories
 #
