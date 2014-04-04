@@ -1,0 +1,22 @@
+#!/bin/bash
+
+nodir() {
+        echo "/lib directory for $1 does not seem to exist."
+        exit 1
+}
+
+# set -x
+
+kmoddir=$1
+
+libdir=$(find /lib/modules/$(uname -r) -type d -name $kmoddir)
+blddir=$(find ./drivers/ -type d -name $kmoddir)
+
+[ -d "$libdir" ] || nodir "$libdir"
+[ -d "$blddir" ] || nodir "$blddir"
+
+echo "rsync -Pvat $blddir $libdir"
+rsync -Pvat $blddir/*.ko $libdir/.
+
+set +x
+

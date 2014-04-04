@@ -1,0 +1,30 @@
+#!/bin/bash
+
+nodir() {
+        echo "/lib directory for $filespec does not seem to exist."
+        exit 1
+}
+
+# set +x
+
+kmod=$1
+libpaths=$(find /lib/modules/$(uname -r) -name $kmod)
+libpathspec=( $libpaths )
+libdirspec=${libpathspec%/*}
+
+bldpaths=$(find ./ -name "$kmod")
+bldpathspec=( $bldpaths )
+blddirspec=${bldpathspec%/*}
+
+filespec=${bldpathspec##*/}
+
+# echo libdirspec = $libdirspec
+# echo blddirspec = $blddirspec
+# echo filespec = $filespec
+
+[ -d "$libdirspec" ] || nodir
+
+echo "cp -vf $blddirspec/$filespec $libdirspec/$filespec"
+cp -vf $blddirspec/$filespec $libdirspec/$filespec
+
+# set -x
