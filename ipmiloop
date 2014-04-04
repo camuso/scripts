@@ -1,0 +1,18 @@
+#!/bin/bash
+
+while [ true ]
+do
+	ipmitool chassis selftest
+	ipmitool chassis status
+	ipmitool chassis bootdev
+	ipmitool chassis bootparam
+	ipmitool chassis identify
+	ipmitool chassis policy list
+	ipmitool mc selftest
+	ipmitool mc getenables
+	ipmitool mc info
+	ipmitool mc guid
+	ipmitool mc getenables system_event_log
+	ipmitool sdr
+	sleep 1
+done
