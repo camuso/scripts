@@ -1,1 +1,16 @@
-lsmod | while read a b; do echo $a:; modinfo $a | grep parm | sed -e 's/parm://'; done
+#!/bin/bash
+
+# lsmod | while read a b; do echo $a:; modinfo $a | grep parm | sed -e 's/parm://'; done
+
+# grepstr="$(alias grep)"
+# unalias grep
+for kmod in $(lsmod | grep "$*" | cut -f1 -d' ')
+do
+	echo
+	echo "$kmod:"
+	echo "****************************************************************"
+	modinfo $kmod | grep parm | sed -e 's/parm:/\nparm:/'
+	echo
+done
+# foo=$(echo $grepstr | cut -c2- | rev | cut -c2- | rev)
+# alias grep="$foo"
