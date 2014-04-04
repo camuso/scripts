@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -v
+modprobe -rv ipmi_devintf
+modprobe -rv ipmi_si
+modprobe -v ipmi_si
+modprobe -v ipmi_devintf
+set +v
