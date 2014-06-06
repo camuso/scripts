@@ -22,6 +22,8 @@ argc=$#
 
 remote=${!argc}
 
+sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+rsyncmd="rsync -vat --no-owner --no-group"
 file=""
 user=""
 
@@ -41,7 +43,7 @@ user="$(echo "$remote" | cut -d'@' -f1)"
 hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
-rsync -vat ~/ark/$file $remote:ark/$file
+$rsyncmd ~/ark/$file $remote:ark/$file
 runremote $user $hos ~/bin/init-my-stuff $user
 echo
 exit
