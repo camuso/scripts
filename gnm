@@ -1,0 +1,29 @@
+#!/bin/sh
+#
+# find files that contain missing symbols from link errors
+# For example ...
+#
+# gnm system_category /usr/local/lib/boost/*.a
+# /usr/local/lib/boost/libboost_chrono.a
+# /usr/local/lib/boost/libboost_coroutine.a
+# /usr/local/lib/boost/libboost_filesystem.a
+# /usr/local/lib/boost/libboost_locale.a
+# /usr/local/lib/boost/libboost_log.a
+# /usr/local/lib/boost/libboost_log_setup.a
+# /usr/local/lib/boost/libboost_system.a
+# /usr/local/lib/boost/libboost_thread.a
+# /usr/local/lib/boost/libboost_wave.a
+# 
+if [ $# -lt 2 ] ; then
+  echo Usage: $0 pattern file[s]
+  exit
+fi
+pattern=$1
+shift
+while [ $# -gt 0 ] ; do
+  nm $1 | grep $pattern > /dev/null
+  if [ $? -eq 0 ] ; then
+    echo $1
+  fi
+  shift
+done

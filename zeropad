@@ -1,0 +1,25 @@
+#!/bin/bash
+
+filespec=$1	# The filenames to be parsed, including directory
+
+usage(){
+	echo "zeropad filespec"
+	echo -e "\tFor example:"
+	echo -e "\t\tzeropad ~/Maildir/temp/cur/*-??-182*.patch"
+	echo -e "\tWill add a zero in front of the two numbers at \"??\""
+	echo
+	exit
+}
+
+[ $filespec ] || usage
+
+set -x
+for file in $(ls $1); do
+	front="$(echo $file | cut -d'-' -f-3)"
+	echo "$front"
+	back="$(echo $file | cut -d'-' -f4-)"
+	echo "$back"
+	name=$front"-0"$back
+	echo "$name"
+done
+set +x
