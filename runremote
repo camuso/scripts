@@ -10,6 +10,8 @@ shift 3
 # escape the arguments
 declare -a args
 
+sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
 count=0
 for arg in "$@"; do
   args[count]=$(printf '%q' "$arg")
@@ -19,4 +21,4 @@ done
 {
   printf '%s\n' "set -- ${args[*]}"
   cat "$realscript"
-} | ssh $user@$host "bash -s"
+} | $sshcmd $user@$host "bash -s"
