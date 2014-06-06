@@ -27,24 +27,49 @@ if [ $total -eq 0 ]; then
 fi
 
 for filename in $(ls | sort -t'_' -k2 -h); do
-	# newname=$(printf "%s-%04d.%03d.patch" $prefix $ddcount $total)
-	#
+	## newname=$(printf "%s-%04d.%03d.patch" $prefix $ddcount $total)
+
 	# Extract the subject line.
 	#
 	subject=$(grep -m1 "Subject: " $filename)
-	#
+
 	# Remove the word "Subject: " from the line
 	#
 	subject=$(echo "$subject" | cut -d' ' -f2-)
-	#
+
 	# Remove any brackets, parentheses, and quotes
 	#
 	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
 	subject=$(echo "$subject" | sed "s/'//g")
-	#
+
 	# Replace spaces, slashes, colons and semicolons with hyphens
 	#
 	subject=$(echo "$subject" | sed "s\[/:; ]\-\g")
+
+	####################################################################
+	#
+	# The subject string at this point will be of the form ...
+	# RHELx.y-PATCH-nn-dd-yada-yada-yada.patch
+	# The nn is the patch enumeration and the ddd is the total number of
+	# patches.
+	# We must ensure that the number of digits is the same in both
+	# numbers, or the files will not be listed in the correct numerical
+	# order. 
+	# in the PATCH xx/yy part of the subject line.
+	#
+
+	# Find the substring starting with the word "PATCH"
+	#
+	pos="$(echo $subject | grep -bo PATCH | cut -d':' -f1)"
+	pstr=${subject:pos}
+
+	# Extract the number substrings and determine their sizes. If the
+	# first number string has fewer digits than the second number
+	# string, then add zeroes to the left of the first number string
+	# until it has the same number of digits as the second number
+	# string.
+	#
+
 	newname=$(printf "%s.patch" "$subject")
 	echo "mv "$filename" -> "$newname""
 	mv "$filename" "$newname"
