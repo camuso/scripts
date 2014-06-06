@@ -328,7 +328,6 @@ declare ui_bools=""
 for offset in \
 prj_indir \
 prj_outdir \
-prj_mailclient \
 prj_b_use_cpcmtlog \
 prj_b_use_bpcmtlog \
 prj_b_autocommit \
@@ -475,6 +474,7 @@ while true; do
 
 		git cherry-pick "$commit"
 		git status
+
 		getyn "Conflicts to fix?" conflicts
 
 		if $conflicts; then
