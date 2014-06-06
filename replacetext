@@ -8,6 +8,8 @@ declare curstr="$1"
 declare newstr="$2"
 declare file=$3
 
+# echo "argcount: $#"
+
 function usage {
 	echo "replacetext current new file"
 	echo -e "\tcurrent - text to be replaced"
@@ -18,4 +20,4 @@ function usage {
 
 [ $# -ne 3 ] && usage
 
-sed -i "s/"$curstr"/"$newstr"/g" $file
+sed -i "s|"$curstr"|"$newstr"|g" $file
