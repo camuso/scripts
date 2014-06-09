@@ -335,7 +335,7 @@ function check_gitam {
 function apply_patches {
 	local stat=0
 	# for patch in $(ls $indir/*.patch); do
-	for patch in $(ls $indir/*.patch | sort -t'-' -k3 -h); do
+	for patch in $(ls $indir/*.patch | sort -V); do
 		echo "$patch"
 		git am $patch
 		stat=$?

@@ -64,7 +64,7 @@ echo
 
 index=0
 # for i in $(ls "$mldir"/*.patch); do
-for i in $(ls "$mldir"/*.patch  | sort -t'-' -k1 -h); do
+for i in $(ls "$mldir"/*.patch  | sort -V); do
 	mlfiles[index]="$i"
 	echo "${mlfiles[$index]}"
 	let index++
@@ -73,7 +73,7 @@ echo
 
 index=0
 #for i in $(ls "$usdir"/*.patch); do
-for i in $(ls "$usdir"/*.patch  | sort -t'-' -k3 -h); do
+for i in $(ls "$usdir"/*.patch  | sort -V); do
 	usfiles[index]="$i"
 	echo "${usfiles[$index]}"
 	let index++
