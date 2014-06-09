@@ -165,7 +165,9 @@ function git_comment2commitsfile {
 	cat /dev/null > $commitsfile
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
 
-	for srcfile in $(ls "$srcdir"/*.patch  | sort -t'-' -k3 -h); do
+	for srcfile in $(ls "$srcdir"/*.patch  | sort -V); do
+
+		echo $srcfile
 
 		# We're going to assume that the commit number consists of 40
 		# hexadecimal digits, using egrep for extended regex
