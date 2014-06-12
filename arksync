@@ -43,7 +43,10 @@ echo
 for remote in \
 "root@hp-octane-01" \
 "camuso@hp-octane-01" \
-"tcamuso@desktop"
+"tcamuso@desktop" \
+"root@desktop" \
+"tcamuso@dinar" \
+"root@dinar"
 do
 	user="$(echo $remote | cut -d'@' -f1)"
 	hos="$(echo $remote | cut -d'@' -f2)"
