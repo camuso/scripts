@@ -7,6 +7,6 @@ awk -v line=$1 '{
         if (NR != line) {
                 print $0;
         }
-}' $2 > temp
-mv temp $2
+}' $2 > __temp__file__
+mv __temp__file__ $2
 

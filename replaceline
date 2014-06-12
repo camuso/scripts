@@ -1,14 +1,16 @@
 #!/bin/bash
+
 lc=$(cat $3 | wc -l)
 
 [ $1 -gt $lc ] && exit 1
 
+# The line number is 1-based, not zero-based.
+#
 awk -v line=$1 -v new_content="$2" '{
-        if (NR == line) {
-                print new_content;
-        } else {
-                print $0;
-        }
-}' $3 > temp
-mv temp "$3"
-
+	if (NR == line) {
+		print new_content;
+	} else {
+		print $0;
+	}
+}' $3 > __temp__file__
+mv __temp__file__ "$3"
