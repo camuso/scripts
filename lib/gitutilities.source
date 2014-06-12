@@ -133,7 +133,7 @@ function git_repo2commitsfile {
 
 function git_excisecommit {
 	local line="$1"
-	echo "$line" | egrep -o '\b[0-9a-f]{40}\b'
+	echo "$line" | egrep -o '\b[0-9a-f]{7,40}\b'
 }
 
 # git_comment2commitsfile
@@ -165,7 +165,7 @@ function git_comment2commitsfile {
 	cat /dev/null > $commitsfile
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
 
-	for srcfile in $(ls "$srcdir"/*.patch  | sort -V); do
+	for srcfile in $(ls -1 "$srcdir"/*.patch  | sort -V); do
 
 		echo $srcfile
 
@@ -177,26 +177,13 @@ function git_comment2commitsfile {
 		# them and stow them in a scratch file, which we will
 		# delete later.
 		#
-		egrep '\b[0-9a-f]{40}\b' $srcfile > $srcdir/scratch
+		egrep -i 'commit|cherry' $srcfile  | egrep '\b[0-9a-f]{7,40}\b' > $srcdir/scratch
 
 		# If there is more than one line with what appears to be a
 		# commit in it, then ask the user from which line he wants
 		# to extract the commit.
 		#
 		cmtcnt=$(cat $srcdir/scratch | wc -l)
-
-		# Filter out any Message-ID strings.
-		#
-		jdex=1
-		while read line; do
-			scrstr=$(echo "$line" | cut -d' ' -f1)
-			if [ "$scrstr" == "Message-Id:" ]; then
-				ui_deleteline $jdex $srcdir/scratch
-				let cmtcnt--
-				break
-			fi
-			let jdex++
-		done < $srcdir/scratch
 
 		# If there are exactly two commits, then see if they are
 		# identical. If so, no need to query the user for which
@@ -240,9 +227,10 @@ function git_comment2commitsfile {
 		rm -f $srcdir/scratch
 
 		# Only take the first matching instance of what looks like
-		# a commit number.
+		# a commit number. The following magic regex looks for hex
+		# numbers that have between 7 and 40 digits.
 		#
-		commit=$(echo $line | egrep -o '\b[0-9a-f]{40}\b')
+		commit=$(echo $line | egrep -o '\b[0-9a-f]{7,40}\b')
 
 		if [ "$commit" ]; then
 			echo "$commit $index/$filecount" >> $commitsfile
