@@ -8,49 +8,95 @@ cd ~/ark
 
 remotename="$1"
 owneropt=""
+logfile="$HOME/.initmystuff.log"
+
 
 #[ "$remotename" ] && owneropt="--no-same-owner"
 
 # Unpack the archives and save them in the ~/ark directory
 #
-cat /dev/null > ~/.initmystuff.log
-echo
+touch "$logfile"
+cat /dev/null > "$logfile"
+echo >> "$logfile" 2>&1
 
 filelist="$(ls -1 ~/ark)"
 
+echo "***************************" >> "$logfile" 2>&1
+echo "* Unpacking the tar files *" >> "$logfile" 2>&1
+echo "***************************" >> "$logfile" 2>&1
+echo
 for file in $filelist	# <-- NO QUOTES around $filelist!
 do
-	echo "Unpacking $file"
+	echo "---------------" >> "$logfile" 2>&1
+	echo "Unpacking $file" | tee -a "$logfile" 2>&1
 	tar -C $HOME --no-same-owner --keep-newer-files -xvf $file \
-		>> ~/.initmystuff.log 2>&1
+		>> "$logfile" 2>&1
+	echo "* * * * * * * * * " >> "$logfile" 2>&1
+	echo "" >> "$logfile" 2>&1
 done
-echo
+echo "***************************" >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
 
 # Return to $HOME
 #
 cd
 
-# Copy some files out of the unpacked archives into their respective
-# directories, but only if they're newer.
+# Copy etc and rc files out of their archive directories into their respective
+# real directories, but only if they're newer.
 #
-[ -f .bashrc.orig ] || cp -vf .bashrc .bashrc.orig >> .initmystuff.log 2>&1
-[ .bashrc.orig -nt rcbak/.bashrc ] && cp -vf rcbak/.bashrc . >> .initmystuff.log 2>&1
-[ rcbak/.vimrc -nt .vimrc ] && cp -vf rcbak/.vimrc . >> .initmystuff.log 2>&1
-[ bin/.gitconfig -nt .gitconfig ] && cp -vf hints/git/.gitconfig . >> .initmystuff.log 2>&1
+echo "************************************************" >> "$logfile" 2>&1
+echo "* Copying newer files from Backup Dirctories   *" >> "$logfile" 2>&1
+echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
+echo "************************************************" >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
+
+for file in \
+".bashrc" \
+".vimrc" \
+".muttrc"
+do
+	echo "--------------" >> "$logfile" 2>&1
+	echo "Checking $file" >> "$logfile" 2>&1
+	[ -f "$file".orig ] || cp -vf $file $file.orig >> "$logfile" 2>&1
+	[ ~/rcbak/"$file" -nt "$file" ] && cp -vf rcbak/$file . >> "$logfile" 2>&1
+	echo "* * * * * * * * * " >> "$logfile" 2>&1
+	echo "" >> "$logfile" 2>&1
+done
+
+# [ -f .bashrc.orig ] || cp -vf .bashrc .bashrc.orig >> "$logfile" 2>&1
+# [ .bashrc.orig -nt rcbak/.bashrc ] && cp -vf rcbak/.bashrc . >> "$logfile" 2>&1
+# [ rcbak/.vimrc -nt .vimrc ] && cp -vf rcbak/.vimrc . >> "$logfile" 2>&1
+# [ bin/.gitconfig -nt .gitconfig ] && cp -vf hints/git/.gitconfig . >> "$logfile" 2>&1
 
 # name=$(pwd | rev | cut -d'/' -f1 | rev)
 # motherdir=$(pwd | cut -d'/' -f2)
 
 if [ "$remotename" == "root" ]; then
-	[ -f /etc/krb5.orig ] || cp -vf /etc/krb5.conf /etc/krb5.orig >> .initmystuff.log 2>&1
-	[ etcbk/krb5.orig -nt /etcbk/krb5.conf ] && cp -vf etcbk/krb5.conf /etc/. >> .initmystuff.log 2>&1
+	for file in \
+	"hosts" \
+	"krb5.conf"
+	do
+		echo "--------------" >> "$logfile" 2>&1
+		echo "Checking $file" >> "$logfile" 2>&1
+		[ -f /etc/"$file".orig ] || cp -vf /etc/$file /etc/$file.orig >> "$logfile" 2>&1
+		[ ~/etcbk/"$file" -nt /etc/"$file" ] && cp -vf ~/etcbk/$file /etc/$file >> "$logfile" 2>&1
+		echo "* * * * * * * * * " >> "$logfile" 2>&1
+		echo "" >> "$logfile" 2>&1
+	done
 fi
+echo "************************************************" >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
 
 # If we have a "user" it's because were running remotely, so
 # do the remote cleanup.
 #
 if [ "$remotename" ]; then
-	bin/fixup-rsync $remotename >> .initmystuff.log 2>&1
+	echo "*********************" >> "$logfile" 2>&1
+	echo "* Doing Rmote Fixup *" >> "$logfile" 2>&1
+	echo "*********************" >> "$logfile" 2>&1
+	echo "" >> "$logfile" 2>&1
+	bin/fixup-rsync $remotename >> "$logfile" 2>&1
 fi
 cd -
 # set +x
