@@ -1,0 +1,167 @@
+#!/bin/bash
+#
+# log2commit
+#
+#	Create a file containing a list of commits from taken from the "commit"
+#	line in each patch in a directory. The patches were extracted from a
+#	mail client, like mutt.
+#
+# NOTE: The only files that will be parsed are those that have ".patch" at the
+#	end of their names.
+#
+# $1 - directory where the mailed patches were extracted
+# $2 - filename, including path, of the commits file.
+#
+
+usage() {
+	usestr=$(
+cat <<EOF
+
+gitmail2commit <srcdir> <outputfile>
+
+	Parses mailed patch files in the srcdir looking for 40-character
+	hexadecimal commit numbers. Commits are extracted and written to
+	an output file. If more than one unique commit is detected, the
+	user is asked which one s/he wants to write into the output
+	file. Additionally, if a valid 40-character commit cannot be
+	found in the commit log of a patch, then a number consisting of
+	40 zeros is written to the corresponding line in the outputfile
+	asa placeholder and flag for downstream parsing utilities.
+
+	srcdir - a directory containing the mailed patch files. Patch
+	         files are must have ".patch" at the end of their
+		 filenames.
+
+	outputfile - A path/file into which the selected commits
+	             will be written.
+
+EOF
+)
+	echo -e "$usestr\n"
+	exit
+}
+
+# ui_readline
+# Reads one line in a file given the line number.
+# $1 - line number
+# $2 - file to read
+#
+# Returns 1 if the line number exceeds the number of lines in the file.
+#
+# call: line=$(ui_readline line file)
+#
+# "line" will contain the line of text
+# "$?" will contain the status
+#
+ui_readline() {
+
+	# local lc=$(cat $2 | wc -l)
+	# [ $1 -gt $lc ] && return 1
+
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+[ $# -eq 2 ] || usage
+
+srcdir="$1"
+commitsfile="$2"
+srcfile=""
+line=""
+index=1
+jdex
+filecount=$(ls $srcdir/*.patch | wc -l)
+cmtcnt=0
+cmtindex=1
+linenumber=1
+commitparity=0	# 1 if commits are the same
+commitarray
+scrstr
+
+# Initialize the outputfile
+#
+cat /dev/null > $commitsfile
+
+for srcfile in $(ls "$srcdir"/*.patch  | sort -V); do
+
+	echo $srcfile
+
+	# We're going to assume that the commit number consists of 40
+	# hexadecimal digits, using egrep for extended regex
+	# capabilities.
+	#
+	# Capture any the lines that look like they have commits in
+	# them and stow them in a scratch file, which we will
+	# delete later.
+	#
+	egrep -i 'commit|cherry' $srcfile  | egrep '\b[0-9a-f]{7,40}\b' > $srcdir/scratch
+
+	# If there is more than one line with what appears to be a
+	# commit in it, then ask the user from which line he wants
+	# to extract the commit.
+	#
+	cmtcnt=$(cat $srcdir/scratch | wc -l)
+
+	# If there are exactly two commits, then see if they are
+	# identical. If so, no need to query the user for which
+	# one he wants.
+	#
+	if [ $cmtcnt -eq 2 ]; then
+		cmtindex=0
+		while read line; do
+			commitarray[cmtindex]=$(git_excisecommit "$line")
+			let cmtindex++
+		done < $srcdir/scratch
+
+		for ((cmtindex=1; cmtindex < cmtcnt; cmtindex++))
+		do
+			[ "${commitarray[cmtindex]}" == "${commitarray[0]}" ] \
+			&& commitparity=1 || commitparity=0
+		done
+	fi
+
+	if [ $cmtcnt -gt 1 ] && [ $commitparity -eq 0 ]; then
+		echo -e "$attr_bold"
+		echo "There is more than one commit mentioned in patch $index."
+		echo "Please choose one of the following."
+		echo -e "$attr_OFF"
+		for ((cmtindex=1; cmtindex <= cmtcnt; cmtindex++))
+		do
+			line=$(ui_readline $cmtindex $srcdir/scratch)
+			printf "%d - $line\n" $cmtindex
+		done
+		echo -e "$attr_bold"
+		echo -en "Enter the number of your selection: "$attr_OFF""
+		read -n1 linenumber
+		echo
+		[ $linenumber == "q" ] && exit 1
+		[ $linenumber == "x" ] && ui_sh_spawn
+	else
+		linenumber=1
+	fi
+
+	line=$(ui_readline $linenumber $srcdir/scratch)
+	rm -f $srcdir/scratch
+
+	# Only take the first matching instance of what looks like
+	# a commit number. The following magic regex looks for hex
+	# numbers that have between 7 and 40 digits.
+	#
+	commit=$(echo $line | egrep -o '\b[0-9a-f]{7,40}\b')
+
+	if [ "$commit" ]; then
+		echo "$commit $index/$filecount" >> $commitsfile
+	else
+		# If we didn't get a commit in this srcfile, then
+		# indicate that in the commitsfile by printing 40
+		# zeroes where the commit number should be.
+		#
+		printf "%040d $index/$filecount\n" 0 >> $commitsfile
+	fi
+	let index++
+done
+
+
