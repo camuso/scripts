@@ -212,6 +212,24 @@ function promptgetchar {
 # Directory Routines
 #############################
 
+# ui_getfilespec - get a pathname to a file, optionally including directory
+#		   and loop until we get a legitimate file name
+# $1 - prompt
+# $2 - returned filespec
+# 
+function ui_getfilespec {
+	local __prompt__="$1"
+	local __filespec__
+	local __found__=false
+
+	while ! $__found__; do
+		getuser "$__prompt__" __filespec__
+		[ -f "$__filespec__" ] && __found__=true
+	done
+	eval $2=$__filespec__
+	return 0
+}
+
 # ui_chkdir "$string"
 # where string is a string representation of a directory
 # returns
@@ -354,8 +372,8 @@ function ui_replaceline {
 		} else {
 			print $0;
 		}
-	}' $3 > temp
-	mv temp "$3"
+	}' $3 > __temp__file__
+	mv __temp__file__ "$3"
 }
 
 # ui_readline
@@ -402,8 +420,8 @@ function ui_insertline {
 				print new_content;
 			}
 			print $0;
-		}' $3 > temp
-		mv -f temp "$3"
+		}' $3 > __temp__file__
+		mv -f __temp__file__ "$3"
 	fi
 }
 
@@ -423,8 +441,8 @@ function ui_deleteline {
 		if (NR != line) {
 			print $0;
 		}
-	}' $2 > temp
-	mv -f temp $2
+	}' $2 > __temp__file__
+	mv -f __temp__file__ $2
 }
 
 # ui_isdigit
