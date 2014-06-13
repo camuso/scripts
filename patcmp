@@ -10,8 +10,8 @@ declare code_special_exit=2
 declare code_parmcount_err=126
 declare code_filecount_neq=127
 
-declare usdir=$1
-declare mldir=$2
+declare mldir=$1
+declare usdir=$2
 declare spclstr=$3
 declare argc=$#
 
@@ -96,6 +96,39 @@ getpatchnumber() {
 	done
 }
 
+# replace_commit
+#
+# $1 - one-based number of the patch in the patchset
+#
+function replace_commit {
+	local patnum=$1
+	local commit
+	local patcnt
+	local commitslog="$usdir/commits.log"
+	local pfx=$(printf "%04d" $patnum)
+	local index=$((patnum - 1))
+	local stat
+
+	if ! [ -f "$commitslog" ]; then
+		ui_getfilespec "Path/File containing the commits: " commitslog
+	fi
+	patcnt=$(cat $commitslog | wc -l)
+
+	rm -vf ${usfiles[$index]}
+	getuser "New commit ID: " commit
+	ui_replaceline $patnum "$commit $patnum/$patcnt" "$commitslog"
+	git format-patch -1 -k --start-number $patnum $commit -o $usdir
+	stat=$?
+	echo $stat
+
+	# If we could not format the patch, then create an empty
+	# patch with the bad commit id in it.
+	#
+	[ $stat -ne 0 ] && echo -e "\ninvalid commit: $commit\n" > $usdir/$pfx-inv.patch
+
+	usfiles[index]=$(ls $usdir/$pfx-*.patch)
+}
+
 index=0
 while true; do
 
@@ -118,9 +151,10 @@ while true; do
 		index=0
 	fi
 	echo -en "$attr_bold"
-	echo -e  "\ts - skip forward one patch"
-	echo -e  "\tb - skip back one patch"
+	echo -e  "\tf - forward one patch"
+	echo -e  "\tb - back one patch"
 	echo -e  "\tn - prompt for a number for a specific patch"
+	echo -e	 "\tp - replace current upstream patch with a different commit"
 	echo -e  "\tx - exit to a shell"
 	echo -e  "\td - done comparing patches"
 	echo -e  "\tq - quit execution"
@@ -135,16 +169,16 @@ while true; do
 		q )	echo
 			exit $code_special_exit
 			;;
-		s )	echo
+		f )	echo
 			[ $index -lt $mlcount ] && index=$((index + 1))
-			continue
 			;;
 		b )	echo
-			[ $index -gt 0 ] && index=$((index - 1))
-			continue
+			[ $index -gt 0 ] && index=$((index - 2))
 			;;
 		n )	getpatchnumber
-			continue
+			;;
+		p )	replace_commit $((index))	# <- one-based
+			let index-- 			# <- zero-based
 			;;
 		x )	ui_sh_spawn
 			continue
