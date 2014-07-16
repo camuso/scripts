@@ -14,8 +14,8 @@ exec > >(tee ../gitup.log)
 #
 exec 2>&1
 
-echo "cd "$1""
-cd "$1"
+#echo "cd "$1""
+#cd "$1"
 
 echo "git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git"
 git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
@@ -25,6 +25,8 @@ cd linux
 echo "copy the git config file into the working tree"
 cp .git/config .git/config-orig
 cp ~/hints/git/linux.git.config .git/config
+
+[ $1 -eq 1 ] || exit
 
 echo "initialize working git tree"
 git remote update
