@@ -16,6 +16,8 @@ usage() {
 # the default, "root". Else, the first argument is the user, and the
 # second argument is the ip.
 #
+[ $# -lt 2 ] && usage
+
 if [[ $1 == *.* ]]; then
 
 	ip="$1"
