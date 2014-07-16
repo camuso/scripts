@@ -54,11 +54,17 @@ echo >> "$logfile" 2>&1
 for file in \
 ".bashrc" \
 ".vimrc" \
-".muttrc"
+".muttrc" \
+".gitconfig"
 do
 	echo "--------------" >> "$logfile" 2>&1
 	echo "Checking $file" >> "$logfile" 2>&1
-	[ -f "$file".orig ] || cp -vf $file $file.orig >> "$logfile" 2>&1
+
+	# If the file already exists in a new install, make a copy of it
+	# as file.orig. This copy will not be made once the .orig file is
+	# is created,
+	#
+	[ -f "$file" ] && [ -f "$file".orig ] || cp -vf $file $file.orig >> "$logfile" 2>&1
 	[ ~/rcbak/"$file" -nt "$file" ] && cp -vf rcbak/$file . >> "$logfile" 2>&1
 	echo "* * * * * * * * * " >> "$logfile" 2>&1
 	echo "" >> "$logfile" 2>&1
