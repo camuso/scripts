@@ -1,0 +1,24 @@
+#!/bin/bash
+set -v
+ipmikmdir="/lib/modules/ipmi-instr"
+[ -d "$ipmikmdir" ] || mkdir -p $ipmikmdir
+tar -C $ipmikmdir -xvf ipmi-instr-kmods.tgz
+
+for kmod in \
+ipmi_si \
+ipmi_watchdog
+do
+	rmmod -v $kmod
+done
+
+cd $ipmikmdir
+
+for kmod in \
+ipmi_si \
+ipmi_watchdog
+do
+	insmod $kmod.ko
+done
+
+cd -
+set +v

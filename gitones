@@ -1,0 +1,6 @@
+#!/bin/bash
+#
+# does a one-line git log for $1 lines
+#
+echo "git log --oneline | head "$1""
+git log --oneline | head -$1

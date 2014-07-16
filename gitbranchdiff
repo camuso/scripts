@@ -1,0 +1,8 @@
+#!/bin/bash
+#
+# gitbranchdiff branch-1 branch-2 outfile path/to/file
+#
+# Creates a diff on a file $4 between two branches, $1 and $2,
+# and writes it to file $3.
+
+git diff $1 $2 -- $4 >> $3
