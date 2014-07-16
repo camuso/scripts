@@ -1,0 +1,7 @@
+#!/bin/bash
+#
+
+[ -d /sys/module/ipmi_si ] || modprobe -v ipmi_si
+[ -d /sys/module/ipmi_wdt ] && rmmod -v drivers/watchdog/ipmi_wdt.ko
+insmod drivers/watchdog/ipmi_wdt.ko preaction=pre_nmi
+# echo pre_nmi > /sys/module/ipmi_wdt/parameters/preaction

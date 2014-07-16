@@ -1,0 +1,4 @@
+make drivers/watchdog/ipmi_wdt.ko
+rmmod -v drivers/watchdog/ipmi_wdt.ko
+insmod drivers/watchdog/ipmi_wdt.ko
+echo pre_nmi > /sys/module/ipmi_wdt/parameters/preaction
