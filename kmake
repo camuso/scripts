@@ -1,15 +1,30 @@
 #!/bin/bash
 cores=$(cpucount)
 
+
+usage=$(
+cat <<EOF
+$0 [OPTION]
+  	numeric level
+	1 - stop after make
+	2 - stop after make modules_install
+EOF
+)
+
+[ "$1" ] && level=$1 || level=3
+
 echo "make -j$cores 2>&1 | tee ../make.log"
 make -j$cores 2>&1 | tee ../make.log
 makestat=$?
 [ $makestat -eq 0 ] || exit $makestat
+[ $level -eq 1 ] && exit 0
 
 echo "make -j$cores modules_install 2>&1 | tee -a ../make.log"
 make -j$cores modules_install 2>&1 | tee -a ../make.log
 makestat=$?
 [ $makestat -eq 0 ] || exit $makestat
+[ $level -eq 2 ] && exit 0
 
 echo "make -j$cores install 2>&1 | tee -a ../make.log"
 make -j$cores install 2>&1 | tee -a ../make.log
+
