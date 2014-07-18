@@ -1,2 +1,10 @@
 #!/bin/bash
-while true; do ipmitool bmc watchdog get; sleep 1; done
+#
+count=0
+while true; do
+	let count++
+	echo "Cycle Counter: $count"
+	ipmitool bmc watchdog get
+	echo
+	sleep 1
+done
