@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# Use systemd to enable and disable the watchdog timer.
+
+cmdline="$@"
+
+usagestr=$(
+cat <<EOF
+
+$cmdline start [timeout] | stop
+	Start or stop the systemd watchdog timer. The optional timeout
+	argument to start sets the timeout in seconds. The default is
+	60 seconds.
+\0
+EOF
+)
+
+usage (){
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+# Find the line number in /etc/systemd/system.conf that has RuntimeWatchdogSec
+#
+line=$(grep -nm 1 RuntimeWatchdogSec /etc/systemd/system.conf)
+
+# separate the line number from the line, and remove the seconds value
+# from the end of the line.
+#
+lnum=$(echo $line | cut -d':' -f1)
+line=$(echo $line | cut -d':' -f2 | cut -d'=' -f1)
+
+action="$1"
+[ "$2" ] && timeout="$2" || timeout="60"
+
+setwdt() {
+	local newstr="$1"
+	sed -i ""$lnum"s|.*|"$newstr"|" /etc/systemd/system.conf
+	systemctl daemon-reexec
+}
+
+case $action in
+
+	"start" )	setwdt "RuntimeWatchdogSec="$timeout""
+			;;
+	"stop" )	setwdt "#RuntimeWatchdogSec="$timeout""
+			;;
+	* )		usage
+			;;
+esac
+
