@@ -1,4 +1,30 @@
 #!/bin/bash
 
-echo '#!/bin/bash' > "$1"
+echo -e "#!/bin/bash
+#
+# $1
+#
+
+cmdline="$@"" > $1
+
+echo -e "
+usagestr=\$(
+cat <<EOF
+
+$1" >> $1
+
+echo '\0' >> $1
+
+echo "EOF
+)" >> $1
+
+echo -e "
+usage() {
+	echo -e \"\$usagestr\"
+	exit
+}
+
+[ \$# -gt 0 ] || usage
+" >> $1
+
 chmod +x "$1"
