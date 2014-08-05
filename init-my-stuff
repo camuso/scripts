@@ -105,5 +105,8 @@ if [ "$remotename" ]; then
 	bin/fixup-rsync $remotename >> "$logfile" 2>&1
 fi
 cd -
+
+[ "$2" == "install" ] && [ "$remotename" == "root" ] && \
+yum install -y --skip-broken gcc gcc-c++ ncurses-devel rpm-build git git-email cscope ipmitool OpenIPMI watchdog
 # set +x
 exit 0
