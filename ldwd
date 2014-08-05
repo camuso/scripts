@@ -1,10 +1,17 @@
 #!/bin/bash
 #
 
-[ $1 -eq 1 ] && watchdog="drivers/watchdog/ipmi_wdt.ko" && mod="ipmi_wdt"
-[ $1 -eq 2 ] && watchdog="drivers/char/ipmi/ipmi_watchdog.ko" && mod="ipmi_watchdog"
+[ $1 -eq 1 ] && watchdog="drivers/watchdog/ipmi_wdt.ko" \
+		&& mod="ipmi_wdt" \
+		&& altwdt="drivers/char/ipmi/ipmi_watchdog" \
+		&& altmod=""
+
+[ $1 -eq 2 ] && watchdog="drivers/char/ipmi/ipmi_watchdog.ko" \
+		&& mod="ipmi_watchdog" \
+		&& alt="ipmi_wdt"
 
 [ -d /sys/module/ipmi_si ] || modprobe -v ipmi_si
+[ -d /sys/module/$alt ] && rmmod -v $alt.ko
 [ -d /sys/module/$mod ] && rmmod -v $watchdog
 insmod $watchdog preaction=pre_nmi
 # echo pre_nmi > /sys/module/ipmi_wdt/parameters/preaction
