@@ -1,8 +1,12 @@
 #!/bin/bash
 
 set -v
+echo "cp -vf drivers/char/ipmi/ipmi_*.ko /lib/modules/"$(uname -r)"/kernel/drivers/char/ipmi/."
+cp -vf drivers/char/ipmi/ipmi_*.ko /lib/modules/$(uname -r)/kernel/drivers/char/ipmi/.
 modprobe -rv ipmi_devintf
+modprobe -rv ipmi_watchdog
 modprobe -rv ipmi_si
 modprobe -v ipmi_si
 modprobe -v ipmi_devintf
+modprobe -v ipmi_watchdog
 set +v
