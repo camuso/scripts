@@ -7,6 +7,7 @@ cat <<EOF
 $0 [OPTION]
 	-c		- confirm before sending archive
 	-f file		- send only the named archive
+	-i		- install default utilities at destination
 EOF
 )
 
@@ -15,6 +16,7 @@ answer="y"
 file=""
 remote=""
 user=""
+installer=false
 
 rsyncmd="rsync -vat --no-owner --no-group"
 
@@ -23,17 +25,16 @@ function do_exit {
 	exit 1
 }
 
-while getopts "cf:" OPTION; do
+while getopts "cif:" OPTION; do
 	case "$OPTION" in
-		c )
-			query=true
+		c ) 	query=true
 			;;
-		f )
-			file="$OPTARG"
+		f ) 	file="$OPTARG"
 			[ "$file" ] || do_exit
 			;;
-		* )
-			do_exit
+		i )	installer=true
+			;;
+		* ) 	do_exit
 			;;
 	esac
 done
@@ -45,6 +46,7 @@ for remote in \
 "camuso@hp-octane-01" \
 "tcamuso@desktop" \
 "root@desktop" \
+"root@localhost" \
 "tcamuso@dinar" \
 "root@dinar"
 do
@@ -62,6 +64,8 @@ do
 	if [ "$answer" == "y" ]; then
 		echo "connecting with $remote..."
 		$rsyncmd ~/ark/$file $remote:ark/$file
+		$installer && \
+		runremote $user $hos ~/bin/init-my-stuff $user "install" || \
 		runremote $user $hos ~/bin/init-my-stuff $user
 		echo
 	fi
