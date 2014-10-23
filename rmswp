@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# rmswp
+#
+
+cmdline=rmswp
+
+usagestr=$(
+cat <<EOF
+
+rmswp
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+# [ $# -gt 0 ] || usage
+
+echo "find . -type f -name .*.swp -exec rm -v '{}' \;"
+find . -type f -name .*.swp -exec rm -v '{}' \;

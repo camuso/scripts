@@ -1,0 +1,158 @@
+#!/bin/bash
+
+# Author: Prarit Bhargava
+#
+# this script takes a directory of text patches and runs them through a
+# quick review.
+
+# find and detect patches for unsupported arches?
+# interactive mode on/off ?
+# open the patch in vim?
+
+# set to 1 for additional output
+debug=0
+
+# default location of the patches, can be overridden with -d parameter
+DIRECTORY=/tmp/patches
+LINUX_GIT_DIR=/home/prarit/git-kernel/linux
+
+red='\e[0;31m'
+green='\e[0;32m'
+NC='\e[0m' # No Color
+
+function warning () {
+	echo -e "${red}     XXX $@${NC}"
+}
+
+function good () {
+	echo -e "${green}$@${NC}"
+}
+
+function find_patch_errors() {
+
+	rhel_only=0
+	interdiff_removed=0
+	interdiff_added=0
+	kabi=0
+	genksyms=0
+
+	# remove header information, makes testing for ++ and -- easier
+	sed -i '1,3d' $1
+
+	# Find lines added or removed in RHEL but not in upstream.
+	[ $debug -eq 1 ] && egrep -nH --color '^\+{2}[^\+]|^\+{2}$|^\-{2}[^\-]|^\-{2}$' $1
+	echo " "
+	rhel_only=$(egrep -o '^\+{2}[^\+]|^\+{2}$|^\-{2}[^\-]|^\-{2}$' $1 | wc -l)
+	[ $rhel_only -ne 0 ] && warning "There are $rhel_only RHEL only changes in this patch, ++ or --"
+
+	# find linux specific lines by search for +-, lines removed in the patch
+	# that are not removed upstream.
+	interdiff_removed=$(egrep -o '^\+\-|' $1 | wc -l)
+	[ $debug -eq 1 ] && egrep -nH --color -o '^\+\-' $1
+	[ $interdiff_removed -ne 0 ] && warning "There are $interdiff_removed lines removed in this patch, +-"
+
+	# find linux specific lines by search for -+, lines added in the patch
+	# that are not added upstream.
+	interdiff_added=$(egrep -o '^\-\+|' $1 | wc -l)
+	[ $debug -eq 1 ] && egrep -nH --color -o '^\-\+' $1
+	[ $interdiff_added -ne 0 ] && warning "There are $interdiff_added lines added in this patch, -+"
+
+	# Is this a kabi patch?  Look for KABI, and GENKYMS
+	kabi=$(egrep -i kabi $FILENAME | wc -l)
+	if [ $kabi -ne 0 ]; then
+		[ $debug -eq 1 ] && echo " " && egrep -i kabi $FILENAME
+		warning "There is a mention of KABI in this patch"
+	fi
+	genksyms=$(egrep GENKSYMS $FILENAME | wc -l)
+	if [ $genksyms -ne 0 ]; then
+		[ $debug -eq 1 ] && echo " " && egrep GENKSYMS $FILENAME
+		warning "There is a mention of GENKSYMS in this patch"
+	fi
+
+	# patches for other arches?
+
+	# open the patch in vim?
+
+	[ $rhel_only -eq 0 ] && [ $interdiff_removed -eq 0 ] && [ $interdiff_added -eq 0 ] && [ $kabi -eq 0 ] && [ $genksyms -eq 0 ] && good "PATCH OK"
+}
+
+
+#
+#
+# main -- this just creates the diff
+#
+#
+
+# optargs is nice but it only allows character use and not strings ...
+while [[ $# > 1 ]]
+do
+	key="$1"
+	shift
+	case $key in
+		-d|--directory)
+			DIRECTORY="$1"
+			shift;;
+		-u|--upstream)
+			LINUX_GIT_DIR="$1"
+			shift;;
+		*)
+			# unknown option
+			warning "Unknown option ..." && exit 1;;
+	esac
+done
+
+[ ! -d $DIRECTORY ] && warning "$DIRECTORY does not exist?" && exit 1
+[ ! -d $LINUX_GIT_DIR ] && warning "$LINUX_GIT_DIR does not exist?" && exit 1
+cd $DIRECTORY
+
+num_patches=$(ls -1 $DIRECTORY/* | wc -l)
+echo "number of patches = $num_patches"
+upstream_dir=$(mktemp -d)
+echo "temp dir = $upstream_dir"
+
+count=0
+ls -1 | while read FILENAME
+do
+	echo " "
+	echo "examining patch #$count $FILENAME"
+	echo " "
+	# find upstream commit id
+	commit_id=""
+	commit_id=$(egrep -o -m1 '[0-9a-f]{40}\b' $FILENAME)
+	if [ -n "$commit_id" ]; then
+		echo "     linux.git commit_id = $commit_id"
+
+		# is this patch in linux.git?
+		(cd $LINUX_GIT_DIR; git-describe $commit_id >& /dev/null)
+		if [ $? -ne 0 ]; then
+			echo " "
+			warning "COMMIT ID NOT FOUND IN linux.git repo"
+			continue
+		fi
+		# get upstream patch
+		(cd $LINUX_GIT_DIR; git-format-patch --no-signature --quiet -1 $commit_id -o $upstream_dir)
+
+		# remove git signature line from $FILENAME patch
+		# WARNING: this only works for git patches
+		#sed -i '$d' $FILENAME
+		#sed -i '$d' $FILENAME
+
+		# create diff of diffs
+		diff -u $FILENAME $upstream_dir/0001* > $upstream_dir/diff.patch
+
+		# error checking
+		find_patch_errors $upstream_dir/diff.patch
+
+		# clean up this patch
+		[ $debug -eq 1 ] && sleep 20
+		rm -f $upstream_dir/*
+	else
+		warning "NO COMMIT ID FOUND -- skipping..."
+	fi
+
+	((count++))
+done
+
+#cleanup
+rm -rf $upstream_dir
+

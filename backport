@@ -1,0 +1,80 @@
+#!/bin/bash
+#
+# backport
+#
+
+cmdline=backport
+
+usagestr=$(
+cat <<EOF
+
+backport patch commit
+
+	Backports a commit that has been reworked into a different patch.
+	The commit message from the original commit is used to create the
+	new commit message.
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 1 ] || usage
+
+patch=$1
+commit=$2
+
+source ~/bin/lib/ui.source
+
+str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
+str_conflicts="Cherry-picked from the following upstream commit."
+str_cmtmsg="$str_conflicts"
+commitmessagefile="../commitmessage"
+
+git apply -v $patch
+git diff
+read -n1
+git commit -aC "$commit"
+git log -n1
+read -n1
+
+# Create the new commit message in a file consisting of ..
+#	The user of this script as author of the patch
+#	The current date
+#	Descriptor line, with leading whitespace trimmed
+#	Standard commit message (str_cmtmsg in this file)
+#	Original commit message from cherry-picked commit
+#	Signed-off-by: line
+#
+echo -e "\n" > $commitmessagefile
+description=$(git log -n1 "$commit" | head -5 | tail -1)
+#
+# Trim leading whitespace from description line and append
+# it to the commit message. Also append the standard commit
+# message.
+#
+description=$(echo -e $description)
+echo "$description" >> $commitmessagefile
+echo -e "\n" >> $commitmessagefile
+echo -e "$str_cmtmsg" >> $commitmessagefile
+echo -e "\n" >> $commitmessagefile
+#
+# Append the original commit message.
+#
+git log -n1 "$commit" >> $commitmessagefile
+#
+# Amend the commit messsage with you as author, using the
+# commit message file we built in the previous few lines,
+# and a Signed-off-by: ("-s") line.
+#
+git commit -s --amend --reset-author --file=$commitmessagefile
+#
+# Display the new git log message and inquire if it needs more
+# editing.
+#
+git log -n1
+getyn "Edit this commit message?" yes
+$yes && git commit --amend

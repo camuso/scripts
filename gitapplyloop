@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# gitapplyloop
+#
+
+cmdline=gitapplyloop
+
+usagestr=$(
+cat <<EOF
+
+gitapplyloop patchdir <testflag>
+
+	patchdir - directory containing the patches
+	testflag - optional parameter to signal test only.
+	           Can be any char or string.
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 1 ] || usage
+
+source ~/bin/lib/ui.source
+
+patchdir="$1"
+testflag="$2"
+
+patches=$(ls -1 $patchdir)
+
+for patch in $patches; do
+	if [ "$testflag" ]; then
+		echo "git apply --check -v $patchdir/$patch"
+		git apply --check -v $patchdir/$patch
+		stat=$?
+	else
+		echo "git apply -v $patchdir/$patch"
+		git apply -v $patchdir/$patch
+		stat=$?
+	fi
+	if [ $stat -ne 0 ]; then
+		getyn "See the patch?" yes
+		$yes && less $patchdir/$patch
+		getyn "Continue?" yes
+		$yes && continue || break
+	fi
+done
+
