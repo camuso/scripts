@@ -107,6 +107,6 @@ fi
 cd -
 
 [ "$2" == "install" ] && [ "$remotename" == "root" ] && \
-yum install -y --skip-broken gcc gcc-c++ ncurses-devel rpm-build git git-email cscope ipmitool OpenIPMI watchdog
+yum install -y --skip-broken gcc gcc-c++ ncurses-devel rpm-build git git-email cscope ipmitool OpenIPMI watchdog krb5-workstation krb5-libs krb5-auth-dialog
 # set +x
 exit 0
