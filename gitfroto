@@ -32,7 +32,7 @@ declare tostr
 
 # Set default options
 #
-optstr="--pretty=oneline"
+optstr="--oneline"
 
 
 # Count the number of options in the argument string by counting the
