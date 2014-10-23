@@ -403,6 +403,8 @@ echo "cherry-picked commits file: "$cpcommitsfile""
 $b_use_cpcmtlog || cat /dev/null > "$cpcommitsfile"
 $b_use_bpcmtlog || cat /dev/null > "$bpcommitsfile"
 
+$b_use_cpcmtlog && cpcommitscount=$(cat "$cpcommitsfile" | wc -l)
+
 # Initialize this session's counters.
 #
 shellindex=1
@@ -451,11 +453,13 @@ while true; do
 	b_shellcommit=false
 	b_shellcommit_noauto=false
 
+
 	if $b_use_cpcmtlog; then
-		if [ $index -le $n_lines_cpcommitsfile ]; then
+		if [ $index -le $cpcommitscount ]; then
 			commit="$(ui_readline $index $cpcommitsfile)"
 			echo -e ""$attr_bold""$commit""$attr_off""
-			getyn "Use this commit?" yes
+			# getyn "Use this commit?" yes
+			yes=true
 		else
 			echo -e "No more commits in "$attr_bold""$cpcommitsfile""$attr_OFF""
 			yes=false
@@ -537,7 +541,7 @@ while true; do
 
 	if $b_autocommit; then
 
-		git commit -C "$commit"
+		git commit -aC "$commit"
 
 		# Create the new commit message in a file consisting of ..
 		#	The user of this script as author of the patch
@@ -584,8 +588,10 @@ while true; do
 	fi
 
 	[ "$commit" ] && let index++
-	getyn "Cherry-pick another commit?" ans
-	$ans || break
+	if ! $b_use_cpcmtlog; then
+		getyn "Cherry-pick another commit?" ans
+		$ans || break
+	fi
 done
 
 function check_commitsfile {
@@ -605,6 +611,7 @@ function check_commitsfile {
 	return 0
 }
 
+$bppatchcount=0
 if $b_create_patchset; then
 	echo
 	check_commitsfile $bpcommitsfile bppatchcount
