@@ -11,6 +11,8 @@ directory=$1
 function usage() {
 	echo
 	echo "usage: gitfor1pat <directory> <patch-number> <commit>"
+#	echo "usage: gitfor1pat <options> <directory> <patch-number> <commit>"
+#	echo -e "\toptions      - any valid optons for \"git format-patch\""
 	echo -e "\tdirectory    - destination of patch"
 	echo -e "\tpatch-number - number of the patch"
 	echo -e "\tcommit       - commit number of patch to be formatted"
@@ -20,8 +22,10 @@ function usage() {
 	exit 1
 }
 
-[ $# -eq 3 ] || usage
+[ "$1" == "?" ] && usage
+[ $# -lt 3 ] && usage
 
-git format-patch --start-number "$currentnumber" -1 "$commit" -o "$directory"
+echo "git format-patch -s --start-number "$currentnumber" "$commit" -o "$directory""
+git format-patch -s --start-number "$currentnumber" "$commit" -o "$directory"
 # mv "$directory"/"$currentnumber" "$directory"/"$currentnumber".patch
 
