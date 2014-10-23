@@ -41,11 +41,11 @@ done
 
 echo
 
+# "root@hp-octane-01" \
+# "camuso@hp-octane-01" \
 for remote in \
-"root@hp-octane-01" \
-"camuso@hp-octane-01" \
-"tcamuso@desktop" \
-"root@desktop" \
+"tcamuso@laptop" \
+"root@laptop" \
 "root@localhost" \
 "tcamuso@dinar" \
 "root@dinar"
