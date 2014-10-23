@@ -1,15 +1,36 @@
 #!/bin/bash
+#
+# insertline
+#
 
-lc=$(cat $3 | wc -l)
+cmdline=insertline
 
-if [ $1 -gt $lc ]; then
-	echo "$2" >> $3
-else
-	awk -v line=$1 -v new_content="$2" '{
-		if (NR == line) {
-			print new_content;
+usagestr=$(
+cat <<EOF
+
+insertline <line-number> <inserted-text> <path/filename>
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 2 ] || usage
+
+file="$3"
+
+awk -v line=$1 -v text=$2
+	'NR==line {
+		if ($0 == "\n"){
+			print text;
+		} else {
+			print "\n";
+			print text;
 		}
-		print $0;
-	}' $3 > __temp__file__
-	mv __temp__file__ "$3"
-fi
+	}1' $file > tmp
+
+mv -f tmp $file
+
