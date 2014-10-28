@@ -455,18 +455,13 @@ while true; do
 		if [ $index -le $cpcommitscount ]; then
 			commit="$(ui_readline $index $cpcommitsfile)"
 			echo -e ""$attr_bold""$commit""$attr_off""
-			# getyn "Use this commit?" yes
-			yes=true
-		else
-			echo -e "No more commits in "$attr_bold""$cpcommitsfile""$attr_OFF""
-			yes=false
-		fi
-
-		if $yes; then
 			commit="$(echo $commit | cut -d' ' -f1)"
 		else
-			getuser "$str_cpprompt" commit
+			echo -e "No more commits in "$attr_bold""$cpcommitsfile""$attr_OFF""
+			commit=""
+			break
 		fi
+
 	else
 		getuser "$str_cpprompt" commit
 	fi
@@ -519,22 +514,6 @@ while true; do
 		fi
 		commit=""
 	fi
-
-	# If we have an upstream commit hash, and user has not changed it in the
-	# shell, then prompt him for b_autocommit.
-	# Print the instructions on the first pass.
-	#
-	#if [ "$commit" ]; then
-	#	if [ $index -eq 1 ]; then
-	#		echo
-	#		echo -e "\tIf you have not already commited your changes,"
-	#		echo -e "\tthey can be committed for you automatically,"
-	#		echo -e "\tincluding the commit message. You will be given"
-	#		echo -e "\tan opportunity to edit the commit message."
-	#		echo
-	#	fi
-	#	getyn "Want to automatically commit your changes?" b_autocommit
-	#fi
 
 	if $b_autocommit; then
 
@@ -608,7 +587,7 @@ function check_commitsfile {
 	return 0
 }
 
-$bppatchcount=0
+bppatchcount=0
 if $b_create_patchset; then
 	echo
 	check_commitsfile $bpcommitsfile bppatchcount
@@ -626,8 +605,8 @@ if [ $bppatchcount -gt 0 ]; then
 		| cut -d' ' -f6 > $cpcommitsfile
 
 	echo
-	echo -e "\tFollowing are the commits you cherry-picked from upstream to create"
-	echo -e "\tthe backported patch set."
+	echo -e "\tFollowing are the commits you cherry-picked from upstream to"
+	echo -e "\tcreate the backported patch set."
 	echo
 	cat "$cpcommitsfile"
 
