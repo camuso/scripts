@@ -159,11 +159,20 @@ function set_booleans {
 	return 0
 }
 
-function init_default_parameters {
-	outdir="../cpout/"
-	indir="../cpin/"
-	[ -d "$outdir" ] || mkdir -p "$outdir"
-	[ -d "$indir"  ] || mkdir -p "$indir"
+function get_cpcommitsfile {
+	if $b_use_cpcmtlog && ! [ -f "$cpcommitsfile" ]; then
+		ui_getfilespec \
+		"File containing the commits to be cherry-picked: " \
+		cpcommitsfile
+	fi
+}
+
+function get_bpcommitsfile {
+	if $b_use_bpcmtlog && ! [ -f "$bpcommitsfile" ]; then
+		ui_getfilespec \
+		"File to contain the backported commits: " \
+		cpcommitsfile
+	fi
 }
 
 function show_settings {
@@ -176,12 +185,12 @@ $attr_bold
  p  Current subject prefix	: $subjectprefix
  s  Source directory		: $indir
  d  Destination directory	: $outdir
- I  Cherry-pick commits file	: $cpcommitsfile
- O  Backport commits file	: $bpcommitsfile
 
     $attr_under\0Options            $attr_OFF$attr_bold
  1  User supplied cherries	: $b_use_cpcmtlog
- 2  User supplied backports 	: $b_use_bpcmtlog
+    Cherry-pick commits file	: $cpcommitsfile
+ 2  User supplied backports	: $b_use_bpcmtlog
+    Backport commits file	: $bpcommitsfile
  3  Automate commits		: $b_autocommit
  4  Create a patchset		: $b_create_patchset
 
@@ -201,7 +210,6 @@ EOF
 }
 
 function menu_parser {
-	infilecount=$(ls $indir | wc -l)
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
@@ -215,17 +223,11 @@ function menu_parser {
 			;;
 		d )	prj_set_directory "destination" $prj_outdir outdir quiet
 			;;
-		I )	getuser \
-			"File containing the commits to be cherry-picked: " \
-			cpcommitsfile
-			;;
-		O )	getuser \
-			"File to contain the backported commits: " \
-			bpcommitsfile
-			;;
 		1 )	ui_toggle b_use_cpcmtlog
+			get_cpcommitsfile
 			;;
 		2 )	ui_toggle b_use_bpcmtlog
+			get_bpcommitsfile
 			;;
 		3 )	ui_toggle b_autocommit
 			;;
@@ -265,7 +267,7 @@ function menu_loop {
 	outdir=$(prj_get_item $prj_outdir)
 	commitmessagefile=""$outdir"commitmessage"
 	bpcommitsfile=""$outdir"/backported-commits.log"
-	cpcommitsfile=""$indir"/cherry-picked-commits.log"
+	# cpcommitsfile=""$indir"/cherry-picked-commits.log"
 	# mailclient=$(prj_get_item $prj_mailclient)
 	local stat=0
 
@@ -312,9 +314,9 @@ declare index=0
 declare boolcount=0
 declare boolindex=0
 declare b_found_first_bool=false
-declare infilecount=0
 declare gitbranch=$(get_gitbranch)
 declare ui_bools=""
+declare cpcommitsfile=""
 
 # Init ui items
 # -------------
@@ -373,11 +375,6 @@ done
 prj_entries=$index
 prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_entries	# ~/bin
 
-# Init the source and destination directories
-#
-#prj_set_directory "source" $prj_indir indir quiet
-#prj_set_directory "destination" $prj_outdir outdir quiet
-
 # Initialize booleans that are not presented in the ui.
 #
 b_shellcommit=false
@@ -397,13 +394,13 @@ get_booleans
 #
 menu_loop
 
+if $b_use_cpcmtlog; then
+	echo "cherry-picked commits file: $cpcommitsfile"
+	cpcommitscount=$(cat "$cpcommitsfile" | wc -l)
+fi
+
 echo "backported commits file:    "$bpcommitsfile""
-echo "cherry-picked commits file: "$cpcommitsfile""
-
-$b_use_cpcmtlog || cat /dev/null > "$cpcommitsfile"
 $b_use_bpcmtlog || cat /dev/null > "$bpcommitsfile"
-
-$b_use_cpcmtlog && cpcommitscount=$(cat "$cpcommitsfile" | wc -l)
 
 # Initialize this session's counters.
 #
