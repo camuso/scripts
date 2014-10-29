@@ -54,6 +54,7 @@ echo >> "$logfile" 2>&1
 for file in \
 ".bashrc" \
 ".vimrc" \
+".vim" \
 ".muttrc" \
 ".gitconfig"
 do
