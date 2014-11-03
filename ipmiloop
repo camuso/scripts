@@ -1,57 +1,72 @@
 #!/bin/bash
 
-loopcount=1
+loopcount=0
 while [ true ]
 do
+	let loopcount++
 	echo
-	echo "loopcount: $loopcount"
+	echo "start loop: $loopcount"
 	echo "****************************************************"
 	echo "ipmitool chassis selftest"
 	echo "-------------------------"
 	ipmitool chassis selftest
+	sleep 1
 	echo
 	echo "ipmitool chassis status"
 	echo "-----------------------"
 	ipmitool chassis status
+	sleep 1
 	echo
 	echo "ipmitool chassis bootdev"
 	echo "------------------------"
 	ipmitool chassis bootdev
+	sleep 1
 	echo
 	echo "ipmitool chassis bootparam"
 	echo "--------------------------"
 	ipmitool chassis bootparam
+	sleep 1
 	echo
 	echo "ipmitool chassis identify"
 	echo "-------------------------"
 	ipmitool chassis identify
+	sleep 1
 	echo
 	echo "ipmitool chassis policy list"
 	echo "----------------------------"
 	ipmitool chassis policy list
+	sleep 1
 	echo
 	echo "mc selftest"
 	echo "-----------"
 	ipmitool mc selftest
+	sleep 1
 	echo
 	echo "mc getenables"
 	echo "-------------"
 	ipmitool mc getenables
+	sleep 1
 	echo
 	echo "mc info"
 	echo "-------"
 	ipmitool mc info
+	sleep 1
 	echo
 	echo "mc guid"
 	echo "-------"
 	ipmitool mc guid
+	sleep 1
 	echo
 	echo "ipmitool mc getenables system_event_log"
 	echo "---------------------------------------"
 	ipmitool mc getenables system_event_log
+	sleep 1
 	echo
 	echo "ipmitool sdr"
 	echo "------------"
 	ipmitool sdr
-	sleep 1
+	echo
+	echo "end loop: $loopcount"
+	echo "--------------------"
+	sleep 2
 done
