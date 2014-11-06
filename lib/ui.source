@@ -213,20 +213,22 @@ function promptgetchar {
 #############################
 
 # ui_getfilespec - get a pathname to a file, optionally including directory
-#		   and loop until we get a legitimate file name
+#		   and loop until we get a legitimate file name or until
+#		   the user types "q" (quit) or "x" (exit to shell)
 # $1 - prompt
 # $2 - returned filespec
 # 
 function ui_getfilespec {
-	local __prompt__="$1"
-	local __filespec__
-	local __found__=false
+	local prompt="$1"
+	local filespec
+	local found=false
 
-	while ! $__found__; do
-		getuser "$__prompt__" __filespec__
-		[ -f "$__filespec__" ] && __found__=true
+	while ! $found; do
+		getuser "$prompt" filespec
+		[ $"filespec" == "" ] && break;
+		[ -f "$filespec" ] && found=true
 	done
-	eval $2=$__filespec__
+	eval $2=$filespec
 	return 0
 }
 
