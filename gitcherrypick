@@ -7,8 +7,9 @@
 
 VERSION="2.0"
 
-# This script needs a bash library source file
-#
+########################################
+# Library FIles
+########################################
 source ~/bin/lib/ui.source
 source ~/bin/lib/project.source
 source ~/bin/lib/gitutilities.source
@@ -27,38 +28,58 @@ declare rc_run=1	# Run gitcherrypick
 # Functions
 #########################################
 
+#===  FUNCTION  ================================================================
+#          NAME:  print_herald
+#   DESCRIPTION:  Simply print the script's herald defined above
+#    PARAMETERS:  Implicit global, str_herald
+#       RETURNS:  None
+#===============================================================================
 function print_herald {
 	echo -e "$str_herald"
-	# promptgetchar "Press any key to continue ..."
-	# echo -e "$str_herald_2"
-	# promptgetchar "press any key to continue ..."
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  exit_gitcherrypick
+#   DESCRIPTION:  exit this script
+#    PARAMETERS:  None
+#       RETURNS:  None
+#===============================================================================
 function exit_gitcherrypick {
 	set_booleans
 	exit $1
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  get_gitbranch
+#   DESCRIPTION:  Get the current git branch
+#    PARAMETERS:  None
+#       RETURNS:  None
+#===============================================================================
 function get_gitbranch {
 	echo $(git branch | egrep \* | cut -d' ' -f2)
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  set_gitbranch
+#   DESCRIPTION:  Set the branch of the git tree
+#    PARAMETERS:  Implicit global parameter workdir
+#       RETURNS:  None
+#===============================================================================
 function set_gitbranch {
 	local index=1
-	git branch > $outdir/branchlist
+	git branch > $workdir/branchlist
 	echo -e "$attr_bold"
 
 	while read line; do
 		printf "%2d  $line\n" $index
 		let index++
-	done < $outdir/branchlist
+	done < $workdir/branchlist
 
 	echo -e  "$attr_bold"
 	echo -e  "The following commands will be issued before a new branch is checked out."
 	echo -en "$attr_OFF"
 	echo -e  "\tgit am --abort      # Abort any pending git am ops"
 	echo -e  "\tgit checkout -f     # Discard any changes"
-	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
 	echo -e 
 	echo -en "$attr_bold"
 	echo -en "Enter the number corresponding to the branch you want: "
@@ -66,33 +87,23 @@ function set_gitbranch {
 	read  linenumber
 	[ "$linenumber" == "q" ] && exit_patchreview 1
 	[ "$linenumber" == "x" ] && ui_sh_spawn
-	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
+	gitbranch="$(ui_readline $linenumber $workdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git am --abort --quiet
-	# git checkout .
-	# git clean -df
 	git checkout -f "$gitbranch" 2>&1
-	~/bin/gitlog1					# ~/bin/gitlog1
+	~/bin/gitlog1
 }
 
-function init_booleans {
-	for ((index=boolindex; index <= prj_entries; index++)); do
-		prj_set_item $index true
-	done
-}
-
-# exec_boolean
-#
-# Execute a command string and pass the boolean that was
-# used to determine whether the command should be executed.
-# The boolean will be given the value passed by the caller.
-#
-# $1 - The boolean
-# $2 - The boolean's new value
-# $3 - The command line as a strng.
-#
-# Returns the status of the executed command string.
-#
+#===  FUNCTION  ================================================================
+#          NAME:  exec_boolean
+#   DESCRIPTION:  Execute a command string and pass the boolean that was
+#   		  used to determine whether the command should be executed.
+#   		  The boolean will be given the value passed by the caller.
+#    PARAMETERS:  $1 - The boolean by name
+#    		  $2 - The boolean's new value
+#    		  $3 - The command line as a string.
+#       RETURNS:  the status of the executed command string.
+#===============================================================================
 function exec_boolean {
 	argc=$#
 	argv="$@"
@@ -118,13 +129,34 @@ function exec_boolean {
 	return $stat
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  init_booleans
+#   DESCRIPTION:  Initialize all booleans in the ui_bools list to "false"
+#    PARAMETERS:  Global symbols:
+#    			ui_bools
+#    			boolindex
+#    	  CALLS:  prj_st_item
+#       RETURNS:  0
+#===============================================================================
 function init_booleans {
 	local index=$boolindex
 	for bool in $ui_bools; do
-		prj_set_item $index false
+		prj_set_item $index true
+		let index++
 	done
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  get_booleans
+#   DESCRIPTION:  Read the values of the program flow control booleans from the
+#   		  project file. If the value has not been initialized, then init
+#   		  to false.
+#    PARAMETERS:  Global symbols:
+#    			ui_bools
+#    			boolindex
+#    	  CALLS:  prj_get_emptyline
+#       RETURNS:  0
+#===============================================================================
 # get_booleans
 #
 # Read the values of the program flow control booleans from the
@@ -145,11 +177,15 @@ function get_booleans {
 	return 0
 }
 
-# set_booleans
-#
-# Write the current values of the program flow booleans into the
-# project file.
-#
+#===  FUNCTION  ================================================================
+#          NAME:  set_booleans
+#   DESCRIPTION:  Write the current values of the program flow booleans into
+#   		  the project file.
+#    PARAMETERS:  Global symbols:
+#    			ui_bools
+#    			boolindex
+#       RETURNS:  0
+#===============================================================================
 function set_booleans {
 	local index=$boolindex
 	for bool in $ui_bools; do
@@ -159,22 +195,50 @@ function set_booleans {
 	return 0
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  get_cpcommitsfile
+#   DESCRIPTION:  Gets the name of the file that contains the commits to
+#                 be cherrypicked.
+#    PARAMETERS:  Global symbols modified by this function
+#			cpcommitsfile - file containing the commits to be
+#					cherry-picked
+#			b_use_cpcmtlog - boolean set true if the filename
+#					 is not ""
+#       RETURNS:  none
+#===============================================================================
 function get_cpcommitsfile {
-	if $b_use_cpcmtlog && ! [ -f "$cpcommitsfile" ]; then
-		ui_getfilespec \
+	ui_getfilespec \
 		"File containing the commits to be cherry-picked: " \
 		cpcommitsfile
-	fi
+	[ "$cpcommitsfile" != "" ] \
+		&& $b_use_cpcmtlog=true || $b_use_cpcmtlog=false
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  get_bpcommitsfile
+#   DESCRIPTION:  Gets the name of the file that will contain the commits
+#                 that were cherrypicked.
+#    PARAMETERS:  Global symbols modified by this function
+#			bpcommitsfile - file containing the commits to be
+#					cherry-picked
+#			b_use_bpcmtlog - boolean set true if the filename
+#					 is not ""
+#       RETURNS:  none
+#===============================================================================
 function get_bpcommitsfile {
-	if $b_use_bpcmtlog && ! [ -f "$bpcommitsfile" ]; then
-		ui_getfilespec \
-		"File to contain the backported commits: " \
-		cpcommitsfile
-	fi
+	ui_getfilespec \
+		"File to store the commits that were cherry-picked: " \
+		bpcommitsfile
+	[ "$bpcommitsfile" != "" ] \
+		&& $b_use_bpcmtlog=true || $b_use_bpcmtlog=false
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  show_settings
+#   DESCRIPTION:  show the current settings and present the menu options
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
 function show_settings {
 	subjectprefix="$(git config format.subjectprefix)"
 	settings=$(
@@ -183,22 +247,17 @@ $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
  b  Current git branch		: $gitbranch
  p  Current subject prefix	: $subjectprefix
- s  Source directory		: $indir
- d  Destination directory	: $outdir
+ w  Working directory		: $workdir
+ s  Source commits file		: $cpcommitsfile
+ d  Destination commits file	: $bpcommitsfile
 
     $attr_under\0Options            $attr_OFF$attr_bold
- 1  User supplied cherries	: $b_use_cpcmtlog
-    Cherry-pick commits file	: $cpcommitsfile
- 2  User supplied backports	: $b_use_bpcmtlog
-    Backport commits file	: $bpcommitsfile
- 3  Automate commits		: $b_autocommit
- 4  Create a patchset		: $b_create_patchset
+ a  Automate commits		: $b_autocommit
+ c  Create a patchset		: $b_create_patchset
 
     $attr_under\0Control            $attr_OFF$attr_bold
  i  Init to defaults
- S  Clean Source directory
- D  Clean Destination directory
- C  Clean both directories
+ C  Clean working directory
  q  Quit this script
  x  Exit to a shell
  h  Help
@@ -209,6 +268,13 @@ EOF
 	echo -e "$settings"
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  menu_parser
+#   DESCRIPTION:  parse the user input at the menu prompt
+#    PARAMETERS:  none, but lots of side effects
+#       RETURNS:  rc_continue, used by menu_loop to determine whether to
+#       	  continue looping.
+#===============================================================================
 function menu_parser {
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
@@ -219,30 +285,17 @@ function menu_parser {
 			;;
 		p )	git_getsubjectprefix
 			;;
-		s )	prj_set_directory "source" $prj_indir indir quiet
+		w )	prj_set_directory "working" $prj_workdir workdir quiet
 			;;
-		d )	prj_set_directory "destination" $prj_outdir outdir quiet
+		s )	get_cpcommitsfile
 			;;
-		1 )	ui_toggle b_use_cpcmtlog
-			get_cpcommitsfile
+		d )	get_bpcommitsfile
 			;;
-		2 )	ui_toggle b_use_bpcmtlog
-			get_bpcommitsfile
+		a )	ui_toggle b_autocommit
 			;;
-		3 )	ui_toggle b_autocommit
+		c )	ui_toggle b_create_patchset
 			;;
-		4 )	ui_toggle b_create_patchset
-			;;
-		5 )	ui_toggle b_clean_indir
-			;;
-		6 )	ui_toggle b_clean_outdir
-			;;
-		C )	rm -vf "$indir"/*
-			rm -vf "$outdir"/*
-			;;
-		D )	rm -vf "$outdir"/*
-			;;
-		S )	rm -vf "$indir"/*
+		C )	rm -vf "$workdir"/*
 			;;
 		i )	init_booleans
 			get_booleans
@@ -261,14 +314,16 @@ function menu_parser {
 	return $rc_continue
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  menu_loop
+#   DESCRIPTION:  Infinite loop presenting the menu until user quits
+#    PARAMETERS:  none, but lots of side effects
+#       RETURNS:  stat, which is the value returned by the call to menu_parser
+#===============================================================================
 function menu_loop {
 	# get_booleans
-	indir=$(prj_get_item $prj_indir)
-	outdir=$(prj_get_item $prj_outdir)
-	commitmessagefile=""$outdir"commitmessage"
-	bpcommitsfile=""$outdir"/backported-commits.log"
-	# cpcommitsfile=""$indir"/cherry-picked-commits.log"
-	# mailclient=$(prj_get_item $prj_mailclient)
+	workdir=$(prj_get_item $prj_workdir)
+	commitmessagefile=""$workdir"commitmessage"
 	local stat=0
 
 	while $true; do
@@ -293,6 +348,8 @@ print_herald
 #
 b_ui_int_first_getyn=false
 
+# Get the current shell level
+#
 myshlvl=$SHLVL
 
 # Determine if we're at the top of a git tree. If not, exit.
@@ -328,10 +385,7 @@ declare cpcommitsfile=""
 # Add new non-boolean parameters to the top of the list.
 #
 for offset in \
-prj_indir \
-prj_outdir \
-prj_b_use_cpcmtlog \
-prj_b_use_bpcmtlog \
+prj_workdir \
 prj_b_autocommit \
 prj_b_create_patchset \
 ; do
@@ -358,7 +412,7 @@ prj_b_create_patchset \
 		# Create a string that contains all the names of the program's
 		# booleans.
 		#
-		ui_bools=""$ui_bools" "$boolname"" # basically a strcat()
+		ui_bools=""$ui_bools" "$boolname" " # basically a strcat()
 
 		[ "${!boolname}" == " " ] && eval $boolname=false
 		let boolcount++
@@ -415,7 +469,7 @@ str_cmtmsg="$str_conflicts"
 str_cpprompt="\nPress \"Enter\" to skip this step.\nCherrypick from commit: "
 
 # \tThe activity in the new shell will be saved in ...\n\
-# \t\t"$attr_bold""$outdir"/shell_$shellindex.log"$attr_OFF"\n\
+# \t\t"$attr_bold""$workdir"/shell_$shellindex.log"$attr_OFF"\n\
 
 str_shellmsg="
 Spawning a new shell so you can edit conflicts.
@@ -476,7 +530,7 @@ while true; do
 		if $conflicts; then
 			echo -e "$str_shellmsg"
 			git status
-			# bash 3>&2>&1 | tee $outdir/shell_$shell_index
+			# bash 3>&2>&1 | tee $workdir/shell_$shell_index
 			bash
 			retval=$?
 			[ $retval -eq 1 ] && b_shellcommit=true
@@ -596,7 +650,7 @@ if $b_create_patchset; then
 	# at the last commit, so no commit hash is necessary, only
 	# the number of commits to format.
 	#
-	git format-patch -$bppatchcount -o $outdir
+	git format-patch -$bppatchcount -o $workdir
 	echo
 fi
 
@@ -612,7 +666,7 @@ if [ $bppatchcount -gt 0 ]; then
 
 	getyn "Create patches from cherry-picked commits?" yes
 	if $yes; then
-		git_file2patchset $cpcommitsfile $indir
+		git_file2patchset $cpcommitsfile $workdir
 	fi
 fi
 
