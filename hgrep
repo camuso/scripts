@@ -89,14 +89,20 @@ grepversion=$(grep -V | head -1 | tr -cd '[[:digit:]]')
 
 # If the grepversion is 2.6.0 or greater, then it supports '-T'
 #
-if [ $grepversion -ge $mingrepversion ]; then tee='T'; else tee=''; fi
+if [ $grepversion -ge $mingrepversion ]; then topt='T'; else topt=''; fi
 
 execstr="find "$dirspec" -type f -iname "$filespec" \
-	-exec grep -Hns"$tee" --color $optstr "$grepstr" '{}' \\;"
-echo $execstr
+	-exec grep -Hns"$topt" --color $optstr "$grepstr" '{}' \\;"
+#echo $execstr
 
 # $optstr cannot be in quotes, or grep will search for the null string
 # and will assume that the $grepstr is the directory specification.
 #
+#find "$dirspec" -type f -iname "$filespec" \
+#	-exec grep -Hns$te --color $optstr "$grepstr" '{}' \;
+set -x
 find "$dirspec" -type f -iname "$filespec" \
-	-exec grep -Hns$tee --color $optstr "$grepstr" '{}' \;
+	-exec sh -c 'grep -q "$2" $3; if [ $? -eq 0 ]; then echo $3; \
+	grep -ns --color $1 "$2" $3; fi' \
+	sh "$optstr""$topt" "$grepstr" '{}' \;
+set +x
