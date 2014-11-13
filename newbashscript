@@ -1,5 +1,12 @@
 #!/bin/bash
 
+if [ -f "$1" ]; then
+	echo
+	echo "File $1 already exists!"
+	echo
+	exit 1
+fi
+
 echo -e "#!/bin/bash
 #
 # $1
