@@ -4,27 +4,60 @@ cores=$(cpucount)
 
 usage=$(
 cat <<EOF
+
 $0 [OPTION]
-  	numeric level
-	1 - stop after make
-	2 - stop after make modules_install
+  	-L numeric level
+		1 - stop after make
+		2 - stop after make modules_install
+		3 - complete to make install
+
+	-C sparse level
+		1 - sparse only for newly compiled sources
+		2 - sparse for all sources
+
+	-V verbose make
+
 EOF
 )
 
-[ "$1" ] && level=$1 || level=3
+# default settings
+#
+level=3		# set for complete build/install
+sparse=0	# disable sparse
+verbose=""	# disable verbose
 
-echo "make -j$cores 2>&1 | tee ../make.log"
-make -j$cores 2>&1 | tee ../make.log
+while getopts L:C:Vh OPTION; do
+    case "$OPTION" in
+	L ) level=$OPTARG
+		;;
+        C ) sparse=$OPTARG
+		;;
+        V ) verbose="V=1"
+		;;
+        h ) echo "$usage"
+            exit 1
+		;;
+    esac
+done
+
+# Assure that the option values cannot exceed the maximums
+#
+[ $sparse -gt 2 ] && sparse=2
+[ $level -gt 3 ] && level=3
+
+echo "make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log"
+make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log
 makestat=$?
 [ $makestat -eq 0 ] || exit $makestat
 [ $level -eq 1 ] && exit 0
 
-echo "make -j$cores modules_install 2>&1 | tee -a ../make.log"
-make -j$cores modules_install 2>&1 | tee -a ../make.log
+echo "make -j$cores $verbose C=$sparse modules_install \
+	2>&1 | tee -a ../make.log"
+make -j$cores modules_install $verbose C=$sparse 2>&1 | tee -a ../make.log
 makestat=$?
 [ $makestat -eq 0 ] || exit $makestat
 [ $level -eq 2 ] && exit 0
 
-echo "make -j$cores install 2>&1 | tee -a ../make.log"
-make -j$cores install 2>&1 | tee -a ../make.log
+echo "make -j$cores $vebose C=$sparse install 2>&1 | tee -a ../make.log"
+make -j$cores $verbose C=$sparse install 2>&1 | tee -a ../make.log
 
