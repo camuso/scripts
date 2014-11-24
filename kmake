@@ -6,17 +6,19 @@ usage=$(
 cat <<EOF
 
 $0 [OPTION]
-  	-L numeric level
+	-l numeric level
 		1 - stop after make
 		2 - stop after make modules_install
 		3 - complete to make install
 
-	-C sparse level
+	-c sparse level
 		1 - sparse only for newly compiled sources
 		2 - sparse for all sources
 
-	-V verbose make
+	-v verbose make
 
+	With no options, kmake will build and install the kernel
+	and kernel modules.
 EOF
 )
 
@@ -26,15 +28,15 @@ level=3		# set for complete build/install
 sparse=0	# disable sparse
 verbose=""	# disable verbose
 
-while getopts L:C:Vh OPTION; do
+while getopts l:c:vh OPTION; do
     case "$OPTION" in
-	L ) level=$OPTARG
+	l ) level=$OPTARG
 		;;
-        C ) sparse=$OPTARG
+	c ) sparse=$OPTARG
 		;;
-        V ) verbose="V=1"
+	v ) verbose="V=1"
 		;;
-        h ) echo "$usage"
+	h ) echo "$usage"
             exit 1
 		;;
     esac
