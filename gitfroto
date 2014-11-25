@@ -9,7 +9,7 @@ function usage {
 	echo -e "\tpath               - optional path or file name"
 	echo
 	echo -e "\tPerforms \"git log\" with default output being"
-	echo -e "\t\"--pretty=oneline\""
+	echo -e "\t\"--oneline\""
 	echo
 	exit
 }
@@ -58,5 +58,7 @@ tostr=$(echo $argstr | cut -d' ' -f $topos)
 #
 [ $((argc - n_opts)) -ge 3 ] && pathspec=$(echo $argstr | cut -d' ' -f $pathpos-)
 
-echo "git log $opstr $fromstr..$tostr -- "${argstr##* }""
+# echo "git log $opstr $fromstr..$tostr -- "${argstr##* }""
+set -x
 git log $optstr $fromstr..$tostr -- $pathspec
+set +x
