@@ -202,16 +202,22 @@ function set_booleans {
 #    PARAMETERS:  Global symbols modified by this function
 #			cpcommitsfile - file containing the commits to be
 #					cherry-picked
-#			b_use_cpcmtlog - boolean set true if the filename
+#			b_use_cpcmtlog - boolean set true
 #					 is not ""
 #       RETURNS:  none
 #===============================================================================
 function get_cpcommitsfile {
-	ui_getfilespec \
-		"File containing the commits to be cherry-picked: " \
-		cpcommitsfile
-	[ "$cpcommitsfile" != "" ] \
-		&& $b_use_cpcmtlog=true || $b_use_cpcmtlog=false
+	getuser "File containing the commits to be cherry-picked: " cpcommitsfile
+
+	if [ $cpcommitsfile ]; then
+		b_use_cpcmtlog=true
+	else
+		b_use_cpcmtlog=false
+		return 1
+	fi
+
+	[ ! -f $cpcommitsfile ] && touch $cpcommitsfile
+	return 0
 }
 
 #===  FUNCTION  ================================================================
@@ -226,11 +232,17 @@ function get_cpcommitsfile {
 #       RETURNS:  none
 #===============================================================================
 function get_bpcommitsfile {
-	ui_getfilespec \
-		"File to store the commits that were cherry-picked: " \
-		bpcommitsfile
-	[ "$bpcommitsfile" != "" ] \
-		&& $b_use_bpcmtlog=true || $b_use_bpcmtlog=false
+	getuser "File to store the commits that were cherry-picked: " bpcommitsfile
+
+	if [ $bpcommitsfile ]; then
+		b_use_bpcmtlog=true
+	else
+		b_use_bpcmtlog=false
+		return 1
+	fi
+
+	[ ! -f $bpcommitsfile ] && touch $bpcommitsfile
+	return 0
 }
 
 #===  FUNCTION  ================================================================
@@ -374,6 +386,9 @@ declare b_found_first_bool=false
 declare gitbranch=$(get_gitbranch)
 declare ui_bools=""
 declare cpcommitsfile=""
+declare bpcommitsfile=""
+declare b_use_cpcmtlog
+declare b_use_bpcmtlog
 
 # Init ui items
 # -------------
@@ -447,6 +462,11 @@ get_booleans
 # Present the ui and get the parameters for the cherry-picks.
 #
 menu_loop
+
+# If user did not give us a cpcommitsfile (cherry-pick commits file), then
+# set b_use_cpcmtlog to false
+#
+[ $cpcommitsfile ] && b_use_cpcmtlog=true || b_use_cpcmtlog=false
 
 if $b_use_cpcmtlog; then
 	echo "cherry-picked commits file: $cpcommitsfile"
