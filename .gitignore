@@ -1,0 +1,17 @@
+temp/
+test/
+coventry/
+recovery/
+.data/
+.bashrc
+.vimrc
+*.prj
+.*.swp
+.*
+.data/patchreview.prj
+extract-html-pre
+togglebit
+chkbit
+getbit
+funcs
+cscope*
