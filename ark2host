@@ -6,11 +6,14 @@
 
 usage=$(
 cat <<EOF
+
 $0 <user@host> [-f file]
 	-f file	- send only the named archive
-	-i		- install default utilities at destination
+	-i install default apps at destination
+	-h help
 
 EOF
+
 )
 
 function do_usage {
@@ -29,14 +32,14 @@ file=""
 user=""
 installer=false
 
-while getopts "if:" OPTION; do
+while getopts "ihf:" OPTION; do
 	case "$OPTION" in
 		f )	file="$OPTARG"
 			[ "$file" ] || do_usage
 			;;
 		i )	installer=true
 			;;
-		* )	do_usage
+		h )	do_usage
 			;;
 	esac
 done
