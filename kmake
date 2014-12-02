@@ -17,6 +17,8 @@ $0 [OPTION]
 
 	-v verbose make
 
+	-h this help screen
+
 	With no options, kmake will build and install the kernel
 	and kernel modules.
 EOF
