@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# init-my-stuff 0.3
+# init-my-stuff 1.0
 # set -x
 
 [ -d ~/ark ] || mkdir ~/ark
@@ -51,33 +51,8 @@ echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
 echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
 
-for file in \
-".bashrc" \
-".vimrc" \
-".vim" \
-".muttrc" \
-".gitconfig"
-do
-	echo "--------------" >> "$logfile" 2>&1
-	echo "Checking $file" >> "$logfile" 2>&1
-
-	# If the file already exists in a new install, make a copy of it
-	# as file.orig. This copy will not be made once the .orig file is
-	# is created,
-	#
-	[ -f "$file" ] && [ -f "$file".orig ] || cp -vf $file $file.orig >> "$logfile" 2>&1
-	[ ~/rcbak/"$file" -nt "$file" ] && cp -vf rcbak/$file . >> "$logfile" 2>&1
-	echo "* * * * * * * * * " >> "$logfile" 2>&1
-	echo "" >> "$logfile" 2>&1
-done
-
-# [ -f .bashrc.orig ] || cp -vf .bashrc .bashrc.orig >> "$logfile" 2>&1
-# [ .bashrc.orig -nt rcbak/.bashrc ] && cp -vf rcbak/.bashrc . >> "$logfile" 2>&1
-# [ rcbak/.vimrc -nt .vimrc ] && cp -vf rcbak/.vimrc . >> "$logfile" 2>&1
-# [ bin/.gitconfig -nt .gitconfig ] && cp -vf hints/git/.gitconfig . >> "$logfile" 2>&1
-
-# name=$(pwd | rev | cut -d'/' -f1 | rev)
-# motherdir=$(pwd | cut -d'/' -f2)
+echo "rsync -vat rcbak/ ." >> "$logfile" 2>&1
+rsync -Pvat rcbak/ . 
 
 if [ "$remotename" == "root" ]; then
 	for file in \
