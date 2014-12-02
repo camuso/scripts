@@ -2,8 +2,66 @@
 #
 # gitup - update all the branches
 #
-# directory of top of git tree is passed as a parameter.
+
+# Default values
 #
+declare path="./"
+declare cfgfile="$HOME/linux.git.config"
+declare b_populate=false
+declare b_branches=false
+declare pwd=$(pwd)
+
+usage=$(
+cat <<EOF
+
+$0 <user@host> [-d:directory -c:config-file -p]
+
+	Clone the linus tree and optionally all the trees and branches in the
+	git config file designated by option -f or ~/linux.git.config
+	by default.
+
+	Invoking with no options simply clones the Linus tree and does not
+	initialize any other branches.
+
+	OPTIONS
+	-d destination directory, default is current directory
+	-c git config file, default is ~/linux.git.config
+	-p fetch and populate all branches in the config file
+	-h help
+\n
+EOF
+
+)
+
+function do_usage {
+	echo -e "$usage"
+	exit 1
+}
+
+while getopts "pd:c:" OPTION; do
+	case "$OPTION" in
+		p )	b_populate=true
+			;;
+		d )	path="$OPTARG"
+			if [ ! -d "$path" ]; then
+				echo -e "\n\t$path is not a valid directory.\n"
+				do_usage
+			fi
+			;;
+		c )	cfgfile="$OPTARG"
+			if [ ! -e "$cfgfile" ]; then
+				echo -e "\n\tFile $cfgfile does not exist.\n"
+				do_usage
+			fi
+			;;
+		* )	do_usage
+			;;
+	esac
+done
+
+argc=$#
+# [ $argc -lt 1 ] && do_usage
+
 
 # Redirect stdout ( > ) into a named pipe ( >() ) running "tee"
 #
@@ -14,55 +72,42 @@ exec > >(tee ../gitup.log)
 #
 exec 2>&1
 
-#echo "cd "$1""
-#cd "$1"
+echo "cd $path"
+cd $path
 
-echo "git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git"
-git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+# Only clone the linus tree if it does not already exist.
+#
+if [ ! -d linux ]; then
+	echo "Top of Linus tree will be in $path/linux"
+	echo "git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git"
+	git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+fi
 
-cd linux
+if $b_populate; then
+	cd linux
 
-echo "copy the git config file into the working tree"
-cp .git/config .git/config-orig
-cp ~/hints/git/linux.git.config .git/config
-
-[ $1 -eq 1 ] || exit
-
-echo "initialize working git tree"
-git remote update
-
-echo "git clean -df"
-git clean -df
-
-while read line; do
-	[ "${line:0:7}" != "[branch" ] && continue
-	branch="$(echo "$line" | cut -d'"' -f2)"
-	echo "================================================================="
-	echo "git checkout -f "$branch""
-	git checkout -b "$branch"
-	stat=$?
-	echo "-----------------------------------------------------------------"
-	[ $stat -ne 0 ] && continue
-	echo "git pull"
-	git pull
-	echo
-	git log -1 "$branch" | head -6
-	branchcommit="$(git log -1 --oneline "$branch")"
-	testbranch="$branch"".test"
-	testcommit="$(git log -1 --oneline "$testbranch")"
-	git branch | grep "$testbranch"
-	if [ $? -eq 0 ] && [ "$testcommit" != "$branchcommit" ]; then
-		echo "-----------------------------------------------------------------"
-		echo "Update the test branch."
-		echo -e "\tgit branch -D "$testbranch""
-		git branch -D "$testbranch"
-		echo -e "\tgit checkout -b "$testbranch""
-		git checkout -b "$testbranch"
-		git log -1 "$branch" | head -6
+	if [ ! -f $cfgfile ]; then
+		echo "$cfgfile does not exist. Cannot populate branches."
+		echo
+		exit 1
 	fi
-	echo
-done < .git/config
 
-cd -
+	printf "\ngit config file is $cfgfile\n\n"
+
+	echo "copy the git config file into the working tree"
+	mv .git/config .git/config-orig
+	cp $cfgfile .git/config
+
+	echo "initialize working git tree"
+	git remote update
+
+	echo "git clean -df"
+	git clean -df
+	cd -
+fi
+
+cd $pwd
+pwd
+echo
 exit 0
 
