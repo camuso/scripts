@@ -207,26 +207,18 @@ function set_booleans {
 #       RETURNS:  none
 #===============================================================================
 function get_cpcommitsfile {
-	getuser "File containing the commits to be cherry-picked: " cpcommitsfile
-
-	if [ $cpcommitsfile ]; then
-		b_use_cpcmtlog=true
-	else
-		b_use_cpcmtlog=false
-		return 1
-	fi
-
-	[ ! -f $cpcommitsfile ] && touch $cpcommitsfile
-	return 0
+	ui_getfilespec "File containing the commits to be cherry-picked: " \
+		cpcommitsfile
+	return $?
 }
 
 #===  FUNCTION  ================================================================
 #          NAME:  get_bpcommitsfile
-#   DESCRIPTION:  Gets the name of the file that will contain the commits
-#                 that were cherrypicked.
+#   DESCRIPTION:  Gets the name of the file that will contain the new commits
+#                 resulting from those that were cherry-picked.
 #    PARAMETERS:  Global symbols modified by this function
-#			bpcommitsfile - file containing the commits to be
-#					cherry-picked
+#			bpcommitsfile - file containing the new commits resulting
+#					from those that were cherry-picked
 #			b_use_bpcmtlog - boolean set true if the filename
 #					 is not ""
 #       RETURNS:  none
@@ -674,7 +666,7 @@ if $b_create_patchset; then
 	echo
 fi
 
-if [ $bppatchcount -gt 0 ]; then
+if [ $bppatchcount -gt 0 ] && [ $cpcommitsfile ]; then
 	git log --reverse -n$bppatchcount | grep "    commit" \
 		| cut -d' ' -f6 > $cpcommitsfile
 
