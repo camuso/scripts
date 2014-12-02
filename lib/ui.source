@@ -222,14 +222,15 @@ function ui_getfilespec {
 	local prompt="$1"
 	local filespec
 	local found=false
+	local retval=0
 
 	while ! $found; do
 		getuser "$prompt" filespec
-		[ $"filespec" == "" ] && break;
-		[ -f "$filespec" ] && found=true
+		[ ! $filespec ] && break && retval=1
+		[ -f "$filespec" ] && found=true && retval=0
 	done
 	eval $2=$filespec
-	return 0
+	return $retval
 }
 
 # ui_chkdir "$string"
