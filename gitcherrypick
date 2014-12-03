@@ -207,9 +207,12 @@ function set_booleans {
 #       RETURNS:  none
 #===============================================================================
 function get_cpcommitsfile {
+	local stat
 	ui_getfilespec "File containing the commits to be cherry-picked: " \
 		cpcommitsfile
-	return $?
+	stat=$?
+	prj_set_item $prj_cpcommits $cpcommitsfile
+	return $stat
 }
 
 #===  FUNCTION  ================================================================
@@ -228,12 +231,15 @@ function get_bpcommitsfile {
 
 	if [ $bpcommitsfile ]; then
 		b_use_bpcmtlog=true
+		echo true
 	else
 		b_use_bpcmtlog=false
+		echo false
 		return 1
 	fi
 
 	[ ! -f $bpcommitsfile ] && touch $bpcommitsfile
+	prj_set_item $prj_bpcommits $bpcommitsfile
 	return 0
 }
 
@@ -328,6 +334,8 @@ function menu_loop {
 	# get_booleans
 	workdir=$(prj_get_item $prj_workdir)
 	commitmessagefile=""$workdir"commitmessage"
+	cpcommitsfile=$(prj_get_item $prj_cpcommits)
+	bpcommitsfile=$(prj_get_item $prj_bpcommits)
 	local stat=0
 
 	while $true; do
@@ -393,6 +401,8 @@ declare b_use_bpcmtlog
 #
 for offset in \
 prj_workdir \
+prj_cpcommits \
+prj_bpcommits \
 prj_b_autocommit \
 prj_b_create_patchset \
 ; do
