@@ -475,8 +475,12 @@ if $b_use_cpcmtlog; then
 	cpcommitscount=$(cat "$cpcommitsfile" | wc -l)
 fi
 
+# If the user provides a bpcommits file to contain the new commits
+# created by cherrypicking into # the current git tree, then be sure the
+# file is empty.
+#
 echo "backported commits file:    "$bpcommitsfile""
-$b_use_bpcmtlog || cat /dev/null > "$bpcommitsfile"
+$b_use_bpcmtlog && cat /dev/null > "$bpcommitsfile"
 
 # Initialize this session's counters.
 #
