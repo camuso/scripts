@@ -1,0 +1,118 @@
+#!/bin/bash
+#
+# gitamendcommit
+#
+
+source ~/bin/lib/ui.source
+
+cmdline=gitamendcommit
+commitmessagefile="../commitmessagefile"
+bpcommitsfile="../bpcommits.log"
+str_cmtmsg="Backported from the following upstream commit."
+
+usagestr=$(
+cat <<EOF
+gitamendcommit
+	
+	Takes no arguments.
+	Amends the topmost commit, appending the original commit to the 
+	new commit preceded by the following comment.
+
+	"$str_cmtmsg"
+
+	The committer will be changed to the user, the date will be changed
+	to the current date, and the user\'s Signed-off-by: signature will
+	be appended to the very end of it all.
+
+	The user will be given an opportunity to edit the commit log before
+	the commit is completed.
+\0
+EOF
+)
+
+usage() {
+	echo -e "\n$usagestr\n"
+	exit 1
+}
+
+[ $# -gt 0 ] && usage
+
+
+# This doesn't do anything yet ...
+#
+function show_settings {
+	subjectprefix="$(git config format.subjectprefix)"
+	settings=$(
+cat <<EOF
+$attr_bold
+    $attr_under\0Environment        $attr_OFF$attr_bold
+ b  Current git branch		: $gitbranch
+ p  Current subject prefix	: $subjectprefix
+ w  Working directory		: $workdir
+ s  Source commits file		: $cpcommitsfile
+ d  Destination commits file	: $bpcommitsfile
+
+    $attr_under\0Options            $attr_OFF$attr_bold
+ a  Automate commits		: $b_autocommit
+ c  Create a patchset		: $b_create_patchset
+
+    $attr_under\0Control            $attr_OFF$attr_bold
+ i  Init to defaults
+ C  Clean working directory
+ q  Quit this script
+ x  Exit to a shell
+ h  Help
+ r  Run
+$attr_OFF
+EOF
+)
+	echo -e "$settings"
+}
+
+# Create the new commit message in a file consisting of ..
+#	The user of this script as author of the patch
+#	The current date
+#	Descriptor line, with leading whitespace trimmed
+#	Standard commit message (str_cmtmsg in this file)
+#	Original commit message from cherry-picked commit
+#	Signed-off-by: line
+#
+echo -e "\n" > $commitmessagefile
+description=$(git log -n1 | head -5 | tail -1)
+#
+# Trim leading whitespace from description line and append
+# it to the commit message. Also append the standard commit
+# message.
+#
+description=$(echo -e $description)
+echo "$description" >> $commitmessagefile
+echo -e "\n" >> $commitmessagefile
+echo -e "$str_cmtmsg" >> $commitmessagefile
+echo -e "\n" >> $commitmessagefile
+#
+# Append the original commit message.
+#
+git log -n1 >> $commitmessagefile
+#
+# Amend the commit messsage with you as author, using the
+# commit message file we built in the previous few lines,
+# and a Signed-off-by: ("-s") line.
+#
+git commit -s --amend --reset-author --file=$commitmessagefile
+#
+# Display the new git log message and inquire if it needs more
+# editing.
+#
+git log -n1
+
+yes=true
+
+while $yes; do
+	getyn "Edit this commit message?" yes
+	$yes && git commit --amend
+done
+
+# Write the new commit into the backport commits file.
+#
+#git log -n1 --oneline >> "$bpcommitsfile"
+
