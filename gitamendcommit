@@ -13,9 +13,9 @@ str_cmtmsg="Backported from the following upstream commit."
 usagestr=$(
 cat <<EOF
 gitamendcommit
-	
-	Takes no arguments.
-	Amends the topmost commit, appending the original commit to the 
+
+	Takes optional commit as an argument.
+	Amends the topmost commit, appending the original commit to the
 	new commit preceded by the following comment.
 
 	"$str_cmtmsg"
@@ -35,8 +35,7 @@ usage() {
 	exit 1
 }
 
-[ $# -gt 0 ] && usage
-
+[ "$1" == "-h" ] && usage
 
 # This doesn't do anything yet ...
 #
@@ -77,8 +76,10 @@ EOF
 #	Original commit message from cherry-picked commit
 #	Signed-off-by: line
 #
+
+commit=$1
 echo -e "\n" > $commitmessagefile
-description=$(git log -n1 | head -5 | tail -1)
+description=$(git log -n1 $commit | head -5 | tail -1)
 #
 # Trim leading whitespace from description line and append
 # it to the commit message. Also append the standard commit
@@ -92,7 +93,7 @@ echo -e "\n" >> $commitmessagefile
 #
 # Append the original commit message.
 #
-git log -n1 >> $commitmessagefile
+git log -n1 $commit >> $commitmessagefile
 #
 # Amend the commit messsage with you as author, using the
 # commit message file we built in the previous few lines,
