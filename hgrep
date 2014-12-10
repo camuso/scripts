@@ -89,7 +89,7 @@ grepversion=$(grep -V | head -1 | tr -cd '[[:digit:]]')
 
 # If the grepversion is 2.6.0 or greater, then it supports '-T'
 #
-if [ $grepversion -ge $mingrepversion ]; then topt='T'; else topt=''; fi
+if [ $grepversion -ge $mingrepversion ]; then topt='-T'; else topt=''; fi
 
 execstr="find "$dirspec" -type f -iname "$filespec" \
 	-exec grep -Hns"$topt" --color $optstr "$grepstr" '{}' \\;"
