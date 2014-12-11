@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# gitamnumbered
+#
+
+cmdline=gitamnumbered
+
+usagestr=$(
+cat <<EOF
+
+gitamnumbered number
+
+	\"git am --3way\" numbered files starting with value of number argument.
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr\n"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+[ "$1" == "-h" ] && usage
+
+for file in $(ls -1 ../backports/*.patch); do
+	name=$(basename ${file});
+	[ ${name:2:2} -ge $1 ] && git am -3 $file;
+done
