@@ -3,14 +3,27 @@
 
 function usage() {
 	echo
-	echo "usage: gitcommit2tag COMMIT"
-	echo -e "\tcommand: git tag --contains COMMIT"
+	echo "usage: gitcommit2tag COMMIT [full]"
+	echo
+	echo -e "\tFinds the first few tags that include the commit"
+	echo -e "\tWith \"full\" option, finds all tags that include the commit"
+	echo -e "\tcommand: git tag --contains COMMIT [ | head -4 ]"
 	echo
 	exit
 }
 
 [ $# -ne 1 ] && usage
 
-echo "git tag --contains "$1""
-git tag --contains "$1"
+if [ "$2" == "full" ]; then
+	set -x
+	git tag --contains $1
+	set +x
+else
+	set -x
+	git tag --contains $1 | head -4
+	set +x
+fi
+
+#echo "git tag --contains "$1""
+#git tag --contains "$1"
 
