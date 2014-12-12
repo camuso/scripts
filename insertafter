@@ -1,0 +1,36 @@
+#!/bin/bash
+#
+# insertafter
+#
+
+cmdline=insertafter
+
+usagestr=$(
+cat <<EOF
+
+insertafter line-number text-to-insert filename
+
+	line-number    - the line number after which to insert the text.
+	text-to-insert - the text to insert
+	filename       - file to act on
+
+	Newlines \\\n must be escaped, so \\\\\\\n.
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 3 ] || usage
+
+insertafter ()
+{
+    local linenumber=$1;
+    local text="$2";
+    local filename=$3;
+    sed -e "$linenumber a\\"$text"" $filename
+}
+
