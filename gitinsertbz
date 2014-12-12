@@ -9,6 +9,5 @@
 bznum=`git describe --contains --all HEAD | awk -F "v" ' { print $1 }'`
 BZNUM=$bznum
 
-git filter-branch -f --msg-filter "sed -e '3i\Bugzilla: https://bugzilla.redhat.com/s
-how_bug.cgi?id='${BZNUM}'\n'" origin..HEAD
+git filter-branch -f --msg-filter "sed -e '3i\Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id='${BZNUM}'\n'" origin..HEAD
 
