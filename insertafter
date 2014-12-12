@@ -26,11 +26,7 @@ usage() {
 
 [ $# -eq 3 ] || usage
 
-insertafter ()
-{
-    local linenumber=$1;
-    local text="$2";
-    local filename=$3;
-    sed -e "$linenumber a\\"$text"" $filename
-}
-
+linenumber=$1;
+text="$2";
+filename=$3;
+sed -e "$linenumber a\\"$text"" $filename
