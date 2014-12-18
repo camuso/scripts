@@ -1,0 +1,22 @@
+#!/bin/bash
+#
+# myips
+#
+
+cmdline=myips
+
+usagestr=$(
+cat <<EOF
+
+myips
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] && usage
+ifconfig | grep -w inet  | tr -s ' ' | cut -d' ' -f3

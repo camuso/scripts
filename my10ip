@@ -1,0 +1,22 @@
+#!/bin/bash
+#
+# myip
+#
+
+cmdline=myip
+
+usagestr=$(
+cat <<EOF
+
+myip
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] && usage
+ifconfig | grep inet | grep "10\." | tr -s ' ' | cut -d' ' -f3
