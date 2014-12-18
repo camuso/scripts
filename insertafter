@@ -29,4 +29,4 @@ usage() {
 linenumber=$1;
 text="$2";
 filename=$3;
-sed -e "$linenumber a\\"$text"" $filename
+sed -i -e "$linenumber a\\"$text"" $filename
