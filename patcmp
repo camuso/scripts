@@ -187,7 +187,7 @@ while true; do
 			;;
 	esac
 
-	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
+	vimdiff -m "${mlfiles[$index]}" "${usfiles[$index]}"
 	[ $index -lt $((mlcount -1)) ] && let index++
 	echo
 done
