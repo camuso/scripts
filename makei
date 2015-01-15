@@ -32,6 +32,12 @@ fi
 
 set -x
 find $dirspec -name \*.c -exec sh -c \
-	'stem=$(echo $1 | cut -d'.' -f1); echo $stem; make $stem.i' \
+	'path=$(dirname $1); \
+	file=$(basename $1); \
+	suffix=${file#*.}; \
+	[ "$suffix" != "c" ] && exit; \
+	stem=${file%.*}; \
+	echo -n "$path/$stem.i: "; \
+	make "$path/$stem.i"' \
 	sh '{}' \;
 set +x
