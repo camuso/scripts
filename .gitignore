@@ -8,6 +8,10 @@ recovery/
 *.prj
 .*.swp
 .*
+
+# specific files to ignore.
+# These are dependent on separate git repos
+#
 .data/patchreview.prj
 extract-html-pre
 togglebit
@@ -15,3 +19,5 @@ chkbit
 getbit
 funcs
 cscope*
+test-inspect
+sparse
