@@ -20,5 +20,5 @@ usage() {
 
 # [ $# -gt 0 ] || usage
 
-echo "find . -type f -name .*.swp -exec rm -v '{}' \;"
-find . -type f -name .*.swp -exec rm -v '{}' \;
+echo "find . -type f -name \".*.swp\" -exec rm -v '{}' \;"
+find . -type f -name ".*.swp" -exec rm -v '{}' \;

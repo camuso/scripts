@@ -32,22 +32,22 @@ declare -i gpos
 
 [ "$1" == "?" ] && usage
 
-echo "Number of args: $argc"
+# echo "Number of args: $argc"
 for (( index = 1; index <= $argc; index++ )); do
 	arg="${!index}"
-	echo -n "arg_$index: "$arg""
+	# echo -n "arg_$index: "$arg""
 	if [ "${arg:0:1}" == "-" ]; then
 		optstr="$optstr $arg"
-		echo " options: $optstr"
+		# echo " options: $optstr"
 		let n_opts++
-	else
-		echo
+	# else
+		# echo
 	fi
 done
-echo "Number of opts: $n_opts, Options: $optstr"
+# echo "Number of opts: $n_opts, Options: $optstr"
 
 n_nonopts=$(( $argc - $n_opts))
-echo "Non-option args: $n_nonopts"
+# echo "Non-option args: $n_nonopts"
 
 case $n_nonopts in
 	1 ) 	grepstr="${!argc}"
@@ -59,7 +59,7 @@ case $n_nonopts in
 	* )	usage
 		;;
 esac
-echo "pathspec: $pathspec, grepstr: $grepstr"
+# echo "pathspec: $pathspec, grepstr: $grepstr"
 
 # If the entire path is a directory, then the filespec defaults
 # to the "*" wildcard.
@@ -73,7 +73,7 @@ else
 	filespec="${pathspec##*/}"
 fi
 
-echo "dirspec: $dirspec, filespec: $filespec"
+# echo "dirspec: $dirspec, filespec: $filespec"
 
 # Need to get the grep version, because earlier versions do not support
 # the '-T' option.
@@ -100,9 +100,9 @@ execstr="find "$dirspec" -type f -iname "$filespec" \
 #
 #find "$dirspec" -type f -iname "$filespec" \
 #	-exec grep -Hns$te --color $optstr "$grepstr" '{}' \;
-set -x
+# set -x
 find "$dirspec" -type f -iname "$filespec" \
 	-exec sh -c 'grep -q "$2" $3; if [ $? -eq 0 ]; then echo $3; \
 	grep -ns --color $1 "$2" $3; fi' \
 	sh "$optstr""$topt" "$grepstr" '{}' \;
-set +x
+# set +x

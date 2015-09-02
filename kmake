@@ -44,6 +44,8 @@ while getopts l:c:vh OPTION; do
     esac
 done
 
+START1=$(date +%s)
+
 # Assure that the option values cannot exceed the maximums
 #
 [ $sparse -gt 2 ] && sparse=2
@@ -52,16 +54,41 @@ done
 echo "make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log"
 make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log
 makestat=$?
-[ $makestat -eq 0 ] || exit $makestat
+
+END=$(date +%s)
+DIFF=$(( $END - $START1 ))
+minutes=$(( $DIFF / 60 ))
+seconds=$(( $DIFF % 60 ))
+echo
+echo "Elapsed time: $minutes : $seconds"
+echo
+
 [ $level -eq 1 ] && exit 0
+[ $makestat -eq 0 ] || exit $makestat
 
 echo "make -j$cores $verbose C=$sparse modules_install \
 	2>&1 | tee -a ../make.log"
 make -j$cores modules_install $verbose C=$sparse 2>&1 | tee -a ../make.log
 makestat=$?
-[ $makestat -eq 0 ] || exit $makestat
+
+END=$(date +%s)
+DIFF=$(( $END - $START1 ))
+minutes=$(( $DIFF / 60 ))
+seconds=$(( $DIFF % 60 ))
+echo
+echo "Elapsed time: $minutes : $seconds"
+echo
+
 [ $level -eq 2 ] && exit 0
+[ $makestat -eq 0 ] || exit $makestat
 
 echo "make -j$cores $vebose C=$sparse install 2>&1 | tee -a ../make.log"
 make -j$cores $verbose C=$sparse install 2>&1 | tee -a ../make.log
 
+END=$(date +%s)
+DIFF=$(( $END - $START1 ))
+minutes=$(( $DIFF / 60 ))
+seconds=$(( $DIFF % 60 ))
+echo
+echo "Elapsed time: $minutes : $seconds"
+echo

@@ -680,6 +680,14 @@ if $b_create_patchset; then
 	echo
 fi
 
+ui_sh_backout $myshlvl
+echo
+echo "Done."
+echo
+exit
+
+# code below kept for historical reasons
+#
 if [ $bppatchcount -gt 0 ] && [ $cpcommitsfile ]; then
 	git log --reverse -n$bppatchcount | grep "    commit" \
 		| cut -d' ' -f6 > $cpcommitsfile
@@ -695,8 +703,3 @@ if [ $bppatchcount -gt 0 ] && [ $cpcommitsfile ]; then
 		git_file2patchset $cpcommitsfile $workdir
 	fi
 fi
-
-ui_sh_backout $myshlvl
-echo
-echo "Done."
-echo

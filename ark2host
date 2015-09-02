@@ -27,7 +27,7 @@ argc=$#
 remote=${!argc}
 
 sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-rsyncmd="rsync -vat --no-owner --no-group"
+rsyncmd="rsync -Pvat --no-owner --no-group"
 file=""
 user=""
 installer=false

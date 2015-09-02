@@ -3,11 +3,11 @@
 # This script takes a branch and adds a bugzilla line to every backported
 # patch.
 #
-# No arguments are necessary as the bz number is read from the branch name.
-#
+# $1 - hash of the first commit in the series.
 
 bznum=`git describe --contains --all HEAD | awk -F "v" ' { print $1 }'`
 BZNUM=$bznum
+first=$1
 
-git filter-branch -f --msg-filter "sed -e '3i\Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id='${BZNUM}'\n'" origin..HEAD
+git filter-branch -f --msg-filter "sed -e '3i\Bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id='${BZNUM}'\n'" $first..HEAD
 
