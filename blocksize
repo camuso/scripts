@@ -1,3 +1,3 @@
-unalias grep
-dumpe2fs /dev/sdb3 | grep -i 'Block size'
+#!/bin/bash
+dumpe2fs $1 | grep -i 'Block size'
 
