@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# gitprepcommits
+#
+
+cmdline=gitprepcommits
+
+usagestr=$(
+cat <<EOF
+
+gitprepcommits start-ref end-ref <path>
+
+	start-ref - starting commit or tag
+	end-ref   - ending commit or tag
+	path      - optional path of driver or facility
+	            default is kernel-wide
+
+Create a list of commits starting at start-ref, ending at end-ref.
+The list is created with the earliest commit first and the most
+recent last using the git --reverse switch. Merges are excluded
+by using the git --no-merges switch.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 1 ] || usage
+
+git log --oneline --no-merges --reverse $1..$2 -- $3
+
