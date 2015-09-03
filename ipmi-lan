@@ -1,0 +1,36 @@
+#!/bin/bash
+
+usage() {
+	echo
+	echo "ipmi-lan - Send an ipmitool command to a host's ipmi over LAN."
+	echo
+	echo "ipmi-lan [user] ip cmd [args...]"
+	echo
+	echo -e "\tuser - Optional. Default user is root, so if this argument"
+	echo -e "\t       is omitted, the ipmi user will be root."
+	echo
+	exit 1
+}
+
+# If the first argument is an ip (contains a '.'), then the user is
+# the default, "root". Else, the first argument is the user, and the
+# second argument is the ip.
+#
+[ $# -lt 2 ] && usage
+
+if [[ $1 == *.* ]]; then
+
+	ip="$1"
+	user="root"
+	shift
+	cmd="$@"
+else 
+	ip="$2"
+	user="$1"
+	shift
+	shift
+	cmd="$@"
+fi
+
+echo "ipmitool -I lanplus -U $user -H $ip -P '' $cmd"
+ipmitool -I lanplus -U $user -H $ip -P '' $cmd
