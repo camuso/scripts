@@ -43,6 +43,10 @@ for filename in $(ls | sort -t'_' -k2 -h); do
 	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
 	subject=$(echo "$subject" | sed "s/'//g")
 	#
+	# remove any leading whitespace
+	#
+	subject="$(echo -e "$subject" | sed -e 's/^[[:space:]]*//')"
+	#
 	# Replace spaces, slashes, colons and semicolons with hyphens
 	#
 	subject=$(echo "$subject" | sed "s\[/:; ]\-\g")
