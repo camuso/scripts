@@ -1,6 +1,5 @@
 #!/bin/bash
-cores=$(cpucount)
-
+cores=$(cpusockets)
 
 usage=$(
 cat <<EOF
@@ -16,7 +15,7 @@ $0 [OPTION]
 		2 - sparse for all sources
 
 	-v verbose make
-
+	-k make kabitools database
 	-h this help screen
 
 	With no options, kmake will build and install the kernel
@@ -27,10 +26,11 @@ EOF
 # default settings
 #
 level=3		# set for complete build/install
-sparse=0	# disable sparse
-verbose=""	# disable verbose
+sparse=0	# no sparse
+verbose=""	# no verbose
+kabi=""		# no kabitools database
 
-while getopts l:c:vh OPTION; do
+while getopts l:c:vkh OPTION; do
     case "$OPTION" in
 	l ) level=$OPTARG
 		;;
@@ -38,11 +38,15 @@ while getopts l:c:vh OPTION; do
 		;;
 	v ) verbose="V=1"
 		;;
+	k ) kabi="K=1"
+		;;
 	h ) echo "$usage"
             exit 1
 		;;
     esac
 done
+
+START1=$(date +%s)
 
 # Assure that the option values cannot exceed the maximums
 #
@@ -50,18 +54,43 @@ done
 [ $level -gt 3 ] && level=3
 
 echo "make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log"
-make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log
+make -j$cores $verbose C=$sparse $kabi 2>&1 | tee ../make.log
 makestat=$?
-[ $makestat -eq 0 ] || exit $makestat
+
+END=$(date +%s)
+DIFF=$(( $END - $START1 ))
+minutes=$(( $DIFF / 60 ))
+seconds=$(( $DIFF % 60 ))
+echo
+echo "Elapsed time: $minutes : $seconds"
+echo
+
 [ $level -eq 1 ] && exit 0
+[ $makestat -eq 0 ] || exit $makestat
 
 echo "make -j$cores $verbose C=$sparse modules_install \
 	2>&1 | tee -a ../make.log"
 make -j$cores modules_install $verbose C=$sparse 2>&1 | tee -a ../make.log
 makestat=$?
-[ $makestat -eq 0 ] || exit $makestat
+
+END=$(date +%s)
+DIFF=$(( $END - $START1 ))
+minutes=$(( $DIFF / 60 ))
+seconds=$(( $DIFF % 60 ))
+echo
+echo "Elapsed time: $minutes : $seconds"
+echo
+
 [ $level -eq 2 ] && exit 0
+[ $makestat -eq 0 ] || exit $makestat
 
 echo "make -j$cores $vebose C=$sparse install 2>&1 | tee -a ../make.log"
 make -j$cores $verbose C=$sparse install 2>&1 | tee -a ../make.log
 
+END=$(date +%s)
+DIFF=$(( $END - $START1 ))
+minutes=$(( $DIFF / 60 ))
+seconds=$(( $DIFF % 60 ))
+echo
+echo "Elapsed time: $minutes : $seconds"
+echo
