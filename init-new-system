@@ -41,7 +41,11 @@ user="$(echo "$remote" | cut -d'@' -f1)"
 hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
-rsync -vat ~/ark/$file $remote:ark/$file
+if [ "$file" ] ; then
+	rsync -Pvat ~/ark/$file $remote:ark/$file
+else
+	rsync -Pvat ~/ark/bin.tgz ~/ark/rcbak.tgz ~/ark/etcbk.tgz $remote:ark/.
+fi
 runremote $user $hos ~/bin/init-my-stuff $user
 echo
 exit
