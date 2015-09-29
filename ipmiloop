@@ -62,6 +62,11 @@ do
 	ipmitool mc getenables system_event_log
 	sleep 1
 	echo
+	echo "ipmitool mc lan print"
+	echo "---------------------"
+	ipmitool lan print
+	sleep 1
+	echo
 	echo "ipmitool sdr"
 	echo "------------"
 	ipmitool sdr
