@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# check to see if this data exists.
+cat /proc/cpuinfo | grep "physical id" >& /dev/null
+[ $? -eq 1 ] && exit
+
+num_sockets=$(cat /proc/cpuinfo | grep "physical id" | awk -F ":" ' { print $2 } ' | sort -u | wc -l)
+#echo "number of sockets = $num_sockets"
+
+# these two values are per socket
+num_physical_cores=$(cat /proc/cpuinfo | grep -m 1 "cpu cores" | awk -F ":" ' { print $2 } ')
+#echo "number of physical cores/socket = $num_physical_cores"
+num_ht_threads=$(cat /proc/cpuinfo | grep -m 1 "siblings" | awk -F ":" ' { print $2 } ')
+#echo "number of threads/socket = $num_ht_threads"
+
+total_physical_cores=$(($num_physical_cores * $num_sockets))
+total_ht_threads=$(($num_ht_threads * $num_sockets))
+#echo "There are $num_sockets sockets with $total_physical_cores cores and $total_ht_threads threads."
+echo $total_physical_cores
+#echo "Using -j$total_physical_cores to compile"
+#echo "%_smp_mflags -j$total_physical_cores" > ~/.rpmmacros

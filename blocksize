@@ -1,0 +1,3 @@
+#!/bin/bash
+dumpe2fs $1 | grep -i 'Block size'
+

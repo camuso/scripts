@@ -1,0 +1,79 @@
+#!/bin/bash
+
+ip=$1
+
+loopcount=0
+# while [ true ]
+# do
+	let loopcount++
+	echo
+	echo "start loop: $loopcount"
+	echo "****************************************************"
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a chassis selftest"
+	echo "-------------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a chassis selftest
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a chassis status"
+	echo "-----------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a chassis status
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a chassis bootdev"
+	echo "------------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a chassis bootdev
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a chassis bootparam"
+	echo "--------------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a chassis bootparam
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a chassis identify"
+	echo "-------------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a chassis identify
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a chassis policy list"
+	echo "----------------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a chassis policy list
+	sleep 1
+	echo
+	echo "-I lanplus -H $ip -U root -P=password -a mc selftest"
+	echo "-----------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a mc selftest
+	sleep 1
+	echo
+	echo "-I lanplus -H $ip -U root -P=password -a mc getenables"
+	echo "-------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a mc getenables
+	sleep 1
+	echo
+	echo "-I lanplus -H $ip -U root -P=password -a mc info"
+	echo "-------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a mc info
+	sleep 1
+	echo
+	echo "-I lanplus -H $ip -U root -P=password -a mc guid"
+	echo "-------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a mc guid
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a mc getenables system_event_log"
+	echo "---------------------------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a mc getenables system_event_log
+	sleep 1
+	echo
+	echo "ipmitool mc lan print"
+	echo "---------------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a lan print
+	sleep 1
+	echo
+	echo "ipmitool -I lanplus -H $ip -U root -P=password -a sdr"
+	echo "------------"
+	ipmitool -I lanplus -H $ip -U root -P=password -a sdr
+	echo
+	echo "end loop: $loopcount"
+	echo "--------------------"
+	sleep 2
+# done
