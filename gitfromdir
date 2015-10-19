@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# gitfromdir
+#
+
+cmdline=gitfromdir
+
+usagestr=$(
+cat <<EOF
+
+gitfromdir
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+usage=$(
+cat <<EOF
+$0 [OPTION] commithash
+
+Creates a merge of an upstream commit when the directory of one or more
+of the target files has been moved to a different upstream directory.
+
+  -d gitdir - optionial other git repository directory
+EOF
+)
+
+while getopts d: OPTION; do
+    case "$OPTION" in
+
+        d )
+            gitdir="$OPTARG"
+        * )
+            echo "unrecognized option"
+            echo "$usage"
+            exit 1
+    esac
+done
+
+commit=$1
+
+git --git-dir=$gitdir/.git \
+format-patch -k -1 --stdout $commit | \
+git am -3 -k
+
+
