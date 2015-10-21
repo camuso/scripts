@@ -34,12 +34,12 @@ EOF
 while getopts d: OPTION; do
     case "$OPTION" in
 
-        d )
-            gitdir="$OPTARG"
-        * )
-            echo "unrecognized option"
+        d ) gitdir="$OPTARG"
+	    ;;
+        * ) echo "unrecognized option"
             echo "$usage"
             exit 1
+	    ;;
     esac
 done
 
