@@ -1,18 +1,39 @@
 #!/bin/bash
-
-# Extracts all the oneline commits between two revisions whose first
-# line contains the provided string and outputs them to a file.
 #
-# $1 - Earliest Revision string
-# $2 - Latest Revision string
-# $3 - Search string
+# gitrevcommits
+#
 
-rev1="$1"
-rev2="$2"
-str="$3"
+cmdline=gitrevcommits
 
-git log $rev1..$rev2 --oneline | grep -iw "$str" > /tmp/$rev2-commits
+usagestr=$(
+cat <<EOF
 
-echo
-echo -e "Your file is saved in /tmp/$rev2-commits."
-echo
+gitrevcommits commit tree
+
+ Extracts all the oneline commits between two revisions for a given
+ directory tree in reverse order and ouputs them to stdout.
+
+ commit - commit string, e.g. \'commit1..commit2\' or \'commit..\'
+ tree   - directory tree - for whole git tree, simply omit this arg
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 1 ] || usage
+
+
+commit="$1"
+tree="$2"
+
+if [ $tree ]; then
+	git log "$commit" --oneline --no-merges --reverse -- "$tree"
+else
+	git log "$commit" --oneline --no-merges --reverse
+fi
+
