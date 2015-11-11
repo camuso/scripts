@@ -529,11 +529,13 @@ while true; do
 
 	b_shellcommit=false
 	b_shellcommit_noauto=false
+	commit=""
 
 
 	if $b_use_cpcmtlog; then
 		if [ $index -le $cpcommitscount ]; then
 			commit="$(ui_readline $index $cpcommitsfile)"
+			[ "${commit:0:1}" == "#" ] && let index++ && continue
 			echo -e ""$attr_bold""$commit""$attr_off""
 			commit="$(echo $commit | cut -d' ' -f1)"
 		else
@@ -551,7 +553,7 @@ while true; do
 		git cherry-pick "$commit"
 		git status
 
-		getyn "Conflicts to fix?" conflicts
+		getyn "Conflicts to fix or selective cherrypick?" conflicts
 
 		if $conflicts; then
 			echo -e "$str_shellmsg"
@@ -591,8 +593,8 @@ while true; do
 			ui_sh_spawn
 		else
 			echo -e "\tContinuing ..."
+			continue;
 		fi
-		commit=""
 	fi
 
 	if $b_autocommit; then
