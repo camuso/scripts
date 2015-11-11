@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# gitpatchloop
+#
+
+cmdline=gitpatchloop
+
+usagestr=$(
+cat <<EOF
+
+gitpatchloop directory
+
+Go through the patches in a directory one at a time and ask the user if
+he wants the patch applied.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+source ~/bin/lib/ui.source
+b_ui_int_first_getyn=false	# For lib/ui.source
+
+directory="$1"
+
+if [ ! -d "$directory" ]; then
+	echo "$directory is an invalid directory."
+	usage
+fi
+
+for p in $(ls $directory); do
+	echo "$directory/$p"
+	getyn "Apply this patch?" apply
+	$apply && git am $directory/$p
+done
