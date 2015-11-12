@@ -1,11 +1,28 @@
 #!/bin/sh
 
+wait_ten() {
+   echo -n "wait ten seconds"
+   for (( i=0; i<10; i++ )); do
+	echo -n "."
+	sleep 1
+   done
+   echo
+}
+
 set -e
 
-for i in $(seq 0 100); do
-   modprobe ipmi_msghandler
-   modprobe ipmi_si
-   modprobe -r ipmi_si
-   modprobe -r ipmi_msghander
+for i in $(seq 0 10); do
+   echo "Insert ipmi modules"
+   modprobe -v ipmi_msghandler
+   modprobe -v ipmi_si
+   modprobe -v ipmi_watchdog
+   modprobe -v ipmi_poweroff
+   wait_ten
+   echo "Remove ipmi modules"
+   modprobe -rv ipmi_poweroff
+   modprobe -rv ipmi_watchdog
+   modprobe -rv ipmi_si
+   modprobe -rv ipmi_msghandler
+   wait_ten
 done
 echo "If you see this message, the test passed."
