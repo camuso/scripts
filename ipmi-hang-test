@@ -12,17 +12,24 @@ wait_ten() {
 set -e
 
 for i in $(seq 0 10); do
-   echo "Insert ipmi modules"
-   modprobe -v ipmi_msghandler
-   modprobe -v ipmi_si
-   modprobe -v ipmi_watchdog
-   modprobe -v ipmi_poweroff
-   wait_ten
-   echo "Remove ipmi modules"
-   modprobe -rv ipmi_poweroff
-   modprobe -rv ipmi_watchdog
-   modprobe -rv ipmi_si
-   modprobe -rv ipmi_msghandler
+	echo "Insert ipmi modules"
+	modprobe -v ipmi_msghandler
+	modprobe -v ipmi_si
+	modprobe -v ipmi_devintf
+	modprobe -v ipmi_watchdog
+	modprobe -v ipmi_poweroff
+	modprobe -v power_meter
+	modprobe -v acpi_ipmi
+	wait_ten
+
+	echo "Remove ipmi modules"
+	modprobe -rv power_meter
+	modprobe -rv acpi_ipmi
+	modprobe -rv ipmi_poweroff
+	modprobe -rv ipmi_watchdog
+	modprobe -rv ipmi_devintf
+	modprobe -rv ipmi_si
+	modprobe -rv ipmi_msghandler
    wait_ten
 done
 echo "If you see this message, the test passed."
