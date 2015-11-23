@@ -1,0 +1,37 @@
+#!/bin/bash
+#
+# insertfile
+#
+
+cmdline=insertfile
+
+usagestr=$(
+cat <<EOF
+
+insertfile line-number dest-file source-file
+
+Inserts source-file into dest-file into another starting at line-number
+of the dest-file.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 3 ] || usage
+
+linenum=$1
+dest=$2
+src=$3
+declare temp
+declare linecount
+
+linecount=0
+echo -n "" > temp
+
+sed -i ""$linenum"r $src" < $dest $dest
+
