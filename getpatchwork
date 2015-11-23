@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# getpatchwork
+#
+
+cmdline=getpatchwork
+
+usagestr=$(
+cat <<EOF
+
+getpatchwork
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+source ~/bin/lib/ui.source
+
+getuser "Number of patches: " number
+
+for ((index=1; index <= number; index++)); do
+	getuser "Full mbox link: " link
+	wget -q $link
+	name=$(printf "%03d-%03d.patch" $index $number)
+	mv -v index.html $name
+done;
+
