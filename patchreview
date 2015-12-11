@@ -113,6 +113,11 @@ function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index true
 	done
+
+	# set the default to clean directories as false for safety
+	# sake.
+	prj_set_item $prj_b_clean_indir false
+	prj_set_item $prj_b_clean_outdir false
 }
 
 # exec_boolean
@@ -215,6 +220,17 @@ function replace_patch {
 	git_file2patchset "$outdir"/commits.log "$outdir"
 }
 
+function clean_directories {
+	local delquery="Are you sure you want to delete the contents of:"
+	local response="n"
+
+	getyn "$delquery\n\t$indir\n\t$outdir\n" response
+	if $response; then
+		rm -vf $indir/*
+		rm -vf $outdir/*
+	fi
+}
+
 function show_settings {
 	settingstr=$(
 cat <<EOF
@@ -222,7 +238,7 @@ $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
  b  Current git branch		: $gitbranch
  m  Mail client                 : $mailclient
- d  Mail directory		: $indir has $infilecount files
+ d  Patch directory		: $indir has $infilecount files
  w  Work directory		: $outdir
 
     $attr_under\0Parameters         $attr_OFF$attr_bold
@@ -238,7 +254,7 @@ $attr_bold
 
     $attr_under\0Control            $attr_OFF$attr_bold
  i  Init to defaults
- c  Clean directories
+ C  Clean directories
  p  Patch Replace
  q  Quit this script
  x  Exit to a shell
@@ -282,8 +298,7 @@ function menu_parser {
 			;;
 		9 )	ui_toggle b_clean_outdir
 			;;
-		c )	rm -vf "$indir"/*
-			rm -vf "$outdir"/*
+		C )	clean_directories
 			;;
 		i )	init_booleans
 			get_booleans
