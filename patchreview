@@ -256,6 +256,7 @@ $attr_bold
     $attr_under\0Control            $attr_OFF$attr_bold
  i  Init to defaults
  C  Clean directories
+ G  restore git head
  p  Patch Replace
  q  Quit this script
  x  Exit to a shell
@@ -300,6 +301,9 @@ function menu_parser {
 		9 )	ui_toggle b_clean_outdir
 			;;
 		C )	clean_directories
+			;;
+		G )	~/bin/gitreset
+			git log --pretty -n1
 			;;
 		i )	init_booleans
 			get_booleans
@@ -471,10 +475,13 @@ while true; do
 	fi
 
 	if $b_apply_patches; then
+		echo "" > $outdir/bp-commits.log
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
 		if [ $st -ne 0 ]; then
 			check_gitam
+		else
+			git log --oneline -n1 >> $outdir/bp-commits.log
 		fi
 	fi
 
