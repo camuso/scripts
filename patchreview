@@ -114,10 +114,11 @@ function init_booleans {
 		prj_set_item $index true
 	done
 
-	# set the default to clean directories as false for safety
-	# sake.
+	# set "destructive" booleans to false
+	#
 	prj_set_item $prj_b_clean_indir false
 	prj_set_item $prj_b_clean_outdir false
+	prj_set_item $prj_b_restore_githead false
 }
 
 # exec_boolean
