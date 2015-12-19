@@ -138,13 +138,14 @@ function git_excisecommit {
 
 # git_comment2commitsfile
 #	Create a file containing a list of commits from taken from the "commit"
-#	line in each patch in a directory. The patches were extracted from a
-#	mail client, like mutt.
+#	line in each patch in a directory. The patches in the directory are
+#	backported patches with upstream commits identified in the backported
+#	patch commit log.
 #
 # NOTE: The only files that will be parsed are those that have ".patch" at the
 #	end of their names.
 #
-# $1 - directory where the mailed patches were extracted
+# $1 - directory containing the backported patches
 # $2 - filename, including path, of the commits file.
 #
 function git_comment2commitsfile {
@@ -157,7 +158,7 @@ function git_comment2commitsfile {
 	local filecount=$(ls $srcdir/*.patch | wc -l)
 	local cmtcnt=0
 	local cmtindex=1
-	local linenumber=1
+	local linenumber=0
 	local commitparity=0	# 1 if commits are the same
 	local commitarray
 	local scrstr
@@ -168,6 +169,7 @@ function git_comment2commitsfile {
 	for srcfile in $(ls -1 "$srcdir"/*.patch  | sort -V); do
 
 		echo $srcfile
+		linenumber=0
 
 		# We're going to assume that the commit number consists of 40
 		# hexadecimal digits, using egrep for extended regex
@@ -214,18 +216,26 @@ function git_comment2commitsfile {
 				line=$(ui_readline $cmtindex $srcdir/scratch)
 				printf "%d - $line\n" $cmtindex
 			done
-			echo -e "$attr_bold"
-			echo -en "Enter the number of your selection: "$attr_OFF""
-			read -n1 linenumber
-			echo
-			[ $linenumber == "q" ] && exit 1
-			[ $linenumber == "x" ] && ui_sh_spawn
+
+			let cmtindex--
+			while [ $linenumber -eq 0 ]; do
+				echo -en "$attr_bold"
+				echo -en "Enter number between 1 and $cmtindex : "$attr_OFF""
+				read -n1 linenumber
+				echo
+				[ $linenumber == "q" ] && exit 1
+				[ $linenumber == "x" ] && ui_sh_spawn
+				if [[ $linenumber != [1..$cmtindex] ]]; then
+					linenumber=0
+					continue
+				fi
+			done
 		else
 			linenumber=1
 		fi
 
 		line=$(ui_readline $linenumber $srcdir/scratch)
-		rm -f $srcdir/scratch
+		rm -f "$srcdir"/scratch
 
 		# Only take the first matching instance of what looks like
 		# a commit number. The following magic regex looks for hex
