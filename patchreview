@@ -212,13 +212,21 @@ function set_booleans {
 function replace_patch {
 	local patnum
 	local commit
-	local patcnt=$(cat $outdir/commits.log | wc -l)
+	local patcnt=$(cat "$outdir/$us_commits" | wc -l)
 
 	getuser "Patch Number to replace: " patnum
 	getuser "Correct commit ID: " commit
-	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir"/commits.log
+	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir/$us_commits"
 	rm -f "$outdir"/*.patch
-	git_file2patchset "$outdir"/commits.log "$outdir"
+	git_file2patchset "$outdir/$us_commits" "$outdir"
+}
+
+function clean_patches {
+	find "$1" -type f -name "*.patch" -exec rm -vf '{}' \;
+}
+
+function clean_dir {
+	clean_patches "$1"
 }
 
 function clean_directories {
@@ -227,8 +235,8 @@ function clean_directories {
 
 	getyn "$delquery\n\t$indir\n\t$outdir\n" response
 	if $response; then
-		rm -vf $indir/*
-		rm -vf $outdir/*
+		clean_patches "$indir"
+		clean_patches "$outdir"
 	fi
 }
 
@@ -242,25 +250,29 @@ $attr_bold
  d  Patch directory		: $indir has $infilecount files
  w  Work directory		: $outdir
 
-    $attr_under\0Parameters         $attr_OFF$attr_bold
+    $attr_under\0Run Parameters     $attr_OFF$attr_bold
  1  Rename input files		: $b_rename_infiles
  2  Save git head		: $b_save_githead
- 3  Apply patches (git am)	: $b_apply_patches
+ 3  Apply patches \(git am\)	: $b_apply_patches
  4  git am abort on error  	: $b_gitam_err_abort
  5  Format upstream patches	: $b_fmt_upstream
  6  Compare patchsets		: $b_patcmp
+
+    $attr_under\0Automatically      $attr_OFF$attr_bold
  7  Restore git head		: $b_restore_githead
- 8  Clean input directory	: $b_clean_indir
+ 8  Clean Patch directory	: $b_clean_indir
  9  Clean work directory	: $b_clean_outdir
 
     $attr_under\0Control            $attr_OFF$attr_bold
- i  Init to defaults
- C  Clean directories
- G  restore git head
- p  Patch Replace
- q  Quit this script
- x  Exit to a shell
  r  Run patch review
+ i  Init to defaults
+ p  Replace an upstream commit in the series
+ G  restore git head
+ P  Clean Patch Directory
+ W  Clean Work Directory
+ C  Clean Patch and Work Directories
+ x  Exit to a shell
+ q  Quit this script
 $attr_OFF
 EOF
 )
@@ -278,9 +290,9 @@ function menu_parser {
 			;;
 		m )	set_mailclient
 			;;
-		d )	prj_set_directory "source" $prj_indir indir quiet
+		d )	prj_set_directory "Patch" $prj_indir indir quiet
 			;;
-		w )	prj_set_directory "destination" $prj_outdir outdir quiet
+		w )	prj_set_directory "Work" $prj_outdir outdir quiet
 			;;
 		1 )	ui_toggle b_rename_infiles
 			;;
@@ -299,6 +311,10 @@ function menu_parser {
 		8 )	ui_toggle b_clean_indir
 			;;
 		9 )	ui_toggle b_clean_outdir
+			;;
+		P )	clean_dir "$indir"
+			;;
+		W )	clean_dir "$outdir"
 			;;
 		C )	clean_directories
 			;;
@@ -354,14 +370,17 @@ function check_gitam {
 
 function apply_patches {
 	local stat=0
+	echo "" > "$outdir/$bp_commits"
 	# for patch in $(ls $indir/*.patch); do
-	for patch in $(ls $indir/*.patch | sort -V); do
+	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
 		echo "$patch"
 		git am $patch
 		stat=$?
 		# echo "git am stat: $stat"
-		[ $stat -ne 0 ] && return $stat
+		[ $stat -ne 0 ] && break
+		git log --oneline -n1 >> "$outdir/$bp_commits"
 	done
+	cat "$outdir/$bp_commits"
 	return $stat
 }
 
@@ -378,7 +397,7 @@ myshlvl=$SHLVL
 # Print the Herald
 #
 echo -e ""$attr_bold""$attr_under""
-echo "Patch Review v1.0 - Review patches extracted from mail"
+echo "Patch Review v2.0 - Review patches and compare to upstream"
 echo -e "$attr_OFF"
 
 # Determine if we're at the top of a git tree. If not, exit.
@@ -411,6 +430,8 @@ declare infilecount=0
 declare gitbranch=$(get_gitbranch)
 declare mailclient="Mutt"
 declare renameagent=renmutpat
+declare us_commits="us-commits.log"	# upstream commits log
+declare bp_commits="bp-commits.log"	# backport commits log
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
@@ -475,27 +496,25 @@ while true; do
 	fi
 
 	if $b_apply_patches; then
-		echo "" > $outdir/bp-commits.log
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
 		if [ $st -ne 0 ]; then
 			check_gitam
-		else
-			git log --oneline -n1 >> $outdir/bp-commits.log
 		fi
 	fi
 
 	# Generate a patch set from the original upstream patches.
 	#
 	if $b_fmt_upstream; then
-		rm -f $outdir/*
+		clean_patches "$outdir"
+		echo "" > "$outdir/$us_commits"
 		echo
-		git_comment2commitsfile $indir "$outdir/commits.log"
+		git_comment2commitsfile $indir "$outdir/$us_commits"
 		echo
-		cat $outdir/commits.log
+		cat "$outdir/$us_commits"
 		echo
 		exec_boolean b_fmt_upstream false \
-			"git_file2patchset ${outdir}/commits.log ${outdir}"
+			"git_file2patchset ${outdir}/"$us_commits" ${outdir}"
 	fi
 
 	if $b_patcmp; then
@@ -509,13 +528,13 @@ while true; do
 
 		if $b_clean_indir; then
 			echo
-			rm -vf $indir/*
+			clean_patches "$indir"
 			echo
 		fi
 
 		if $b_clean_outdir; then
 			echo
-			rm -vf $outdir/*
+			clean_patches "$outdir"
 			echo
 		fi
 
