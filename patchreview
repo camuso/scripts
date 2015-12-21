@@ -282,7 +282,7 @@ EOF
 }
 
 function menu_parser {
-	infilecount=$(ls "$indir"/*.patch | wc -l)
+	infilecount=$(ls "$indir" | wc -l)
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
