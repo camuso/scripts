@@ -45,7 +45,7 @@ mlcount=$(ls "$mldir"/*.patch | wc -l)
 # of files, because we will simply stop processing when we run out of files
 # in one directory or the other. However, it could lead to confusion, since
 # we are comparing a patch set. Both directories containing the patch set
-# must therefore have the same number of files.
+# must therefore have the same number of patch files.
 #
 if ((mlcount != uscount)); then
 	echo
