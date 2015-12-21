@@ -104,7 +104,7 @@ function replace_commit {
 	local patnum=$1
 	local commit
 	local patcnt
-	local commitslog="$usdir/commits.log"
+	local commitslog="$usdir/us-commits.log"
 	local pfx=$(printf "%04d" $patnum)
 	local index=$((patnum - 1))
 	local stat
