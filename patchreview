@@ -62,7 +62,7 @@ function set_gitbranch {
 	echo -e  "The following commands will be issued before a new branch is checked out."
 	echo -en "$attr_OFF"
 	echo -e  "\tgit am --abort      # Abort any pending git am ops"
-	echo -e  "\tgit checkout -f     # Discard any changes"
+	echo -e  "\tgit checkout        # Discard any changes"
 	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
 	echo -e
 	echo -en "$attr_bold"
@@ -76,7 +76,8 @@ function set_gitbranch {
 	git am --abort --quiet
 	# git checkout .
 	# git clean -df
-	git checkout -f "$gitbranch" 2>&1
+	git checkout "$gitbranch" 2>&1
+	[ $? -eq 0 ] || exit 1
 	~/bin/gitlog1
 }
 
@@ -222,7 +223,8 @@ function replace_patch {
 }
 
 function clean_patches {
-	find "$1" -type f -name "*.patch" -exec rm -vf '{}' \;
+	# find "$1" -type f -name "*.patch" -exec rm -vf '{}' \;
+	rm -vf "$1"/*.patch
 }
 
 function clean_dir {
@@ -247,7 +249,7 @@ $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
  b  Current git branch		: $gitbranch
  m  Mail client                 : $mailclient
- d  Patch directory		: $indir has $infilecount files
+ d  Patch directory		: $indir has $infilecount patch files
  w  Work directory		: $outdir
 
     $attr_under\0Run Parameters     $attr_OFF$attr_bold
@@ -267,7 +269,7 @@ $attr_bold
  r  Run patch review
  i  Init to defaults
  p  Replace an upstream commit in the series
- G  restore git head
+ G  Restore git head
  P  Clean Patch Directory
  W  Clean Work Directory
  C  Clean Patch and Work Directories
@@ -280,7 +282,7 @@ EOF
 }
 
 function menu_parser {
-	infilecount=$(ls $indir | wc -l)
+	infilecount=$(ls "$indir"/*.patch | wc -l)
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
@@ -469,10 +471,14 @@ prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
 # new project file has been created and its values must be initialized.
 #
 if [ $? -ne 0 ]; then
-	prj_set_directory "source" $prj_indir indir
-	prj_set_directory "destination" $prj_outdir outdir
+	prj_set_directory "Patch" $prj_indir indir
+	prj_set_directory "Work" $prj_outdir outdir
 	init_booleans
 fi
+
+# delete any "scratch" file from the indir
+#
+rm -f "$indir"/scratch
 
 prj_set_item $prj_mailclient $mailclient
 
