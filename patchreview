@@ -255,7 +255,7 @@ $attr_bold
     $attr_under\0Run Parameters     $attr_OFF$attr_bold
  1  Rename input files		: $b_rename_infiles
  2  Save git head		: $b_save_githead
- 3  Apply patches \(git am\)	: $b_apply_patches
+ 3  Apply patches (git am)	: $b_apply_patches
  4  git am abort on error  	: $b_gitam_err_abort
  5  Format upstream patches	: $b_fmt_upstream
  6  Compare patchsets		: $b_patcmp
@@ -372,6 +372,7 @@ function check_gitam {
 
 function apply_patches {
 	local stat=0
+	local count=1
 	echo "" > "$outdir/$bp_commits"
 	# for patch in $(ls $indir/*.patch); do
 	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
@@ -380,7 +381,9 @@ function apply_patches {
 		stat=$?
 		# echo "git am stat: $stat"
 		[ $stat -ne 0 ] && break
+		printf "%3d " $count >> "$outdir/$bp_commits"
 		git log --oneline -n1 >> "$outdir/$bp_commits"
+		let count++
 	done
 	cat "$outdir/$bp_commits"
 	return $stat
