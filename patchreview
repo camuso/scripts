@@ -62,7 +62,7 @@ function set_gitbranch {
 	echo -e  "The following commands will be issued before a new branch is checked out."
 	echo -en "$attr_OFF"
 	echo -e  "\tgit am --abort      # Abort any pending git am ops"
-	echo -e  "\tgit checkout        # Discard any changes"
+	echo -e  "\tgit checkout"
 	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
 	echo -e
 	echo -en "$attr_bold"
@@ -238,7 +238,7 @@ function clean_directories {
 
 	getyn "$delquery\n\t$indir\n\t$outdir\n" response
 	if $response; then
-		clean_patches "$indir"
+		rm -vf "$indir"/*
 		clean_patches "$outdir"
 	fi
 }
@@ -315,7 +315,7 @@ function menu_parser {
 			;;
 		9 )	ui_toggle b_clean_outdir
 			;;
-		P )	clean_dir "$indir"
+		P )	rm -vf "$indir"/*
 			;;
 		W )	clean_dir "$outdir"
 			;;
@@ -346,6 +346,14 @@ function menu_loop {
 	indir=$(prj_get_item $prj_indir)
 	outdir=$(prj_get_item $prj_outdir)
 	mailclient=$(prj_get_item $prj_mailclient)
+
+	commit_msg_file="$outdir/commit-msg.txt"
+	echo $commit_msg_file
+
+	# delete any "scratch" file from the indir
+	#
+	rm -f "$indir"/scratch
+
 	local stat=0
 
 	while $true; do
@@ -357,6 +365,10 @@ function menu_loop {
 	return $stat
 }
 
+repatchstr="
+Spawning a shell so you can fix or refresh the aborted patch
+and apply by hand.
+"
 
 function check_gitam {
 	echo -n "Patch failed to apply. "
@@ -379,11 +391,51 @@ function check_gitam {
 	else
 		git am --abort
 		echo
-		echo  "Fix or refresh the aborted patch and apply by hand."
-		ui_sh_spawn "Type exit 1 if you want to exit the script."
+		echo "Fix or refresh the aborted patch and apply by hand."
+		echo -e "Type "$attr_bold"exit 1"$attr_OFF" if you want to exit the script."
+		ui_sh_spawn
 		[ $? -ne 0 ] && exit 1
 		return 0
 	fi
+}
+
+function strindex {
+	x="${1%%$2*}"
+	[[ $x = $1 ]] && echo -1 || echo ${#x}
+}
+
+
+function create_commit_msg {
+	local diffstr="diff "
+	local subjstr="Subject: "
+	local found_subj=false
+
+	echo "" > "$commit_msg_file"
+
+	while read line; do
+		[ "${line:0:5}" == "$diffstr" ] && break
+
+		if [ "${line:0:9}" == "$subjstr" ]; then
+			local sumstrpos=$(($(strindex "$line" "]") + 1))
+			local sumstr=$(echo -e ${line:$sumstrpos})
+			echo "$sumstr" >> "$commit_msg_file"
+			echo "" >> "$commit_msg_file"
+			found_subj=true
+		fi
+		$found_subj && echo "$line" >> "$commit_msg_file"
+	done < "$1"
+}
+
+function retry_patch {
+	create_commit_msg "$1"
+	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$1".retry
+	if [ $? -ne 0 ]; then
+		echo "Unable to apply "$1""
+		echo "Exiting script with nonzero status"
+		echo
+		exit 1
+	fi
+	commit . -F "$commit_msg_file"
 }
 
 function apply_patches {
@@ -398,11 +450,13 @@ function apply_patches {
 		stat=$?
 		# echo "git am stat: $stat"
 
-		if [ $stat -ne 0 ]; then
-			check_gitam
-			stat=$?
-			[ $stat -ne 0 ] && break
-		fi
+#		if [ $stat -ne 0 ]; then
+#			check_gitam
+#			stat=$?
+#			[ $stat -ne 0 ] && break
+#		fi
+
+		[ $stat -ne 0 ] && retry_patch "$patch"
 
 		printf "%3d " $patchcount >> "$outdir/$bp_commits"
 		git log --oneline -n1 >> "$outdir/$bp_commits"
@@ -502,10 +556,6 @@ if [ $? -ne 0 ]; then
 	init_booleans
 fi
 
-# delete any "scratch" file from the indir
-#
-rm -f "$indir"/scratch
-
 prj_set_item $prj_mailclient $mailclient
 
 ##############################################
@@ -528,6 +578,7 @@ while true; do
 	fi
 
 	if $b_apply_patches; then
+		git am --abort
 		patchcount=0
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
