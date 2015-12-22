@@ -117,6 +117,7 @@ function init_booleans {
 
 	# set "destructive" booleans to false
 	#
+	prj_set_item $prj_b_gitam_err_abort false
 	prj_set_item $prj_b_clean_indir false
 	prj_set_item $prj_b_clean_outdir false
 	prj_set_item $prj_b_restore_githead false
@@ -359,33 +360,54 @@ function menu_loop {
 
 function check_gitam {
 	echo -n "Patch failed to apply. "
-	$b_gitam_err_abort && echo "Aborting git am." || echo
-	promptgetchar "Press any key to continue ..."
-	echo
-	$b_gitam_err_abort && git am --abort
-	if $b_restore_githead; then
-		~/bin/gitreset
-		git log --pretty -n1
+
+	if $b_gitam_err_abort ; then
+		echo "Aborting git am."
+		git am --abort
+
+		if $b_restore_githead; then
+			~/bin/gitreset
+			git log --pretty -n1
+		fi
+
+		promptgetchar \
+			"Press x to exit, any other key to continue: " \
+			response
+		echo
+		[ "$response" == "x" ] && exit 1
+		return 1
+	else
+		git am --abort
+		echo
+		echo  "Fix or refresh the aborted patch and apply by hand."
+		ui_sh_spawn "Type exit 1 if you want to exit the script."
+		[ $? -ne 0 ] && exit 1
+		return 0
 	fi
-	echo
 }
 
 function apply_patches {
+	# patchcount is global
 	local stat=0
-	local count=1
 	echo "" > "$outdir/$bp_commits"
 	# for patch in $(ls $indir/*.patch); do
 	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
+		let patchcount++
 		echo "$patch"
 		git am $patch
 		stat=$?
 		# echo "git am stat: $stat"
-		[ $stat -ne 0 ] && break
-		printf "%3d " $count >> "$outdir/$bp_commits"
+
+		if [ $stat -ne 0 ]; then
+			check_gitam
+			stat=$?
+			[ $stat -ne 0 ] && break
+		fi
+
+		printf "%3d " $patchcount >> "$outdir/$bp_commits"
 		git log --oneline -n1 >> "$outdir/$bp_commits"
-		let count++
 	done
-	cat "$outdir/$bp_commits"
+	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
 	return $stat
 }
 
@@ -437,6 +459,7 @@ declare mailclient="Mutt"
 declare renameagent=renmutpat
 declare us_commits="us-commits.log"	# upstream commits log
 declare bp_commits="bp-commits.log"	# backport commits log
+declare patchcount=0
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
@@ -454,7 +477,7 @@ prj_b_patcmp \
 prj_b_restore_githead \
 prj_b_clean_indir \
 prj_b_clean_outdir \
-prj_b_exit_on_error
+prj_b_gitam_err_abort
 do
 	let index++
 	let $offset=$index
@@ -505,11 +528,9 @@ while true; do
 	fi
 
 	if $b_apply_patches; then
+		patchcount=0
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
-		if [ $st -ne 0 ]; then
-			check_gitam
-		fi
 	fi
 
 	# Generate a patch set from the original upstream patches.
