@@ -5,6 +5,8 @@ if [ -f /etc/bashrc ]; then
 	. /etc/bashrc
 fi
 
+shopt -s extglob
+
 #export CLICOLOR=1
 #export LSCOLORS=DxGxcxdxCxegedabagacad
 
