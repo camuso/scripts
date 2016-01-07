@@ -1,9 +1,10 @@
 #!/bin/bash
 count=0;
-for f in $(ls -1 ~/Maildir/work/cur/*.patch); do
+for f in $(ls -1 "$1"/*.patch); do
 	let count++
 	echo "$count: $f"
 	if [ $((count % 10)) -eq 0 ]; then
-		read -n1;
+		# read -n1;
+		echo
 	fi;
 done;
