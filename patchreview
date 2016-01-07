@@ -237,6 +237,7 @@ function clean_patches {
 
 function clean_dir {
 	rm -vf "$1"/!(*.log);
+	find "$outdir" -mindepth 1 -depth -type d -exec rm -rf '{}' \;
 }
 
 function clean_directories {
@@ -247,6 +248,7 @@ function clean_directories {
 	if $response; then
 		rm -vf "$indir"/*
 		rm -vf "$outdir"/!(*.log)
+		find "$outdir" -mindepth 1 -depth -type d -exec rm -rf '{}' \;
 	fi
 }
 
@@ -456,6 +458,7 @@ function retry_patch {
 	local retryname=$(basename -s .patch "$1")
 
 	create_commit_msg "$1"
+	git clean -df --exclude=*.rej
 	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$retryname".retry
 	retrystat=$?
 	if [ $retrystat -ne 0 ]; then
@@ -464,6 +467,24 @@ function retry_patch {
 		echo
 		exit 1
 	fi
+
+	# get any .rej files out of the way by moving them to the $outdir
+	#
+set -x
+	git status --porcelain
+	for rej in $(git status --porcelain); do
+		read -n1
+		if [[ $(echo "$rej" | tail -c4) == "rej" ]]; then
+			echo $rej
+			mkdir -p ../temp/$(dirname $rej)
+			mv $rej ../temp/$(dirname $rej)/.
+		fi
+	done
+
+set +x
+	git status
+	read -n1
+	git add --no-all .
 	git commit . -F "$commit_msg_file"
 	# git log --pretty -n1
 	# read -n1
