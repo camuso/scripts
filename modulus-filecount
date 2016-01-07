@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# modulus-filecount
+#
+
+cmdline=modulus-filecount
+
+usagestr=$(
+cat <<EOF
+
+modulus-filecount filespec
+
+	filespec - directory/filetype
+
+	Example:
+		modulus-filecount ../patches/*.patch
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+echo $#
+[ $# -ne 0 ] || usage
+
+#!/bin/bash
+
+count=0;
+filespec="$@"
+
+for f in $filespec; do
+	let count++
+	printf "%3d: %s\n" $count $f
+	if [ $((count % 10)) -eq 0 ]; then
+		# read -n1;
+		echo
+	fi;
+done;
