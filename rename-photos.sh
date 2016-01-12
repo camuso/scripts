@@ -30,7 +30,7 @@ usage
 [ $# -ge 2 ] || min_parms
 
 PhotosPath="$1"				# Source path of new photos
-SortPath="~/.imagesort"			# Default sort path
+SortPath="$HOME/.imagesort"		# Default sort path
 LibraryPath="$2"			# Destination path of renamed photos
 CharFromName=4
 
@@ -63,7 +63,7 @@ read -p "Press any key to continue or Ctl-c to exit."
 
 ############
 # Copy files from $PhotosPath to $SortPath
-rsync -va $PhotosPath/* $SortPath/
+rsync -Pva $PhotosPath/* $SortPath/
 
 ############
 # rename all image files in $SortPath
@@ -71,25 +71,25 @@ rsync -va $PhotosPath/* $SortPath/
 # jhead  -autorot -ft -nf%y%m%d-%H%M%S $SortPath/*
 cd $SortPath
 ls
-find $SortPath -type f -iname '*.jpg' \
- -exec jhead -ft -nf$LibraryPath/%Y/%m/%d/$prefix%Y-%m-%d-%H:%M:%S$suffix '{}' \;
 
+find $SortPath -type f -iname '*.jpg' \
+ -exec jhead -autorot -mkexif -rgt -ft -nf$prefix%Y-%m-%d-%H:%M:%S$suffix '{}' \;
 
 ###########
 # Sort files into folders using $CharFromName letters of the file name
 #
-#ls $SortPath | while read file; do
- # extract first $CharFromName characters from filename
-# FolderDate=${file:0:$CharFromName}
- # create directory if it does not exist
-# test -d $LibraryPath/$FolderDate || mkdir $LibraryPath/$FolderDate
- # move the current file to the destination dir
-# mv -v $SortPath/$file $LibraryPath/$FolderDate/$file
+# ls $SortPath | while read file; do
+#	# extract first $CharFromName characters from filename
+#	FolderDate=${file:0:$CharFromName}
+#	# create directory if it does not exist
+#	test -d $LibraryPath/$FolderDate || mkdir $LibraryPath/$FolderDate
+#	# move the current file to the destination dir
+#	mv -v $SortPath/$file $LibraryPath/$FolderDate/$file
 #done
 
 ##########
-# move sorted files into photo library
-# mv -v $SortPath/* $LibraryPath/
+move sorted files into photo library
+mv -v $SortPath/* $LibraryPath/
 
 ##########
 # Umount the card
