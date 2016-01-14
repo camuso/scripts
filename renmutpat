@@ -1,4 +1,5 @@
 #!/bin/bash
+
 function usage {
 	echo
 	echo "renmutpat <directory>"
@@ -26,7 +27,14 @@ if [ $total -eq 0 ]; then
 	exit 1
 fi
 
-for filename in $(ls | sort -t'_' -k2 -h); do
+# Enable extglob for more specific directory actions
+#
+shopt -s extglob
+
+# Don't try to rename files that have ".patch" endings, because
+# these have already been renamed.
+#
+for filename in $(ls !(*.patch) | sort -t'_' -k2 -h); do
 # for filename in $(ls); do
 	# newname=$(printf "%s-%04d.%03d.patch" $prefix $ddcount $total)
 	#
