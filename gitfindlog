@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# gitfindlog
+#
+
+cmdline=gitfindlog
+
+usagestr=$(
+cat <<EOF
+
+gitfindlog latest-tag earliest-tag string
+
+Perform git log --oneline for any logs whose first line contains string.
+Latest tag must be first argument, and earliest-tag the last argument.
+Output is given with latest commit first.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 3 ] || usage
+
+latest="$1"
+earliest="$2"
+string="$3"
+
+git log --oneline | awk '/$latest/,/$earliest/' | grep -i "$string"
