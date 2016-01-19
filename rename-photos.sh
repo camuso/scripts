@@ -73,7 +73,7 @@ cd $SortPath
 ls
 
 find $SortPath -type f -iname '*.jpg' \
- -exec jhead -autorot -mkexif -rgt -ft -nf$prefix%Y-%m-%d-%H:%M:%S$suffix '{}' \;
+ -exec jhead -autorot -mkexif -rgt -ft -nf$prefix%Y-%m-%d-%H-%M-%S$suffix '{}' \;
 
 ###########
 # Sort files into folders using $CharFromName letters of the file name
