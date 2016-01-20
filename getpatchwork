@@ -37,13 +37,12 @@ patchstr="/patch/"
 lentopatch=$(($(strindex "$link" "$patchstr") + ${#patchstr} ))
 linkhead=${link:0:$lentopatch}
 linktail=${link:$lentopatch}
-echo "$linkhead --- $linktail"
+# echo "$linkhead --- $linktail"
+
 patchnumlen=$(strindex "$linktail" "/")
 patchnum=${linktail:0:$patchnumlen}
 linktail=${linktail:$patchnumlen}
-echo "$patchnum --- $linktail"
-
-read -n1
+# echo "$patchnum --- $linktail"
 
 for ((index=1; index <= number; index++)); do
 	link="$linkhead""$patchnum""$linktail"
