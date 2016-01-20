@@ -483,4 +483,15 @@ function ui_digit2bool {
 	local boolean=${!1}
 	$boolean && eval $1=true || eval $1=false
 }
+
+# ui_strindex string-1 string-2
+#
+# Return zero-based index of string-2 in string-1
+# Returns -1 if string-2 is not found in string-1
+#
+function ui_strindex {
+	local x="${1%%$2*}"
+	[[ $x = $1 ]] && echo -1 || echo ${#x}
+}
+
 ui_source_loaded=true
