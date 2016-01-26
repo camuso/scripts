@@ -26,12 +26,14 @@
 #
 shopt -s extglob
 
+LIB="$HOME/bin/lib"
+
 #######################################
 # External Source Files
 #######################################
-source ~/bin/lib/ui.source
-source ~/bin/lib/project.source
-source ~/bin/lib/gitutilities.source
+source $LIB/ui.source
+source $LIB/project.source
+source $LIB/gitutilities.source
 
 ########################################
 # Function Return Codes
