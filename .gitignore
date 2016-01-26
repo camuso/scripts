@@ -5,6 +5,14 @@ recovery/
 .data/
 *.prj
 .*.swp
+*.tgz
+*.tgz
+*.tgz
+*.tgz
+*.tgz
+*.tgz
+*.tgz
+*.tgz
 
 # specific files to ignore.
 # These are dependent on separate git repos
