@@ -471,12 +471,13 @@ menu_loop
 [ $cpcommitsfile ] && b_use_cpcmtlog=true || b_use_cpcmtlog=false
 
 if $b_use_cpcmtlog; then
-	echo "cherry-picked commits file: $cpcommitsfile"
 	cpcommitscount=$(cat "$cpcommitsfile" | wc -l)
+	echo -n "cherry-picked commits file: $cpcommitsfile "
+	echo "has $cpcommitscount commits to process."
 fi
 
 # If the user provides a bpcommits file to contain the new commits
-# created by cherrypicking into # the current git tree, then be sure the
+# created by cherrypicking into the current git tree, then be sure the
 # file is empty.
 #
 echo "backported commits file:    "$bpcommitsfile""
@@ -589,12 +590,10 @@ while true; do
 	if $b_shellcommit_noauto; then
 		echo -en "$str_extcmt_validate"
 		read -n1 spawnshell
-		if [ "$spawnshell" == "x" ]; then
-			ui_sh_spawn
-		else
-			echo -e "\tContinuing ..."
-			continue;
-		fi
+		[ "$spawnshell" == "x" ] && ui_sh_spawn
+		echo -e "\tContinuing ..."
+		let index++
+		continue
 	fi
 
 	if $b_autocommit; then
