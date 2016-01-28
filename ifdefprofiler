@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# ifdefprofiler
+#
+
+cmdline=ifdefprofiler
+
+usagestr=$(
+cat <<EOF
+
+ifdefprofiler
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 1 ] || usage
+
+declare index=0
+declare linenumber=0
+declare file="$1"
+
+indent() {
+	local idx=$1
+	for ((x=0; x < $idx; ++x)); do
+		echo -n " "
+	done
+}
+
+if ![ -f "$1" ]; then
+	echo "$1 is not a valid filename."
+	echo
+	exit 1
+fi
+
+IFS=	# prevent stripping of leading and trailing spaces
+set -f	# disable pathname expansion
+
+# read -r processes backspaces as ordinary characters, rather
+#         rather than as escape sequences
+#
+while read -r line || [[ -n $line ]]; do
+	let linenumber++
+	if [[ $line == *"#ifdef"* ]]; then
+		indent $index
+		printf "%5d: %s\n" $linenumber $line
+		let index++
+	fi
+
+	if [[ $line == *"#endif"* ]]; then
+		let index--
+		indent $index
+		printf "%5d: %s\n" $linenumber $line
+		[ $index -eq 0 ] && echo
+	fi
+
+done < "$file"
