@@ -9,6 +9,18 @@ usagestr=$(
 cat <<EOF
 
 getpatchwork
+
+Creates a set of patches from patchworks archive given the number of patches
+and the full mbox link.
+
+The user is queried for these items by invoking this script. If the script is
+invoked with any parameters, the user will be given this usage text.
+
+Patches are simply named x-y.patch, where x is the number of the patch and y is
+the total number of patches.
+
+RHEL patchworks is at http://patchwork.lab.bos.redhat.com/
+
 \0
 EOF
 )
@@ -17,6 +29,8 @@ usage() {
 	echo -e "$usagestr"
 	exit
 }
+
+[ "$1" ] && usage
 
 source ~/bin/lib/ui.source
 
