@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# ../rpm-spec-patchlist
+#
+
+cmdline=../rpm-spec-patchlist
+
+usagestr=$(
+cat <<EOF
+
+../rpm-spec-patchlist
+
+Creates text to be inserted in a rpm spec file for patches in the local
+directory. The text is output to ../patchlist.txt
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 0 ] || usage
+
+outfile="../patchlist.txt"
+
+n=1; 
+echo "" > $outfile
+
+for f in $(ls -1 *.patch); do 
+	printf "Patch%02d:\ttboot-%%{version}-%s\n" \
+		$n $(echo $f | cut -d'-' -f3-) >> $outfile
+	let n++
+done
+
+n=1
+for f in $(ls -1 *.patch); do
+	printf "%%patch%02d -p1 -b .%s\n" \
+		$n $(echo $(basename $f .patch) | cut -d'-' -f3-) >> $outfile
+	let n++
+done;
+
