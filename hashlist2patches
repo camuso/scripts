@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# hashlist2patches
+#
+
+source ~/bin/lib/gitutilities.source
+
+usagestr=$(
+cat <<EOF
+
+hashlist2patches hashlist target-directory
+
+Takes the commit hashes in the hashlist and generates a patchset in the
+target-directory. 
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 2 ] || usage
+
+git_file2patchset "$1" "$2"
