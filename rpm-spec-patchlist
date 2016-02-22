@@ -31,14 +31,14 @@ echo "" > $outfile
 
 for f in $(ls -1 *.patch); do 
 	printf "Patch%02d:\ttboot-%%{version}-%s\n" \
-		$n $(echo $f | cut -d'-' -f3-) >> $outfile
+		$n $(echo $f | cut -d'-' -f1-) >> $outfile
 	let n++
 done
 
 n=1
 for f in $(ls -1 *.patch); do
 	printf "%%patch%02d -p1 -b .%s\n" \
-		$n $(echo $(basename $f .patch) | cut -d'-' -f3-) >> $outfile
+		$n $(echo $(basename $f .patch) | cut -d'-' -f1-) >> $outfile
 	let n++
 done;
 
