@@ -34,7 +34,7 @@ int main(int argc, char *argv[])
         if (!str2int(str, mask))
 		return 0;
 	bit = 1 << bit;
-	cout << bit & mask;
+	cout << (bit & mask);
 	return bit & mask;
 }
 
