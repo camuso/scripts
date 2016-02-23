@@ -42,6 +42,11 @@ echo >> "$logfile" 2>&1
 #
 cd
 
+# Clone the scripts and rename the new directory to bin
+#
+git clone https://github.com/camuso/scripts.git
+mv scripts bin
+
 # Copy etc and rc files out of their archive directories into their respective
 # real directories, but only if they're newer.
 #
@@ -51,8 +56,8 @@ echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
 echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
 
-echo "rsync -vat rcbak/ ." >> "$logfile" 2>&1
-rsync -Pvat rcbak/ . 
+echo "rsync -Pvat rcbak/ ." >> "$logfile" 2>&1
+rsync -Pvat rcbak/ .
 
 if [ "$remotename" == "root" ]; then
 	for file in \
@@ -85,4 +90,12 @@ cd -
 [ "$2" == "install" ] && [ "$remotename" == "root" ] && \
 yum install -y --skip-broken gcc gcc-c++ ncurses-devel rpm-build git git-email cscope ipmitool OpenIPMI watchdog krb5-workstation krb5-libs krb5-auth-dialog
 # set +x
+
+# build the binaries and return to home
+#
+cd bin
+for f in $(ls -1 *.c); do make -k $(basename $f .c) ; done
+for f in $(ls -1 *.cpp); do make -k $(basename $f .cpp) ; done
+cd
+
 exit 0
