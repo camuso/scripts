@@ -14,6 +14,9 @@
 //
 // Tony Camuso 20131016
 //
+//
+
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <string.h>
