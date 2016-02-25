@@ -1,0 +1,11 @@
+#!/bin/bash
+
+start=$(date +%s)
+make K=1 -j$1
+end=$(date +%s)
+et=$(( end - start ))
+min=$(( et / 60 ))
+sec=$(( et % 60 ))
+echo
+echo "Elapsed time: $min:$sec"
+echo
