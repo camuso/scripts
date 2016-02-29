@@ -3,7 +3,7 @@
 # getpatchwork
 #
 
-cmdline=getpatchwork
+cmdtemp=getpatchwork
 
 usagestr=$(
 cat <<EOF
@@ -34,14 +34,14 @@ usage() {
 
 source ~/bin/lib/ui.source
 
-# strindex string-1 string-2
+# strindex string substring
 #
-# Return zero-based index of string-2 in string-1
-# Returns -1 if string-2 is not found in string-1
+# Return zero-based index of substring in string
+# Returns -1 if substring is not found in string
 #
 function strindex {
 	x="${1%%$2*}"
-	[[ $x = $1 ]] && echo -1 || echo ${#x}
+	[[ "$x" = "$1" ]] && echo -1 || echo ${#x}
 }
 
 getuser "Number of patches: " number
@@ -59,10 +59,49 @@ linktail=${linktail:$patchnumlen}
 # echo "$patchnum --- $linktail"
 
 for ((index=1; index <= number; index++)); do
+	declare found=false
+	declare newname=""
+	declare temp=""
+
 	link="$linkhead""$patchnum""$linktail"
 	wget -q $link
-	name=$(printf "%03d-%03d.patch" $index $number)
-	mv -v index.html $name
+
+	while IFS= read line; do
+
+		if ! $found  \
+			&& [ $(strindex "$line" "Subject: ") -ge 0 ] \
+			&& [ $(strindex "$line" "RHEL") -ge 0 ]; then
+
+			found=true
+
+			# Remove the word "Subject: " from the temp
+			#
+			temp=$(echo "$line" | cut -d' ' -f2-)
+
+			# Remove any brackets, parentheses, and quotes
+			#
+			temp=$(echo "$temp" | sed 's/[][{}<>(),"]//g')
+			temp=$(echo "$temp" | sed "s/'//g")
+
+			# Replace spaces, slashes, colons and semicolons
+			# with hyphens
+			#
+			temp=$(echo "$temp" | sed "s\[/:; ]\-\g")
+
+			# Create the new name
+			#
+			newname=$(printf "%s.patch" "$temp")
+
+			echo "$newname"
+			echo $line > "$newname"
+			continue
+		fi
+
+		$found && echo "$line" >> "$newname"
+
+	done < index.html
+
+	rm -f index.html
 	let patchnum++
 done;
 
