@@ -37,7 +37,7 @@ for filename in $(ls | sort -t'_' -k2 -h); do
 
 	# Remove any brackets, parentheses, and quotes
 	#
-	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
+	subject=$(echo "$subject" | sed 's/[][<>{}(),"]//g')
 	subject=$(echo "$subject" | sed "s/'//g")
 
 	# Replace spaces, slashes, colons and semicolons with hyphens
