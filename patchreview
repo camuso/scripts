@@ -507,7 +507,7 @@ function apply_patches {
 	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
 		let patchcount++
 		echo "$patch"
-		git am $patch
+		git am -3 $patch
 		stat=$?
 		# echo "git am stat: $stat"
 
