@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# prefixfname
+#
+
+cmdline=prefixfname
+
+usagestr=$(
+cat <<EOF
+
+prefixfname prefix filelist
+
+Enter directory and prepend the prefix to all the files in the filelist.
+
+Example:
+	prefixfname "foo-" '/my-path/*.bar'
+
+	Will prepend "foo-" to all the files named *.bar in the
+	/my-path directory.
+
+	Wildcard characters must be escaped, either preceded by
+	a backslash '\' or surrounded by single or double quotes,
+	as in the example.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 2 ] || usage
+
+set -f		# disable pathname expansions
+
+declare prefix="$1"
+declare fspec="$2"
+declare path=$(dirname $fspec)
+declare flist=$(basename $fspec)
+declare fname
+
+cd $path
+
+set +f
+for fname in $(ls -1 $flist); do
+	mv -v $fname "$prefix""$fname"
+done
+
+cd -
