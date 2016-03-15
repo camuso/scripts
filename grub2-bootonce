@@ -28,7 +28,7 @@ if [ $# -eq 1 ]; then
 fi
 
 value=0
-cat /boot/grub2/grub.cfg | grep 'menuentry ' | awk -F "'" ' { print $2 } ' | while read ENTRY
+cat $(find /boot -name grub.cfg) | grep 'menuentry ' | awk -F "'" ' { print $2 } ' | while read ENTRY
 do
 	if [ ! -z "$ENTRY" ]; then
 		echo $value " " $ENTRY
