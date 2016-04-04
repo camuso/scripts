@@ -226,7 +226,7 @@ function git_comment2commitsfile {
 				echo
 				[ $linenumber == "q" ] && exit 1
 				[ $linenumber == "x" ] && ui_sh_spawn
-				if [[ $linenumber != [1..$cmtindex] ]]; then
+				if [[ $linenumber != [1-$cmtindex] ]]; then
 					linenumber=0
 					continue
 				fi
