@@ -1,14 +1,25 @@
 #!/bin/bash
 
-echo "current directory $PWD"
 cd $HOME
-echo "changed to home directory $PWD"
-mv bin/bin.tgz ~/
-tar -xvf bin.tgz
-mv .bashrc .bashrc.orig
-cp -f bin/.bashrc ~/.
-cp -f bin/.vimrc ~/.
-cd -
-echo "back to current directory $PWD"
+
+logfile="$HOME/.deletemystuff.log"
+touch "$logfile"
+cat /dev/null > "$logfile"
+echo >> "$logfile" 2>&1
+
+
+for f in $(ls -rtd1 rcbak/{*,.*}); do
+	name=$(basename $f);
+
+	if [ -f $f ] && [ -f "$name.orig" ]; then
+		mv -vf $name.orig $name 2>&1 | tee -a $logfile
+	fi
+done
+
+
+for file in $(ls -1 ark/); do
+	name=$(basename -s .tgz $file)
+	rm -rvf $name 2>&1 | tee -a $logfile
+done
 
 exit 0
