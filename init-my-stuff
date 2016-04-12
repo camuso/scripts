@@ -51,8 +51,18 @@ echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
 echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
 
-echo "rsync -vat rcbak/ ." >> "$logfile" 2>&1
-rsync -Pvat rcbak/ .
+# Get the full pathname so we can use that to copy from.
+# If the file or directory already exists, then copy it into a .orig before
+# performing the rsync and possibley overwriting it with new content.
+#
+for f in $(ls -rtd1 rcbak/{*,.*}); do
+	name=$(basename $f);
+	if [ -f $f ] && [ -f "$name" ]; then
+		cp -v $name $name.orig 2>&1 | tee -a $logfile
+	fi
+done
+
+rsync -Pvat rcbak/ . 2>&1 | tee -a $logfile
 
 if [ "$remotename" == "root" ]; then
 	for file in \
