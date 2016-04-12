@@ -16,8 +16,7 @@ and the full mbox link.
 The user is queried for these items by invoking this script. If the script is
 invoked with any parameters, the user will be given this usage text.
 
-Patches are simply named x-y.patch, where x is the number of the patch and y is
-the total number of patches.
+Patches are simply named according to the subject line.
 
 RHEL patchworks is at http://patchwork.lab.bos.redhat.com/
 
