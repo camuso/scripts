@@ -65,9 +65,18 @@ for ((index=1; index <= number; index++)); do
 
 	link="$linkhead""$patchnum""$linktail"
 	wget -q $link
+	lastto=''
+	lastfrom=''
 
-	while IFS= read line; do
-
+	while IFS= read -r line; do
+		if ! $found  \
+			&& [ $(strindex "$line" "To:") -ge 0 ]; then
+			lastto=$line
+		fi
+		if ! $found  \
+			&& [ $(strindex "$line" "From:") -ge 0 ]; then
+			lastfrom=$line
+		fi
 		if ! $found  \
 			&& [ $(strindex "$line" "Subject: ") -ge 0 ] \
 			&& [ $(strindex "$line" "RHEL") -ge 0 ]; then
@@ -93,8 +102,16 @@ for ((index=1; index <= number; index++)); do
 			newname=$(printf "%s.patch" "$temp")
 
 			echo "$newname"
-			echo $line > "$newname"
+			echo $lastto > "$newname"
+			echo $lastfrom >> "$newname"
+			echo $line >> "$newname"
 			continue
+		fi
+
+		if $found \
+		    && [ $(strindex "$line" "From patchwork") -ge 0 ]; then
+		    # someone must have sent a reply
+		    break
 		fi
 
 		$found && echo "$line" >> "$newname"
@@ -103,5 +120,5 @@ for ((index=1; index <= number; index++)); do
 
 	rm -f index.html
 	let patchnum++
-done;
+done
 
