@@ -58,7 +58,7 @@ function prj_init_prjfile {
 		return 1
 	else
 		local sizediff
-		local size=$(cat "$prjfile" | wc -l)
+		local size=$(cat $prjfile | wc -l)
 		sizediff=$(( size - prj_prjfile_size ))
 
 		if [ $sizediff -ne 0 ]; then
