@@ -272,11 +272,6 @@ $attr_bold
  5  Format upstream patches	: $b_fmt_upstream
  6  Compare patchsets		: $b_patcmp
 
-    $attr_under\0Automatically      $attr_OFF$attr_bold
- 7  Restore git head		: $b_restore_githead
- 8  Clean Patch directory	: $b_clean_indir
- 9  Clean work directory	: $b_clean_outdir
-
     $attr_under\0Control            $attr_OFF$attr_bold
  r  Run patch review
  i  Init to defaults
@@ -319,12 +314,6 @@ function menu_parser {
 		5 )	ui_toggle b_fmt_upstream
 			;;
 		6 )	ui_toggle b_patcmp
-			;;
-		7 )	ui_toggle b_restore_githead
-			;;
-		8 )	ui_toggle b_clean_indir
-			;;
-		9 )	ui_toggle b_clean_outdir
 			;;
 		P )	rm -vf "$indir"/*
 			;;
@@ -699,3 +688,22 @@ done
 # Done with the patch review
 #
 exit_patchreview 0
+
+# These menu options have been removed as too dangerous.
+#
+# from show_settings() function:
+# ------------------------------
+#    $attr_under\0Automatically      $attr_OFF$attr_bold
+# 7  Restore git head		: $b_restore_githead
+# 8  Clean Patch directory	: $b_clean_indir
+# 9  Clean work directory	: $b_clean_outdir
+#
+# from menu_parser() function:
+#-----------------------------
+#		7 )	ui_toggle b_restore_githead
+#			;;
+#		8 )	ui_toggle b_clean_indir
+#			;;
+#		9 )	ui_toggle b_clean_outdir
+#			;;
+
