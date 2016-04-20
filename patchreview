@@ -1,6 +1,7 @@
 #!/bin/bash
 #
 # patchreview
+version="3.0"
 #
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -19,8 +20,13 @@
 #
 # ~/bin/githead
 # ~/bin/gitreset
-# ~/bin/renpat
+# ~/bin/ren*pat
 # ~/bin/patcmp
+
+# Requires to run ...
+#
+# lib/*.source
+# .data/patchreview.prj
 
 # Enable extglob for more specific directory actions
 #
@@ -124,9 +130,12 @@ function init_booleans {
 	# set "destructive" booleans to false
 	#
 	prj_set_item $prj_b_gitam_err_abort false
-	prj_set_item $prj_b_clean_indir false
-	prj_set_item $prj_b_clean_outdir false
-	prj_set_item $prj_b_restore_githead false
+
+# 	removed in 3.0
+#	--------------
+#	prj_set_item $prj_b_clean_indir false
+#	prj_set_item $prj_b_clean_outdir false
+#	prj_set_item $prj_b_restore_githead false
 }
 
 # exec_boolean
@@ -171,6 +180,11 @@ function exec_boolean {
 # Read the values of the program flow control booleans from the
 # project file.
 #
+# removed in v3.0
+#	b_restore_githead \
+#	b_clean_indir \
+#	b_clean_outdir \
+#
 function get_booleans {
 	index=$boolindex
 	for bool in \
@@ -179,9 +193,6 @@ function get_booleans {
 	b_apply_patches \
 	b_fmt_upstream \
 	b_patcmp \
-	b_restore_githead \
-	b_clean_indir \
-	b_clean_outdir \
 	b_gitam_err_abort
 	do
 		eval $bool=$(prj_get_item $index)
@@ -190,10 +201,16 @@ function get_booleans {
 	done
 }
 
+
 # set_booleans
 #
 # Write the current values of the program flow booleans into the
 # project file.
+#
+# removed in v3.0
+#	b_restore_githead \
+#	b_clean_indir \
+#	b_clean_outdir \
 #
 function set_booleans {
 	index=$boolindex
@@ -203,9 +220,6 @@ function set_booleans {
 	b_apply_patches \
 	b_fmt_upstream \
 	b_patcmp \
-	b_restore_githead \
-	b_clean_indir \
-	b_clean_outdir \
 	b_gitam_err_abort
 	do
 		prj_set_item $index ${!bool}
@@ -232,24 +246,25 @@ function replace_patch {
 	git_file2patchset "$outdir/$us_commits" "$outdir"
 }
 
-function clean_patches {
-	# find "$1" -type f -name "*.patch" -exec rm -vf '{}' \;
-	rm -vf "$1"/*.patch
-}
-
 function clean_dir {
-	rm -vf "$1"/!(*.log);
-	find "$outdir" -mindepth 1 -depth -type d -exec rm -rf '{}' \;
+	local delquery="Are you sure you want to delete the contents of:"
+	local response=false
+
+	getyn "$delquery\n\t$1\n" response
+	$response && find -depth "$1" -exec rm -rf '{}' \;
 }
 
 function clean_directories {
 	local delquery="Are you sure you want to delete the contents of:"
-	local response="n"
+	local response=false
 
 	getyn "$delquery\n\t$indir\n\t$outdir\n" response
 	if $response; then
+		# remove the sub-directories in the outdir first
 		find "$outdir" -mindepth 1 -depth -type d -exec rm -rf '{}' \;
+		# remove all but the log files in the outdir
 		rm -vf "$outdir"/!(*.log)
+		# remove everything in the indir
 		rm -vf "$indir"/*
 	fi
 }
@@ -280,6 +295,7 @@ $attr_bold
  P  Clean Patch Directory
  W  Clean Work Directory
  C  Clean Patch and Work Directories
+ h  help text
  x  Exit to a shell
  q  Quit this script
 $attr_OFF
@@ -289,8 +305,9 @@ EOF
 }
 
 function menu_parser {
-	infilecount=$(ls "$indir" | wc -l)
+
 	show_settings
+	infilecount=$(ls "$indir" | wc -l)
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
 	case $setting in
@@ -315,7 +332,7 @@ function menu_parser {
 			;;
 		6 )	ui_toggle b_patcmp
 			;;
-		P )	rm -vf "$indir"/*
+		P )	clean_dir "$indir"
 			;;
 		W )	clean_dir "$outdir"
 			;;
@@ -337,14 +354,22 @@ function menu_parser {
 		r )	set_booleans
 			return $rc_run
 			;;
+		h )	less $HOME/bin/.data/patchreview.help
+			;;
 	esac
 	return $rc_continue
 }
 
 function menu_loop {
 	get_booleans
+
+	# get the patch and work directories.
+	#
 	indir=$(prj_get_item $prj_indir)
 	outdir=$(prj_get_item $prj_outdir)
+
+	# get the mail client
+	#
 	mailclient=$(prj_get_item $prj_mailclient)
 	commit_msg_file="$outdir/commit-msg.txt"
 
@@ -532,7 +557,7 @@ myshlvl=$SHLVL
 # Print the Herald
 #
 echo -e ""$attr_bold""$attr_under""
-echo "Patch Review v2.0 - Review patches and compare to upstream"
+echo "Patch Review $version - Review patches and compare to upstream"
 echo -e "$attr_OFF"
 
 # Determine if we're at the top of a git tree. If not, exit.
@@ -554,7 +579,7 @@ echo -en "$attr_OFF"
 # Parameter Initialization
 ###########################################
 
-# Declare the global variables we will be using
+# Declare the global variables
 #
 declare prj_entries=0
 declare index=0
@@ -573,7 +598,13 @@ declare patchcount=0
 # Add new booleans to the end of the list.
 # Add new non-boolean parameters to the top of the list.
 #
+# removed in 3.0
+# prj_b_restore_githead \
+# prj_b_clean_indir \
+# prj_b_clean_outdir \
+#
 for offset in \
+prj_mode \
 prj_indir \
 prj_outdir \
 prj_mailclient \
@@ -582,9 +613,6 @@ prj_b_save_githead \
 prj_b_apply_patches \
 prj_b_fmt_upstream \
 prj_b_patcmp \
-prj_b_restore_githead \
-prj_b_clean_indir \
-prj_b_clean_outdir \
 prj_b_gitam_err_abort
 do
 	let index++
@@ -599,14 +627,20 @@ do
 done
 
 prj_entries=$index
+[ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
+[ -e "$HOME/bin/.data/patchreview.prj" ] || touch $HOME/bin/.data/patchreview.prj
 prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
 # new project file has been created and its values must be initialized.
 #
 if [ $? -ne 0 ]; then
-	prj_set_directory "Patch" $prj_indir indir
-	prj_set_directory "Work" $prj_outdir outdir
+	echo
+	echo "A new project file has been created."
+	echo "We will need to know where your patches will be and where you"
+	echo "want us to put the output of this script."
+	prj_set_directory "Patch" $prj_indir indir quiet
+	prj_set_directory "Work" $prj_outdir outdir quiet
 	init_booleans
 fi
 
@@ -641,7 +675,7 @@ while true; do
 	# Generate a patch set from the original upstream patches.
 	#
 	if $b_fmt_upstream; then
-		clean_patches "$outdir"
+		rm -vf "$outdir"/*.patch
 		echo "" > "$outdir/$us_commits"
 		echo
 		git_comment2commitsfile $indir "$outdir/$us_commits"
@@ -661,23 +695,26 @@ while true; do
 
 	if [ $menu_stat -eq $rc_run ]; then
 
-		if $b_clean_indir; then
-			echo
-			clean_patches "$indir"
-			echo
-		fi
-
-		if $b_clean_outdir; then
-			echo
-			clean_patches "$outdir"
-			echo
-		fi
-
-		if $b_restore_githead; then
-			~/bin/gitreset
-			git log --pretty -n1
-			echo
-		fi
+# removed in v3.0
+# ---------------
+#		if $b_clean_indir; then
+#			echo
+#			clean_patches "$indir"
+#			echo
+#		fi
+#
+#		if $b_clean_outdir; then
+#			echo
+#			clean_patches "$outdir"
+#			echo
+#		fi
+#
+#		if $b_restore_githead; then
+#			~/bin/gitreset
+#			git log --pretty -n1
+#			echo
+#		fi
+#----------------
 
 		# Backout of any residual child shells.
 		#
