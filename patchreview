@@ -127,12 +127,9 @@ function init_booleans {
 		prj_set_item $index true
 	done
 
-	# set "destructive" booleans to false
-	#
-	prj_set_item $prj_b_gitam_err_abort false
-
 # 	removed in 3.0
 #	--------------
+#	prj_set_item $prj_b_gitam_err_abort false
 #	prj_set_item $prj_b_clean_indir false
 #	prj_set_item $prj_b_clean_outdir false
 #	prj_set_item $prj_b_restore_githead false
@@ -276,7 +273,7 @@ $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
  b  Current git branch		: $gitbranch
  m  Mail client                 : $mailclient
- d  Patch directory		: $indir has $infilecount patch files
+ d  Patch directory		: $indir has $infilecount files
  w  Work directory		: $outdir
 
     $attr_under\0Run Parameters     $attr_OFF$attr_bold
@@ -306,8 +303,8 @@ EOF
 
 function menu_parser {
 
-	show_settings
 	infilecount=$(ls "$indir" | wc -l)
+	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
 	case $setting in
