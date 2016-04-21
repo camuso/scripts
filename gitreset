@@ -1,10 +1,12 @@
 #!/bin/bash
+#
+# $1 - directory from which to retrieve git head hash
 
 function git_getbranch {
 	echo $(git branch | egrep \* | cut -d' ' -f2)
 }
 
-declare headdir="../headdir"
+declare headdir="$1"
 declare gitbranch="$(git_getbranch)"
 
 git reset --hard $(cat "$headdir"/"$gitbranch")

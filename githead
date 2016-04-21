@@ -2,12 +2,13 @@
 #
 # Save the commit number of the HEAD of the tree to a file.
 #
+# $1 directory into which the head hash gets saved.
 
 function git_getbranch {
 	echo $(git branch | egrep \* | cut -d' ' -f2)
 }
 
-declare headdir="../headdir"
+declare headdir="$1"
 declare gitbranch="$(git_getbranch)"
 
 [ -d "$headdir" ] || mkdir "$headdir"
