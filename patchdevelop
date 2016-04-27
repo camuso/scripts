@@ -18,8 +18,6 @@ version="1.0"
 
 # Calls on the following external scripts.#
 #
-# ~/bin/githead
-# ~/bin/gitreset
 # ~/bin/ren*pat
 # ~/bin/patcmp
 
@@ -35,7 +33,6 @@ shopt -s extglob
 
 LIB="$HOME/bin/lib"
 manual="$HOME/bin/man/patchdevelop.txt"
-prjfile="$HOME/bin/.data/patchdevelop.prj"
 
 #######################################
 # External Source Files
@@ -348,11 +345,6 @@ function check_gitam {
 		echo "Aborting git am."
 		git am --abort
 
-		# if $b_restore_githead; then
-		#	~/bin/gitreset
-		#	git log --pretty -n1
-		# fi
-
 		promptgetchar \
 			"Press x to exit, any other key to continue: " \
 			response
@@ -570,7 +562,7 @@ done
 
 prj_entries=$index
 [ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
-[ -e "$prjfile" ] || touch "$prjfile"
+[ -e "$HOME/bin/.data/patchdevelop.prj" ] || touch $HOME/bin/.data/patchdevelop.prj
 prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
@@ -599,11 +591,6 @@ while true; do
 
 	if $b_rename_infiles; then
 		exec_boolean b_rename_infiles false "$renameagent $indir"
-		[ $? -ne 0 ] && continue
-	fi
-
-	if $b_save_githead; then
-		exec_boolean b_save_githead false "githead $outdir"
 		[ $? -ne 0 ] && continue
 	fi
 
