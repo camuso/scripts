@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# tboot-info
+#
+
+cmdline=tboot-info
+
+usagestr=$(
+cat <<EOF
+
+tboot-info pathname
+
+Example: tboot-info /tmp/tboot-info.txt
+
+Where filename is the path to the output file
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 1 ] || usage
+
+[ $UID -ne 0 ] && echo -e "\nYou must be root to execute this script\n" && exit 1
+
+outfil="$1"
+
+cat /etc/redhat-release | tee -a $outfile
+uname -r | tee -a $outfile
+dmidecode | grep -e Date -e Vendor -e Version -e Product -e "BIOS Revision" | head -5 | tee $outfil
+cpumod=$(cat /proc/cpuinfo | grep -m1 'model name')
+echo $cpumod | tee -a $outfile
+rpm -qa | grep -w tboot | tee -a $outfile
+[ -d "/boot/efi" ] && echo -e "\nEFI partition detected. tboot is not supported on UEFI systems.\n"  | tee -a $outfile
+
