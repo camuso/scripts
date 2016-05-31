@@ -285,23 +285,23 @@ function git_reset_head {
 	$response && gitreset $sesdir
 }
 
-function log_head {
-	local commit=$1
-	local short=$(git --oneline -n1 $commit | cut -d' ' -f1)
+function git_log_head {
+	local commit=$(git log --oneline -n1 | cut -d' ' -f1)
 	local line=""
 	local line_hash=""
 
 	while read line; do
 		line_hash=$(echo $line | cut -d' ' -f1)
-		if [ $line_hash == $short ]; then
+		if [ $line_hash == $commit ]; then
 			return 1
 		fi
 	done < $sesdir/$sesfile
 
-	git log --oneline -n1 $short >> $sesdir/$sesfile
+	git log --oneline -n1 $commit >> $sesdir/$sesfile
+	return 0
 }
 
-function set_head {
+function git_restore_head {
 	local line=""
 	local index=1
 	local linenumber=0
@@ -400,7 +400,7 @@ function menu_parser {
 			;;
 		C )	clean_directories
 			;;
-		G )	git_reset_head
+		G )	git_restore_head
 			;;
 		S )	> $sesdir/$sesfile
 			;;
@@ -732,8 +732,10 @@ while true; do
 	fi
 
 	if $b_save_githead; then
-		exec_boolean b_save_githead false "githead $outdir/session"
-		[ $? -ne 0 ] && continue
+		exec_boolean b_save_githead false "githead $sesdir"
+		st=$?
+		git_log_head
+		[ $st -ne 0 ] && continue
 	fi
 
 	if $b_apply_patches; then
@@ -741,7 +743,7 @@ while true; do
 		patchcount=0
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
-		log_head
+		git_log_head
 	fi
 
 	# Generate a patch set from the original upstream patches.
