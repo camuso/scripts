@@ -22,6 +22,33 @@ function git_commit2patchset {
 	return 0
 }
 
+# git_commit2patch
+# 	creates one patch from a given commit in a series, using the
+# 	number in the series of the commit in the patch as a part of
+# 	its name.
+#
+# $1 - number of the commit in the series
+# $2 - commit hash
+# $3 - destination directory
+#
+function git_commit2patch {
+	local index=$1
+	local commit=$2
+	local destdir=$3
+	local pfx=$(printf "%04d" $index)
+
+	if [ ${#commitnum} -gt 1 ]; then
+		git format-patch -1 -k --start-number $index $commit -o $destdir
+
+		# If we could not format the patch, then create an empty
+		# patch with the bad patch number in it.
+		#
+		[ $? -eq 0 ] || echo "invalid commit: $commit" > $destdir/"$pfx-inv.patch"
+	else
+		echo -n "" > $destdir/"$pfx-no.patch"
+	fi
+}
+
 # git_file2patchset
 # 	creates a patchset from a file containing a list of discontiguous
 #	commits.
