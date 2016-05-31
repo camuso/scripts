@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # patchreview
-version="3.1"
+version="3.2"
 #
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -111,17 +111,17 @@ function set_mailclient {
 
 			1 )	mailclient="ThunderBird"
 				renameagent=rentbpat
-				prj_set_item $prj_mailclient "$mailclient"
 				break
 				;;
 
 			2)	mailclient="Mutt"
 				renameagent=renmutpat
-				prj_set_item $prj_mailclient "$mailclient"
 				break
 				;;
 		esac
 	done
+
+	prj_set_item $prj_mailclient "$mailclient"
 }
 
 function init_booleans {
@@ -129,12 +129,12 @@ function init_booleans {
 		prj_set_item $index true
 	done
 
-# 	removed in 3.0
-#	--------------
-#	prj_set_item $prj_b_gitam_err_abort false
-#	prj_set_item $prj_b_clean_indir false
-#	prj_set_item $prj_b_clean_outdir false
-#	prj_set_item $prj_b_restore_githead false
+	# removed in 3.0
+	# --------------
+	# prj_set_item $prj_b_gitam_err_abort false
+	# prj_set_item $prj_b_clean_indir false
+	# prj_set_item $prj_b_clean_outdir false
+	# prj_set_item $prj_b_restore_githead false
 }
 
 # exec_boolean
@@ -242,7 +242,8 @@ function replace_patch {
 	getuser "Correct commit ID: " commit
 	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir/$us_commits"
 	rm -f "$outdir"/*.patch
-	git_file2patchset "$outdir/$us_commits" "$outdir"
+	# git_file2patchset "$outdir/$us_commits" "$outdir"
+	git_commit2patch $patnum $commit $outdir
 }
 
 function clean_dir {
@@ -277,11 +278,56 @@ function git_reset_head {
 "\nAre you sure you want to reset the git head to the following commit?\n"
 	local response=false
 	local gitbranch=$(git_getbranch)
-	local githead=$(cat "$outdir"/"$gitbranch")
-	local logstr=$attr_OFF$(git log -n1 --pretty=short $githead)$attr_bold
+	local githead=$(cat $sesdir/$gitbranch)
+	local logstr=$attr_OFF$(git log -n1 --oneline $githead)$attr_bold
 
 	getyn "$resetquery\n$logstr\n\n" response
-	$response && gitreset $outdir
+	$response && gitreset $sesdir
+}
+
+function log_head {
+	local commit=$1
+	local short=$(git --oneline -n1 $commit | cut -d' ' -f1)
+	local line=""
+	local line_hash=""
+
+	while read line; do
+		line_hash=$(echo $line | cut -d' ' -f1)
+		if [ $line_hash == $short ]; then
+			return 1
+		fi
+	done < $sesdir/$sesfile
+
+	git log --oneline -n1 $short >> $sesdir/$sesfile
+}
+
+function set_head {
+	local line=""
+	local index=1
+	local linenumber=0
+	local commit
+
+	while read line; do
+		printf "%3d - %s" $index $line
+		let index++
+	done < $sesdir/$sesfile
+
+	echo -e
+	echo -en "$attr_bold"
+	echo -en "Enter the number corresponding to the head you want: "
+	echo -en "$attr_OFF"
+
+	read linenumber
+	[ "$linenumber" == "q" ] && exit_patchreview 1
+	[ "$linenumber" == "x" ] && ui_sh_spawn
+	[ $linenumber -ge $index ] && linenumber=$index
+	[ $linenumber -le 0 ] && linenumber=$index
+
+	line=$(readlinen $linenumber $sesdir/$sesfile)
+	commit=$(echo $line | cut -d' ' -f1)
+	git reset --hard $commit
+
+	return 0
 }
 
 function show_settings {
@@ -310,6 +356,7 @@ $attr_bold
  P  Clean Patch Directory
  W  Clean Work Directory
  C  Clean Patch and Work Directories
+ S  Clean Session
  h  help text
  x  Exit to a shell
  q  Quit this script
@@ -354,6 +401,8 @@ function menu_parser {
 		C )	clean_directories
 			;;
 		G )	git_reset_head
+			;;
+		S )	> $sesdir/$sesfile
 			;;
 		i )	init_booleans
 			get_booleans
@@ -607,6 +656,8 @@ declare renameagent=renmutpat
 declare us_commits="us-commits.log"	# upstream commits log
 declare bp_commits="bp-commits.log"	# backport commits log
 declare patchcount=0
+declare sesdir="../.session"
+declare sesfile="sessions.log"
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
@@ -658,6 +709,12 @@ if [ $? -ne 0 ]; then
 	init_booleans
 fi
 
+# Create the sessions directory and sessions file to log session
+# information
+#
+[ -d "$sesdir" ] || mkdir -p "$sesdir"
+[ -e "$sesfile" ] || touch $sesdir/$sesfile
+
 prj_set_item $prj_mailclient $mailclient
 
 ##############################################
@@ -675,7 +732,7 @@ while true; do
 	fi
 
 	if $b_save_githead; then
-		exec_boolean b_save_githead false "githead $outdir"
+		exec_boolean b_save_githead false "githead $outdir/session"
 		[ $? -ne 0 ] && continue
 	fi
 
@@ -684,6 +741,7 @@ while true; do
 		patchcount=0
 		exec_boolean b_apply_patches false "apply_patches"
 		st=$?
+		log_head
 	fi
 
 	# Generate a patch set from the original upstream patches.
