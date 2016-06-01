@@ -308,7 +308,7 @@ function git_restore_head {
 	local commit
 
 	while read line; do
-		printf "%3d - %s" $index $line
+		printf "%3d - %s\n" $index "$line"
 		let index++
 	done < $sesdir/$sesfile
 
