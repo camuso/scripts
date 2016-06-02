@@ -1,0 +1,289 @@
+#!/bin/bash
+#
+# lib/patch.source
+#
+# The following source files must be included before this one.
+#
+# source $LIB/ui.source
+# source $LIB/project.source
+# source $LIB/gitutilities.source
+
+b_ui_int_first_getyn=false	# For lib/ui.source
+
+# Declare the global variables
+#
+declare mailclient
+declare renameagent
+declare prj_entries=0
+declare index=0
+declare boolcount=0
+declare boolindex=0
+declare b_found_first_bool=false
+declare infilecount=0
+declare gitbranch=$(git_getcurrentbranch)
+declare us_commits="us-commits.log"	# upstream commits log
+declare bp_commits="bp-commits.log"	# backport commits log
+declare patchcount=0
+declare sesdir="../.session"
+declare sesfile="sessions.log"
+declare commit_msg_file="$outdir/commit-msg.txt"
+
+declare prj_indir
+declare pprj_outdir
+declare pprj_mailclient
+declare pprj_b_rename_infiles
+declare pprj_b_save_githead
+declare pprj_b_apply_patches
+declare pprj_b_fmt_upstream
+declare pprj_b_patcmp
+declare pprj_b_gitam_err_abort
+
+
+function get_mailclient {
+	echo $(prj_get_item $prj_mailclient)
+}
+
+function set_renameagent {
+
+	case $mailclient in
+
+		"Thunderbird" )	renameagent=rentbpat
+				;;
+		"Mutt" )	renameagent=renmutpat
+				;;
+	esac
+}
+
+function set_mailclient {
+	echo -e "$attr_bold"
+	echo -e "Select your mail client from the following list."
+	echo -e " 1 - ThunderBird"
+	echo -e " 2 - Mutt"
+	promptgetchar "Your choice: " choice
+
+	while true; do
+		case $choice in
+
+			1 )	mailclient="ThunderBird"
+				prj_set_item $prj_mailclient "$mailclient"
+				break
+				;;
+
+			2)	mailclient="Mutt"
+				prj_set_item $prj_mailclient "$mailclient"
+				break
+				;;
+		esac
+	done
+
+	set_renameagent
+}
+
+# exec_boolean
+#
+# Execute a command string and pass the boolean that was
+# used to determine whether the command should be executed.
+# The boolean will be given the value passed by the caller.
+#
+# $1 - The boolean
+# $2 - The boolean's new value
+# $3 - The command line as a strng.
+#
+# Returns the status of the executed command string.
+#
+function exec_boolean {
+	argc=$#
+	argv="$@"
+	local stat
+	local boolean=$1
+	local b_newval=$2
+	local cmdstr="$(echo "$@" | cut -d' ' -f$argc-)"
+	local offset=prj_${boolean}
+	# echo ${!offset}
+	$cmdstr
+	stat=$?
+	# echo "$cmdstr status: $stat"
+	if [ $stat -eq 0 ]; then
+		if [ $argc -eq 3 ]; then
+			$b_newval && boolean=true || boolean=false
+		fi
+		[ $argc -ge 2 ] && prj_set_item ${!offset} $boolean
+	else
+		echo "$cmdstr"
+		echo -e "\tDid not execute successfully"
+		echo
+	fi
+	return $stat
+}
+
+function git_log_head {
+	local commit=$(git log --oneline -n1 | cut -d' ' -f1)
+	local line=""
+	local line_hash=""
+
+	while read line; do
+		line_hash=$(echo $line | cut -d' ' -f1)
+		if [ $line_hash == $commit ]; then
+			return 1
+		fi
+	done < $sesdir/$sesfile
+
+	git log --oneline -n1 $commit >> $sesdir/$sesfile
+	return 0
+}
+
+function git_restore_head {
+	local line=""
+	local index=1
+	local linenumber=0
+	local commit
+
+	while read line; do
+		printf "%3d - %s\n" $index "$line"
+		let index++
+	done < $sesdir/$sesfile
+
+	echo -e
+	echo -en "$attr_bold"
+	echo -en "Enter the number corresponding to the head you want: "
+	echo -en "$attr_OFF"
+
+	read linenumber
+	[ "$linenumber" == "q" ] && exit_patchreview 1
+	[ "$linenumber" == "x" ] && ui_sh_spawn
+	[ $linenumber -ge $index ] && linenumber=$index
+	[ $linenumber -le 0 ] && linenumber=$index
+
+	line=$(readlinen $linenumber $sesdir/$sesfile)
+	commit=$(echo $line | cut -d' ' -f1)
+	git reset --hard $commit
+
+	return 0
+}
+
+# replace_patch
+#
+# GLOBALS
+#	outdir
+#	us_commits
+#
+function replace_patch {
+	local patnum
+	local commit
+	local patcnt=$(cat "$outdir/$us_commits" | wc -l)
+
+	getuser "Patch Number to replace: " patnum
+	getuser "Correct commit ID: " commit
+	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir/$us_commits"
+	rm -f "$outdir"/*.patch
+	# git_file2patchset "$outdir/$us_commits" "$outdir"
+	git_commit2patch $patnum $commit $outdir
+}
+
+# create_commit_msg
+#
+# $1 - pathname of patch
+#
+# GLOBALS
+#	outdir
+#	commit_msg_file
+#
+function create_commit_msg {
+	local diffstr="diff "
+	local subjstr="Subject: "
+	local found_subj=false
+
+	echo "" > "$commit_msg_file"
+
+	while read line; do
+		[ "${line:0:5}" == "$diffstr" ] && break
+
+		if [ "${line:0:9}" == "$subjstr" ]; then
+			local sumstrpos=$(($(ui_strindex "$line" "]") + 1))
+			local sumstr=$(echo -e ${line:$sumstrpos})
+			echo "$sumstr" >> "$commit_msg_file"
+			echo "" >> "$commit_msg_file"
+			found_subj=true
+		fi
+		$found_subj && echo "$line" >> "$commit_msg_file"
+	done < "$1"
+}
+
+# retry_patch
+#
+# $1 - pathname of patch
+#
+# GLOBALS
+#	outdir
+#	commit_msg_file
+#
+function retry_patch {
+	local retrystat
+	local retryname=$(basename -s .patch "$1")
+
+	create_commit_msg "$1"
+	git clean -df --exclude=*.rej
+	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$retryname".retry
+	retrystat=$?
+	if [ $retrystat -ne 0 ]; then
+		echo "Unable to apply "$1""
+		echo "Exiting script with nonzero status"
+		echo
+		exit 1
+	fi
+
+	# get any .rej files out of the way by moving them to the $outdir
+	#
+	git status --porcelain
+	for rej in $(git status --porcelain); do
+		[ -d "$rej" ] && continue
+		if [[ $(echo "$rej" | tail -c4) == "rej" ]]; then
+			echo $rej
+			mkdir -p $outdir/$(dirname $rej)
+			mv $rej $outdir/$(dirname $rej)/.
+			# read -n1
+		fi
+	done
+
+	git status
+	git add .
+	git commit . -F "$commit_msg_file"
+	echo
+	# git log --pretty -n1
+	# read -n1
+}
+
+# apply_patches
+#
+# GLOBALS
+#	indir
+#	outdir
+#	bp_commits
+#
+function apply_patches {
+	# patchcount is global
+	local stat=0
+	echo "" > "$outdir/$bp_commits"
+
+	# for patch in $(ls $indir/*.patch); do
+	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
+		let patchcount++
+		echo "$patch"
+		git am -3 $patch
+		stat=$?
+		# echo "git am stat: $stat"
+
+		if [ $stat -ne 0 ]; then
+			git am --abort
+			echo -e "\ngit am aborted. Exiting script ...\n"
+			$b_gitam_err_abort && exit 1
+			retry_patch "$patch"
+		fi
+
+		printf "%3d " $patchcount >> "$outdir/$bp_commits"
+		git log --oneline -n1 >> "$outdir/$bp_commits"
+	done
+	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
+	return $stat
+}
+

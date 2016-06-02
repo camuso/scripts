@@ -10,6 +10,7 @@
 # as local. You may otherwise experience behavior that is difficult to debug.
 #
 
+#
 # Text attributes
 #
 attr_bold="\033[1m"
@@ -493,5 +494,3 @@ function ui_strindex {
 	local x="${1%%$2*}"
 	[[ $x = $1 ]] && echo -1 || echo ${#x}
 }
-
-ui_source_loaded=true

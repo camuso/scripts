@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # patchdevelop - based on patchreview v3.1
-version="1.0"
+version="3.2"
 #
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -40,6 +40,7 @@ manual="$HOME/bin/man/patchdevelop.txt"
 source $LIB/ui.source
 source $LIB/project.source
 source $LIB/gitutilities.source
+source $LIB/patch-common.source
 
 ########################################
 # Function Return Codes
@@ -56,113 +57,10 @@ function exit_patchdevelop {
 	exit $1
 }
 
-function get_gitbranch {
-	echo $(git branch | egrep \* | cut -d' ' -f2)
-}
-
-function set_gitbranch {
-	local index=1
-	git branch > $outdir/branchlist
-	echo -e "$attr_bold"
-
-	while read line; do
-		printf "%2d  $line\n" $index
-		let index++
-	done < $outdir/branchlist
-
-	echo -e  "$attr_bold"
-	echo -e  "The following commands will be issued before a new branch is checked out."
-	echo -en "$attr_OFF"
-	echo -e  "\tgit am --abort      # Abort any pending git am ops"
-	echo -e  "\tgit checkout"
-	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
-	echo -e
-	echo -en "$attr_bold"
-	echo -en "Enter the number corresponding to the branch you want: "
-	echo -en "$attr_OFF"
-	read  linenumber
-	[ "$linenumber" == "q" ] && exit_patchdevelop 1
-	[ "$linenumber" == "x" ] && ui_sh_spawn
-	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
-	echo "git checkout "$gitbranch""
-	git am --abort --quiet
-	# git checkout .
-	# git clean -df
-	git checkout "$gitbranch" 2>&1
-	[ $? -eq 0 ] || exit 1
-	~/bin/gitlog1
-}
-
-function get_mailclient {
-	echo $(prj_get_item $prj_mailclient)
-}
-
-function set_mailclient {
-	echo -e "$attr_bold"
-	echo -e "Select your mail client from the following list."
-	echo -e " 1 - ThunderBird"
-	echo -e " 2 - Mutt"
-	promptgetchar "Your choice: " choice
-
-	while true; do
-		case $choice in
-
-			1 )	mailclient="ThunderBird"
-				renameagent=rentbpat
-				prj_set_item $prj_mailclient "$mailclient"
-				break
-				;;
-
-			2)	mailclient="Mutt"
-				renameagent=renmutpat
-				prj_set_item $prj_mailclient "$mailclient"
-				break
-				;;
-		esac
-	done
-}
-
 function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index true
 	done
-}
-
-# exec_boolean
-#
-# Execute a command string and pass the boolean that was
-# used to determine whether the command should be executed.
-# The boolean will be given the value passed by the caller.
-#
-# $1 - The boolean
-# $2 - The boolean's new value
-# $3 - The command line as a strng.
-#
-# Returns the status of the executed command string.
-#
-function exec_boolean {
-	argc=$#
-	argv="$@"
-	local stat
-	local boolean=$1
-	local b_newval=$2
-	local cmdstr="$(echo "$@" | cut -d' ' -f$argc-)"
-	local offset=prj_${boolean}
-	# echo ${!offset}
-	$cmdstr
-	stat=$?
-	# echo "$cmdstr status: $stat"
-	if [ $stat -eq 0 ]; then
-		if [ $argc -eq 3 ]; then
-			$b_newval && boolean=true || boolean=false
-		fi
-		[ $argc -ge 2 ] && prj_set_item ${!offset} $boolean
-	else
-		echo "$cmdstr"
-		echo -e "\tDid not execute successfully"
-		echo
-	fi
-	return $stat
 }
 
 # get_booleans
@@ -208,28 +106,6 @@ function set_booleans {
 	return 0
 }
 
-# replace_patch
-#
-# GLOBALS
-#	outdir
-#	us_commits
-#
-function replace_patch {
-	local patnum
-	local commit
-	local patcnt=$(cat "$outdir/$us_commits" | wc -l)
-
-	getuser "Patch Number to replace: " patnum
-	getuser "Correct commit ID: " commit
-	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir/$us_commits"
-	rm -f "$outdir"/*.patch
-	git_file2patchset "$outdir/$us_commits" "$outdir"
-}
-
-function git_getbranch {
-	echo $(git branch | egrep \* | cut -d' ' -f2)
-}
-
 function show_settings {
 	settingstr=$(
 cat <<EOF
@@ -268,7 +144,7 @@ function menu_parser {
 
 	case $setting in
 
-		b )	set_gitbranch
+		b )	git_setbranch
 			;;
 		m )	set_mailclient
 			;;
@@ -316,7 +192,7 @@ function menu_loop {
 	# get the mail client
 	#
 	mailclient=$(prj_get_item $prj_mailclient)
-	commit_msg_file="$outdir/commit-msg.txt"
+	set_renameagent
 
 	# delete any "scratch" file from the indir
 	#
@@ -333,162 +209,9 @@ function menu_loop {
 	return $stat
 }
 
-repatchstr="
-Spawning a shell so you can fix or refresh the aborted patch
-and apply by hand.
-"
-
-function check_gitam {
-	echo -n "Patch failed to apply. "
-
-	if $b_gitam_err_abort ; then
-		echo "Aborting git am."
-		git am --abort
-
-		promptgetchar \
-			"Press x to exit, any other key to continue: " \
-			response
-		echo
-		[ "$response" == "x" ] && exit 1
-		return 1
-	else
-		git am --abort
-		echo
-		echo "Fix or refresh the aborted patch and apply by hand."
-		echo -e "Type "$attr_bold"exit 1"$attr_OFF" if you want to exit the script."
-		ui_sh_spawn
-		[ $? -ne 0 ] && exit 1
-		return 0
-	fi
-}
-
-# strindex string-1 string-2
-#
-# Return zero-based index of string-2 in string-1
-# Returns -1 if string-2 is not found in string-1
-#
-function strindex {
-	x="${1%%$2*}"
-	[[ $x = $1 ]] && echo -1 || echo ${#x}
-}
-
-# create_commit_msg
-#
-# $1 - pathname of patch
-#
-# GLOBALS
-#	outdir
-#	commit_msg_file
-#
-function create_commit_msg {
-	local diffstr="diff "
-	local subjstr="Subject: "
-	local found_subj=false
-
-	echo "" > "$commit_msg_file"
-
-	while read line; do
-		[ "${line:0:5}" == "$diffstr" ] && break
-
-		if [ "${line:0:9}" == "$subjstr" ]; then
-			local sumstrpos=$(($(strindex "$line" "]") + 1))
-			local sumstr=$(echo -e ${line:$sumstrpos})
-			echo "$sumstr" >> "$commit_msg_file"
-			echo "" >> "$commit_msg_file"
-			found_subj=true
-		fi
-		$found_subj && echo "$line" >> "$commit_msg_file"
-	done < "$1"
-}
-
-# retry_patch
-#
-# $1 - pathname of patch
-#
-# GLOBALS
-#	outdir
-#	commit_msg_file
-#
-function retry_patch {
-	local retrystat
-	local retryname=$(basename -s .patch "$1")
-
-	create_commit_msg "$1"
-	git clean -df --exclude=*.rej
-	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$retryname".retry
-	retrystat=$?
-	if [ $retrystat -ne 0 ]; then
-		echo "Unable to apply "$1""
-		echo "Exiting script with nonzero status"
-		echo
-		exit 1
-	fi
-
-	# get any .rej files out of the way by moving them to the $outdir
-	#
-	git status --porcelain
-	for rej in $(git status --porcelain); do
-		[ -d "$rej" ] && continue
-		if [[ $(echo "$rej" | tail -c4) == "rej" ]]; then
-			echo $rej
-			mkdir -p ../temp/$(dirname $rej)
-			mv $rej ../temp/$(dirname $rej)/.
-			# read -n1
-		fi
-	done
-
-	git status
-	git add .
-	git commit . -F "$commit_msg_file"
-	echo
-	# git log --pretty -n1
-	# read -n1
-}
-
-# apply_patches
-#
-# GLOBALS
-#	indir
-#	outdir
-#	bp_commits
-#
-function apply_patches {
-	# patchcount is global
-	local stat=0
-	echo "" > "$outdir/$bp_commits"
-
-	# for patch in $(ls $indir/*.patch); do
-	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
-		let patchcount++
-		echo "$patch"
-		git am -3 $patch
-		stat=$?
-		# echo "git am stat: $stat"
-
-#		if [ $stat -ne 0 ]; then
-#			check_gitam
-#			stat=$?
-#			[ $stat -ne 0 ] && break
-#		fi
-
-		if [ $stat -ne 0 ]; then
-			git am --abort
-			$b_gitam_err_abort && exit 1
-			retry_patch "$patch"
-		fi
-
-		printf "%3d " $patchcount >> "$outdir/$bp_commits"
-		git log --oneline -n1 >> "$outdir/$bp_commits"
-	done
-	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
-	return $stat
-}
-
 #############################
 # Start of Script Execution
 #############################
-
-b_ui_int_first_getyn=false	# For lib/ui.source
 
 # Save our current shell level.
 #
@@ -500,15 +223,7 @@ echo -e ""$attr_bold""$attr_under""
 echo "Patch Develop $version - Check backported patches with upstream"
 echo -e "$attr_OFF"
 
-# Determine if we're at the top of a git tree. If not, exit.
-#
-if ! [ -d .git ]; then
-	echo -e "The current directory... "$attr_bold" "$PWD""$attr_OFF""
-	echo -e "\t ...is not the top of a git tree."
-	echo "Please cd to the top of a git tree."
-	echo
-	exit 1
-fi
+! $(git_checkrepo) && git_invrepomsg && exit 1
 
 echo -en "$attr_bold"
 echo -en "Press \"q\" to quit or \"x\" to spawn a new shell "
@@ -518,21 +233,6 @@ echo -en "$attr_OFF"
 ###########################################
 # Parameter Initialization
 ###########################################
-
-# Declare the global variables
-#
-declare prj_entries=0
-declare index=0
-declare boolcount=0
-declare boolindex=0
-declare b_found_first_bool=false
-declare infilecount=0
-declare gitbranch=$(get_gitbranch)
-declare mailclient="Mutt"
-declare renameagent=renmutpat
-declare us_commits="us-commits.log"	# upstream commits log
-declare bp_commits="bp-commits.log"	# backport commits log
-declare patchcount=0
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
@@ -563,7 +263,7 @@ done
 prj_entries=$index
 [ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
 [ -e "$HOME/bin/.data/patchdevelop.prj" ] || touch $HOME/bin/.data/patchdevelop.prj
-prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
+prj_init_prjfile ~/bin/.data/patchdevelop.prj $prj_entries
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
 # new project file has been created and its values must be initialized.
@@ -575,10 +275,9 @@ if [ $? -ne 0 ]; then
 	echo "want us to put the output of this script."
 	prj_set_directory "Patch" $prj_indir indir quiet
 	prj_set_directory "Work" $prj_outdir outdir quiet
+	set_mailclient
 	init_booleans
 fi
-
-prj_set_item $prj_mailclient $mailclient
 
 ##############################################
 # Main Program Loop

@@ -303,5 +303,74 @@ function git_mailhead2commitsfile {
 	grep "From " $srcdir/*.patch | cut -d' ' -f2 >> $commitsfile
 }
 
-gitutilities_source_loaded=true
+function git_invrepomsg {
+	echo -e ""$attr_bold""$PWD""$attr_OFF" is not a valid git repo\n"
+}
 
+# git_checkrepo
+# 	Determines whether the current directory is a valid git repo
+#
+# returns 0 valid repo, else returns 1
+#
+# usage:
+# 	$(git_checkrepo) || echo "$PWD is not a valid git repo" || exit 1
+#
+function git_checkrepo {
+	[ -d .git ] && return 0 || return 1
+}
+
+# git_getcurrentbranch
+#
+# echoes the current branch in the git tree after checking that it's a
+# valid repo
+#
+# usage:
+# 	local current_branch=$(git_getcurrentbranch)
+#
+function git_getcurrentbranch {
+ 	git_checkrepo true
+	[ $? -eq 0 ] || exit 1
+	echo $(git branch | egrep \* | cut -d' ' -f2)
+}
+
+# git_setbranch outdir
+#
+# $1 if it exists sets the outdir. Default is /tmp
+#
+function git_setbranch {
+	local index=1
+	local line
+	local outdir="/tmp"
+
+	[ $# -eq 1 ] && outdir="$1"
+
+	git branch > $outdir/branchlist
+	echo -e "$attr_bold"
+
+	while read line; do
+		printf "%2d  $line\n" $index
+		let index++
+	done < $outdir/branchlist
+
+	echo -e  "$attr_bold"
+	echo -e  "The following commands will be issued before a new branch is checked out."
+	echo -en "$attr_OFF"
+	echo -e  "\tgit am --abort      # Abort any pending git am ops"
+	echo -e  "\tgit checkout"
+	# echo -e  "\tgit clean           # Clean out uncommitted files and directories"
+	echo -e
+	echo -en "$attr_bold"
+	echo -en "Enter the number corresponding to the branch you want: "
+	echo -en "$attr_OFF"
+	read  linenumber
+	[ "$linenumber" == "q" ] && exit_patchdevelop 1
+	[ "$linenumber" == "x" ] && ui_sh_spawn
+	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
+	echo "git checkout "$gitbranch""
+	git am --abort --quiet
+	# git checkout .
+	# git clean -df
+	git checkout "$gitbranch" 2>&1
+	[ $? -eq 0 ] || exit 1
+	~/bin/gitlog1
+}
