@@ -73,10 +73,37 @@ function set_mailclient {
 				prj_set_item $prj_mailclient "$mailclient"
 				break
 				;;
+			*)	continue
+				;;
 		esac
 	done
 
 	set_renameagent
+}
+
+# check_dir
+# 	Checks whether the directory coming from the project file is valid.
+# 	If not, calls prj_set_directory to get the new directory name.
+# 	The prj_set_directory routine calls ui_getnewdir, which will ask
+# 	if the user wants to create the directory if it does not already
+# 	exist.
+#
+# $1 - index into the project file where the directory name string goes
+# $2 - string representing the directory type, e.g. "Patch" or "Work"
+# $3 - returns the name of the directory
+#
+function check_dir {
+	local index=$1
+	local dirtype="$2"
+	local dirname=$(prj_get_item $index)
+
+	if ! [ -d "$dirname" ]; then
+		echo -e "\n"$attr_bold""$dirname""$attr_OFF" does not exist.\n";
+		prj_set_directory "$dirtype" $index dirname quiet
+		dirname=$(prj_get_item $index)
+	fi
+
+	eval $3=$dirname
 }
 
 # exec_boolean

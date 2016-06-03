@@ -282,9 +282,18 @@ function ui_getnewdir {
 		fi
 
 		if [ $stat -eq 0 ]; then
-			mkdir -p "$newdir"
-			stat=$?
-			[ $stat -ne 0 ] && continue
+			echo "\""$newdir"\" does not exist."
+			getyn "Want to create "$newdir" now?" ans
+			if $ans; then
+				mkdir -p "$newdir"
+				stat=$?
+				if [ $stat -ne 0 ]; then
+					echo "Could not create directory "$newdir""
+					continue
+				fi
+			else
+				continue
+			fi
 			eval $2="$newdir"
 			return $stat
 		fi

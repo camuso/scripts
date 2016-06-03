@@ -251,8 +251,8 @@ function menu_loop {
 
 	# get the patch and work directories.
 	#
-	indir=$(prj_get_item $prj_indir)
-	outdir=$(prj_get_item $prj_outdir)
+	check_dir $prj_indir "Patch" indir
+	check_dir $prj_outdir "Work" outdir
 
 	# get the mail client
 	#
