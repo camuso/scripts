@@ -10,6 +10,10 @@ shopt -s extglob
 #export CLICOLOR=1
 #export LSCOLORS=DxGxcxdxCxegedabagacad
 
+# from http://wiki.bash-hackers.org/scripting/debuggingtips
+#
+export PS4='+(${BASH_SOURCE}:${LINENO}): '
+
 [ $(echo $PATH | grep -w $HOME/bin) ] || export PATH=$PATH:$HOME/bin
 
 export TEMPDIR=~/Maildir/temp/
