@@ -2,8 +2,7 @@ temp/
 test/
 coventry/
 recovery/
-.data/
-*.prj
+.*
 .*.swp
 *.tgz
 *.tar
@@ -20,4 +19,3 @@ getbit
 funcs
 cscope*
 test-inspect
-sparse
