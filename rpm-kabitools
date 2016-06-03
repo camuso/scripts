@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+# rpm-kabitools
+#
+
+cmdline=rpm-kabitools
+
+usagestr=$(
+cat <<EOF
+
+rpm-kabitools <vr>
+
+Where <vr> is version-revision, eg 3.5.1-1
+
+This is intended to be run from the directory above rpmbuild. If
+rpmbuild directory does not exist, then this script will create it and
+its directory tree. The tar file and rpm file will be created in that
+tree in the places specified in the spec file.
+
+rpmbuild/
+    BUILD/
+    BUILDROOT/
+    RPMS/
+    SOURCES/
+    SPECS/
+    SRPMS/
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 1 ] || usage
+
+declare vr="$1"
+
+[ -d "rpmbuild" ]	 	|| mkdir rpmbuild
+[ -d "rpmbuild/BUILD" ] 	|| mkdir -p rpmbuild/BUILD
+[ -d "rpmbuild/BUILDROOT" ] 	|| mkdir -p rpmbuild/BUILDROOT
+[ -d "rpmbuild/RPMS" ] 		|| mkdir -p rpmbuild/RPMS
+[ -d "rpmbuild/SOURCES" ] 	|| mkdir -p rpmbuild/SOURCES
+[ -d "rpmbuild/SPECS" ]		|| mkdir -p rpmbuild/SPECS
+[ -d "rpmbuild/SRPMS" ]		|| mkdir -p rpmbuild/SRPMS
+
+tar -cvzf rpmbuild/SOURCES/kabitools-"$vr".tar.gz \
+	kabitools-"$vr"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
+
+cd rpmbuild
+rpmbuild --bb --clean SPECS/kabitools.spec
+cd -
+
