@@ -1,0 +1,43 @@
+#!/bin/bash
+#
+# sysinfo
+#
+
+cmdline=sysinfo
+
+usagestr=$(
+cat <<EOF
+
+$cmdline
+
+Gives information on the currently running system.
+You must be root to execute this script.
+
+- vendor
+- product
+- BIOS revision
+- distro
+- kernel version
+- CPU model
+- host bridges
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 0 ] || usage
+[ $UID -ne 0 ] && {
+	echo -e "\nYou must be root to execute this script\n";
+	exit 1
+}
+
+dmidecode | grep -e Date -e Vendor -e Version -e Product -e "BIOS Revision" | head -5
+cat /etc/redhat-release | head -1
+echo "kernel $(uname -r)"
+cpumod=$(cat /proc/cpuinfo | grep -m1 'model name')
+echo "CPU $cpumod"
+lspci | grep -i bridge
