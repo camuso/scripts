@@ -26,7 +26,7 @@ declare bp_commits="bp-commits.log"	# backport commits log
 declare patchcount=0
 declare sesdir="../.session"
 declare sesfile="sessions.log"
-declare commit_msg_file="$outdir/commit-msg.txt"
+declare commit_msg_file="commit-msg.txt"
 
 declare prj_indir
 declare pprj_outdir
@@ -210,17 +210,18 @@ function replace_patch {
 # create_commit_msg
 #
 # $1 - pathname of patch
+# $2 - outdir
 #
 # GLOBALS
-#	outdir
 #	commit_msg_file
 #
 function create_commit_msg {
 	local diffstr="diff "
 	local subjstr="Subject: "
 	local found_subj=false
+	local commit_msg_path=""$outdir"/"$commit_msg_file""
 
-	echo "" > "$commit_msg_file"
+	echo "" > "$commit_msg_path"
 
 	while read line; do
 		[ "${line:0:5}" == "$diffstr" ] && break
@@ -228,27 +229,28 @@ function create_commit_msg {
 		if [ "${line:0:9}" == "$subjstr" ]; then
 			local sumstrpos=$(($(ui_strindex "$line" "]") + 1))
 			local sumstr=$(echo -e ${line:$sumstrpos})
-			echo "$sumstr" >> "$commit_msg_file"
-			echo "" >> "$commit_msg_file"
+			echo "$sumstr" >> "$commit_msg_path"
+			echo "" >> "$commit_msg_path"
 			found_subj=true
 		fi
-		$found_subj && echo "$line" >> "$commit_msg_file"
+		$found_subj && echo "$line" >> "$commit_msg_path"
 	done < "$1"
 }
 
 # retry_patch
 #
 # $1 - pathname of patch
+# $2 - outdir
 #
 # GLOBALS
-#	outdir
 #	commit_msg_file
 #
 function retry_patch {
 	local retrystat
 	local retryname=$(basename -s .patch "$1")
+	local commit_msg_path="$outdir"/"$commit_msg_file"
 
-	create_commit_msg "$1"
+	create_commit_msg "$1" "$2"
 	git clean -df --exclude=*.rej
 	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$retryname".retry
 	retrystat=$?
@@ -274,7 +276,7 @@ function retry_patch {
 
 	git status
 	git add .
-	git commit . -F "$commit_msg_file"
+	git commit . -F "$commit_msg_path"
 	echo
 	# git log --pretty -n1
 	# read -n1
