@@ -35,7 +35,7 @@ declare     attr_off='\[\e[0m\]'
 declare    underline='\[\e[3m\]'
 
 if [ $(id -u) -eq 0 ]; then # you are root, set root prompt
-	export PS1="[$underline$red_bold\u$attr_off$red_bold@$green_bold\h $yellow_bold\W$attr_off]$magenta_bold$ $attr_off"
+	export PS1="[$underline$red_bold\u$attr_off$red_bold@$green_bold\h $yellow_bold\W$attr_off]$red_bold# $attr_off"
 else # normal user
 	# export PS1="[\[\e[1;35m\]\u\[\e[31;1m\]@\[\e[1;32m\]\h \[\e[1;33m\]\W]\[\e[1;35m\]$\[\e[0m\] "
 	export PS1="[$magenta_bold\u$red_bold@$green_bold\h $yellow_bold\W$attr_off]$magenta_bold$ $attr_off"
