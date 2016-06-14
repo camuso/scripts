@@ -123,7 +123,7 @@ function clean_dir {
 	local response=false
 
 	getyn "$delquery\n\t$1\n" response
-	$response && find -depth "$1" -exec rm -rf '{}' \;
+	$response && find "$1" -mindepth 1 -exec rm -rf '{}' \;
 }
 
 function clean_directories {
