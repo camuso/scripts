@@ -115,15 +115,15 @@ replace_commit() {
 	local stat
 	local idx=$index
 
-	if ((idx <= 0)); then 
-		idx=0
-	elif ((1 <= $index && index <= $penindex)); then
-		let idx--
+	if (($index <= 0)); then
+		index=0
+	elif ((1 <= $index && $index <= $penindex)); then
+		let index--
 	elif (($index >= $maxindex)); then
-		idx=$index
+		index=$maxindex
 	fi
 
-	patnum=$((idx + 1 ))
+	patnum=$((index + 1 ))
 	pfx=$(printf "%04d" $patnum)
 
 	if ! [ -f "$commitslog" ]; then
@@ -143,9 +143,8 @@ replace_commit() {
 	#
 	[ $stat -ne 0 ] && echo -e "\ninvalid commit: $commit\n" > $usdir/$pfx-inv.patch
 
-	usfiles[index]=$(ls $usdir/$pfx-*.patch)
-	
-	echo $idx
+	usfiles[$index]=$(ls $usdir/$pfx-*.patch)
+
 }
 
 # backup - set index to value for previous diff'd files
@@ -217,7 +216,7 @@ while true; do
 			;;
 		n )	getpatchnumber
 			;;
-		p )	index=$(replace_commit)
+		p )	replace_commit
 			;;
 		x )	ui_sh_spawn
 			continue
