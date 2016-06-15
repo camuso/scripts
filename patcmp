@@ -15,7 +15,15 @@ declare usdir=$2
 declare spclstr=$3
 declare argc=$#
 
-function usage () {
+declare uscount=$(ls "$usdir"/*.patch | wc -l)
+declare mlcount=$(ls "$mldir"/*.patch | wc -l)
+
+declare index=0
+declare maxindex=$((mlcount - 1))
+declare penindex=$((maxindex - 1))
+declare preindex=0
+
+usage() {
 	echo
 	echo "usage: patcmp dir-1 dir-2 [special action string]"
 	echo
@@ -38,9 +46,6 @@ function usage () {
 [ $argc -lt 2 ] && usage
 
 
-uscount=$(ls "$usdir"/*.patch | wc -l)
-mlcount=$(ls "$mldir"/*.patch | wc -l)
-
 # It is not really required that the two directories have the same number
 # of files, because we will simply stop processing when we run out of files
 # in one directory or the other. However, it could lead to confusion, since
@@ -61,8 +66,6 @@ echo
 echo "Patches in $mldir will be compared with patches in $usdir"
 echo
 
-
-index=0
 # for i in $(ls "$mldir"/*.patch); do
 for i in $(ls "$mldir"/*.patch  | sort -V); do
 	mlfiles[index]="$i"
@@ -79,6 +82,9 @@ for i in $(ls "$usdir"/*.patch  | sort -V); do
 	let index++
 done
 echo
+
+# PS4='+(${BASH_SOURCE}:${LINENO}): '
+# set -x
 
 getpatchnumber() {
 	index=-1
@@ -100,14 +106,25 @@ getpatchnumber() {
 #
 # $1 - one-based number of the patch in the patchset
 #
-function replace_commit {
-	local patnum=$1
+replace_commit() {
+	local patnum
 	local commit
 	local patcnt
 	local commitslog="$usdir/us-commits.log"
-	local pfx=$(printf "%04d" $patnum)
-	local index=$((patnum - 1))
+	local pfx
 	local stat
+	local idx=$index
+
+	if ((idx <= 0)); then 
+		idx=0
+	elif ((1 <= $index && index <= $penindex)); then
+		let idx--
+	elif (($index >= $maxindex)); then
+		idx=$index
+	fi
+
+	patnum=$((idx + 1 ))
+	pfx=$(printf "%04d" $patnum)
 
 	if ! [ -f "$commitslog" ]; then
 		ui_getfilespec "Path/File containing the commits: " commitslog
@@ -127,16 +144,39 @@ function replace_commit {
 	[ $stat -ne 0 ] && echo -e "\ninvalid commit: $commit\n" > $usdir/$pfx-inv.patch
 
 	usfiles[index]=$(ls $usdir/$pfx-*.patch)
+	
+	echo $idx
+}
+
+# backup - set index to value for previous diff'd files
+#
+# Globals:
+# 	index
+# 	maxindex
+# 	preindex
+# 	penindex
+#
+backup() {
+	local idx=$index
+
+	let idx--
+
+	if (($idx <= 0)); then
+		idx=0
+	elif (( (1 <= $index && index <= $penindex)
+	     || ($preindex == $penindex) )); then
+		let idx--
+	fi
+	echo $idx
 }
 
 index=0
 while true; do
 
-	if [ $index -eq $((mlcount - 1)) ]; then
+	if [[ $index -ge $maxindex ]]; then
 		echo -e "$attr_bold"
-		printf "Patch %04d is the last patch in the set." $((index + 1))
+		printf "Patch %04d is the last patch in the set." $((maxindex + 1))
 		echo -e "$att_OFF"
-		index=$((mlcount - 1))
 	fi
 
 	echo "-----------------------------------------------------------------"
@@ -146,7 +186,7 @@ while true; do
 	echo "With     : ${usfiles[$index]}"
 	grep -m1 "Subject: " "${usfiles[$index]}"
 	echo
-	if [ $index -lt 0 ] || [ $index -ge $mlcount ]; then
+	if [[ $index -lt 0 ]] || [[ $index -gt $maxindex ]]; then
 		echo -e ""$attr_bold"There is no patch number: $((index + 1))."$att_OFF""
 		index=0
 	fi
@@ -170,15 +210,14 @@ while true; do
 			exit $code_special_exit
 			;;
 		f )	echo
-			[ $index -lt $mlcount ] && index=$((index + 1))
+			[[ $index -lt $maxindex ]] && index=$((index + 1)) || index=maxindex
 			;;
 		b )	echo
-			[ $index -gt 0 ] && index=$((index - 2))
+			index=$(backup)
 			;;
 		n )	getpatchnumber
 			;;
-		p )	replace_commit $((index))	# <- one-based
-			let index-- 			# <- zero-based
+		p )	index=$(replace_commit)
 			;;
 		x )	ui_sh_spawn
 			continue
@@ -188,8 +227,23 @@ while true; do
 	esac
 
 	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
-	[ $index -lt $((mlcount -1)) ] && let index++
+	preindex=$index
+	[[ $index -lt $maxindex ]] && let index++
 	echo
 done
 echo
 exit $code_ok
+
+	case $idx in
+
+	0 | 1 )		idx=0
+			;;
+	{2..$penindex )	idx=$((idx - 2))
+			;;
+	$maxindex )		idx=$((idx - 1))
+			;;
+	esac
+
+	echo $idx
+
+
