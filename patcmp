@@ -162,11 +162,12 @@ backup() {
 
 	if (($idx <= 0)); then
 		idx=0
-	elif (( (1 <= $index && index <= $penindex)
+	elif (( ( (1 <= $index) && ($index <= $penindex) )
 	     || ($preindex == $penindex) )); then
 		let idx--
 	fi
-	echo $idx
+
+	index=$idx
 }
 
 index=0
@@ -212,7 +213,7 @@ while true; do
 			[[ $index -lt $maxindex ]] && index=$((index + 1)) || index=maxindex
 			;;
 		b )	echo
-			index=$(backup)
+			backup
 			;;
 		n )	getpatchnumber
 			;;
@@ -232,17 +233,3 @@ while true; do
 done
 echo
 exit $code_ok
-
-	case $idx in
-
-	0 | 1 )		idx=0
-			;;
-	{2..$penindex )	idx=$((idx - 2))
-			;;
-	$maxindex )		idx=$((idx - 1))
-			;;
-	esac
-
-	echo $idx
-
-
