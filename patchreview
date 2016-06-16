@@ -153,6 +153,17 @@ function git_reset_head {
 	$response && gitreset $sesdir
 }
 
+function clean_sessions {
+	local session_query=\
+"\nClearing the sessions file.\n\
+After choosing the head you want from the sessions file, it will be cleared.\n\
+Do you want to proceed?"
+	local response=false
+
+	getyn "$session_query" response
+	$response && { git_restore_head; > $sesdir/$sesfile; }
+}
+
 function show_settings {
 	settingstr=$(
 cat <<EOF
@@ -225,7 +236,7 @@ function menu_parser {
 			;;
 		G )	git_restore_head
 			;;
-		S )	> $sesdir/$sesfile
+		S )	clean_sessions
 			;;
 		i )	init_booleans
 			get_booleans
