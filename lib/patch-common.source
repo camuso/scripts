@@ -47,7 +47,7 @@ function set_renameagent {
 
 	case $mailclient in
 
-		"Thunderbird" )	renameagent=rentbpat
+		"ThunderBird" )	renameagent=rentbpat
 				;;
 		"Mutt" )	renameagent=renmutpat
 				;;
