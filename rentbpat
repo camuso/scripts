@@ -30,9 +30,13 @@ savedifs="$IFS"
 IFS="
 "
 
+# Enable extglob for more specific directory actions
+#
+shopt -s extglob
+
 # Use "ls -1" to assure that each filename is on a separate line.
 #
-for filename in $(ls -1); do
+for filename in $(ls -1 !(*.patch) ); do
 
 	# Remove leading date stamp.
 	#
