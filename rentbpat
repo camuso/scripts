@@ -45,7 +45,7 @@ for filename in $(ls -1 !(*.patch) ); do
 
 	# remove trailing thunderbird sequence stamp and ".txt"
 	#
-	newname="$(echo "$newname" | cut --complement -d'-' -f2-)"
+	newname="$(echo "$newname" | cut --complement -d'-' -f3-)"
 
 	# Remove any brackets, parentheses, and quotes
 	#
@@ -62,8 +62,7 @@ for filename in $(ls -1 !(*.patch) ); do
 
 	# Rename the file.
 	#
-	echo "mv "$filename" -> "$newname""
-	mv "$filename" "$newname"
+	mv -v "$filename" "$newname"
 done
 
 # Restore IFS
