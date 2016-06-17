@@ -29,6 +29,7 @@ fi
 savedifs="$IFS"
 IFS="
 "
+shopt -s extglob
 
 # Enable extglob for more specific directory actions
 #
