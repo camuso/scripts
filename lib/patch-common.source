@@ -162,8 +162,8 @@ function git_log_head {
 function git_restore_head {
 	local line=""
 	local index=1
-	local linenumber=0
 	local commit
+	local choice=0
 
 	[[ -s "$sesdir/$sesfile" ]] || {
 		echo -en "$attr_bold"
@@ -178,18 +178,16 @@ function git_restore_head {
 		let index++
 	done < $sesdir/$sesfile
 
-	echo -e
-	echo -en "$attr_bold"
-	echo -en "Enter the number corresponding to the head you want: "
-	echo -en "$attr_OFF"
+	printf "%3d - Just clear session file without setting git head\n" $index
 
-	read linenumber
-	[ "$linenumber" == "q" ] && exit_patchreview 1
-	[ "$linenumber" == "x" ] && ui_sh_spawn
-	[ $linenumber -ge $index ] && linenumber=$index
-	[ $linenumber -le 0 ] && linenumber=$index
+	while true; do
+		getuser "Enter your choice from above list: " choice
+		(( (choice >= 1) && (choice <= $index) )) && break
+	done
 
-	line=$(readlinen $linenumber $sesdir/$sesfile)
+	(( choice == $index )) && return 0
+
+	line=$(readlinen $choice $sesdir/$sesfile)
 	commit=$(echo $line | cut -d' ' -f1)
 	git reset --hard $commit
 
