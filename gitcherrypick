@@ -444,7 +444,20 @@ done
 # above for-loop and init the project file.
 #
 prj_entries=$index
+[ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
+[ -e "$HOME/bin/.data/gitcherrypick.prj" ] || touch $HOME/bin/.data/gitcherrypick.prj
 prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_entries	# ~/bin
+
+# If the above call to prj_init_prjfile returns nonzero, it means that a
+# new project file has been created and its values must be initialized.
+#
+if [ $? -ne 0 ]; then
+	echo
+	echo "A new project file has been created."
+	echo "We will need to know where your work directory will be. "
+	prj_set_directory "Work" $prj_workdir outdir quiet
+	init_booleans
+fi
 
 # Initialize booleans that are not presented in the ui.
 #
