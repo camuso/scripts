@@ -1,17 +1,28 @@
 #!/bin/bash
 #
-# ../rpm-spec-patchlist
+# rpm-spec-patchlist
 #
 
-cmdline=../rpm-spec-patchlist
+declare outfile="patchlist.txt"
+declare dir=$(dirname "$2")
+declare name=$(echo "$1" | cut -d'-' -f1)
+declare version=$(echo "$1" | cut -d'-' -f2)
+declare revision=$(echo "$1" | cut -d'-' -f3)
+declare n=1;
+declare err1="Directory \"%s\" does not exist.\n"
+declare err2="There are no \".patch\" files in directory \"%s\""
 
-usagestr=$(
+declare usagestr=$(
 cat <<EOF
 
-../rpm-spec-patchlist
+$0 name-version-revision dir
 
-Creates text to be inserted in a rpm spec file for patches in the local
-directory. The text is output to ../patchlist.txt
+Creates text to be inserted in a rpm spec file for patches in the specified
+directory.
+
+If no directory is specified, then the current directory is used.
+
+The output is created in the specified directory and named \"$outfile\"
 
 \0
 EOF
@@ -22,23 +33,39 @@ usage() {
 	exit
 }
 
-[ $# -eq 0 ] || usage
+[ $# -ne 2 ] && usage
 
-outfile="../patchlist.txt"
+# See if the directory exists.
+#
+[[ ! -d "$dir" ]] && { printf "$err1" $dir; exit 1; }
 
-n=1;
-echo "" > $outfile
+# See if there are any .patch files in the directory
+#
+ls *.patch
+(( $? == 0 )) || { printf "$err2" $dir; exit 2; }
+
+# Create an empty output file
+#
+> "$dir"/"$outfile"
 
 for f in $(ls -1 *.patch); do
-	printf "Patch%02d:\ttboot-%%{version}-%%{release}-%s\n" \
-		$n $(echo $f | cut -d'-' -f1-) >> $outfile
+	printf "Patch%02d:\t$name-%%{version}-%%{release}-%s\n" \
+		$n $(echo $f | cut -d'-' -f1-) >> "$outfile"
 	let n++
 done
 
 n=1
 for f in $(ls -1 *.patch); do
+
+	# Rename file to "name-version-revision-"patchname
+	#
+	mv $f $name-$version-$revision-$f
+
+	# Create text to look like this:
+	# patch01 -p1 -b .patchname
+	#
 	printf "%%patch%02d -p1 -b .%s\n" \
-		$n $(echo $(basename $f .patch) | cut -d'-' -f1-) >> $outfile
+		$n $(echo $(basename $f .patch) | cut -d'-' -f1-) >> "$outfile"
 	let n++
 done;
 
