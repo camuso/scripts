@@ -7,7 +7,8 @@ declare outfile="patchlist.txt"
 declare dir=$(dirname "$2")
 declare name=$(echo "$1" | cut -d'-' -f1)
 declare version=$(echo "$1" | cut -d'-' -f2)
-declare revision=$(echo "$1" | cut -d'-' -f3)
+declare revision=$(echo "$1" | cut -d'-' -f3 | cut -d'.' -f1)
+declare dist=$(echo "$1" | rev | cut -d'.' -f1 | rev)
 declare n=1;
 declare err1="Directory \"%s\" does not exist.\n"
 declare err2="There are no \".patch\" files in directory \"%s\""
@@ -15,13 +16,13 @@ declare err2="There are no \".patch\" files in directory \"%s\""
 declare usagestr=$(
 cat <<EOF
 
-$0 name-version-revision dir
+$0 name-version-revision.dist dir
+
+name-version-revision.dist, e.g. tboot-1.9.4-1.el7
 
 Creates text to be inserted in a rpm spec file for patches in the specified
 directory.
-
 If no directory is specified, then the current directory is used.
-
 The output is created in the specified directory and named \"$outfile\"
 
 \0
@@ -57,9 +58,9 @@ done
 n=1
 for f in $(ls -1 *.patch); do
 
-	# Rename file to "name-version-revision-"patchname
+	# Rename file to "name-version-revision.dist-"patchname
 	#
-	mv $f $name-$version-$revision-$f
+	mv $f $name-$version-$revision.$dist-$f
 
 	# Create text to look like this:
 	# patch01 -p1 -b .patchname
