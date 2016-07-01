@@ -6,19 +6,28 @@
 [ -d ~/ark ] || mkdir ~/ark
 cd ~/ark
 
-remotename="$1"
-owneropt=""
-logfile="$HOME/.initmystuff.log"
-
+declare remotename="$1"
+declare owneropt=""
+declare logfile="$HOME/.initmystuff.log"
+declare filelist=""
 
 #[ "$remotename" ] && owneropt="--no-same-owner"
 
-# Unpack the archives and save them in the ~/ark directory
-#
 touch "$logfile"
 cat /dev/null > "$logfile"
 echo >> "$logfile" 2>&1
 
+echo "***************************" >> "$logfile" 2>&1
+echo "* Clone the scripts       *" >> "$logfile" 2>&1
+echo "***************************" >> "$logfile" 2>&1
+echo
+[[ -d "scripts" ]] && rm -rf scripts
+[[ -d "bin" ]] && rm -rf bin
+git clone https://github.com/camuso/scripts.git
+mv -fv scripts bin 2>&1 | tee -a $logfile
+
+# Unpack the archives and save them in the ~/ark directory
+#
 filelist="$(ls -1 ~/ark)"
 
 echo "***************************" >> "$logfile" 2>&1
@@ -92,7 +101,80 @@ if [ "$remotename" ]; then
 fi
 cd -
 
-[ "$2" == "install" ] && [ "$remotename" == "root" ] && \
-yum install -y --skip-broken gcc gcc-c++ ncurses-devel rpm-build git git-email cscope ipmitool OpenIPMI watchdog krb5-workstation krb5-libs krb5-auth-dialog
+# If we are running as root and install has been requested, then install
+# the development tools.
+#
+
+get_rcmurl()
+{
+	local majversion="$(lsb_release -rs | cut -f1 -d.)"
+
+	case "$majversion" in
+		"6" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo"
+			return 0
+ 			;;
+		"7" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo"
+			return 0
+			;;
+	esac
+
+	echo ""
+	return 1
+}
+
+if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
+
+	declare distro="$(lsb_release -is)"
+	declare rhpkgurl=""
+	declare rcmurl=""
+	declare installagent""
+
+	# Get the additional repos according to distro
+	#
+	if [[ "$distro" == "Fedora" ]]; then
+		rhpkgurl="http://download.devel.redhat.com/rel-eng/dist-git/fedora/rhpkg.repo"
+		rcmurl="http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo"
+		installagent="dnf"
+
+	elif [[ "$distro" == *"RedHat"* ]]; then
+		rhpkgurl="http://download.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
+		rcmurl="$(get_rcmurl)"
+		installagent="yum"
+	else
+		echo "Unrecognized distro: "$distro""
+		exit 1
+	fi
+
+	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
+	culr -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
+
+	$installagent groupinstall -y 'X Window System' 'GNOME'
+
+	$installagent install -y --nogpgcheck --skip-broken \
+	gcc \
+	gcc-c++ \
+	openssl \
+	openssl-devel \
+	ncurses-devel \
+	rpm-build \
+	git \
+	git-email \
+	cscope \
+	ipmitool \
+	OpenIPMI \
+	watchdog \
+	kmmod \
+	kmod-libs \
+	kmodtool \
+	krb5-workstation \
+	krb5-libs \
+	krb5-auth-dialog \
+	trousers \
+	trousers-devel \
+	rhpkg \
+	koji \
+	brewkoji
+fi
+
 # set +x
 exit 0
