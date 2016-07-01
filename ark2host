@@ -1,7 +1,10 @@
 #!/bin/bash
 # ark2host
 #
-# Copy one archive to a remote host and unpack it.
+# Copy archives to a remote host and unpack them.
+#
+# Uses 'runremote' script to run local script 'init-my-stuff' on
+# the remote system.
 #
 
 usage=$(
@@ -49,8 +52,12 @@ hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
 $rsyncmd ~/ark/$file $remote:ark/$file
-$installer && \
-	runremote $user $hos ~/bin/init-my-stuff $user "install" || \
+
+if $installer; then
+	runremote $user $hos ~/bin/init-my-stuff $user "install"
+else
 	runremote $user $hos ~/bin/init-my-stuff $user
+fi
+
 echo
 exit
