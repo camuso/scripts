@@ -107,7 +107,7 @@ cd -
 
 get_rcmurl()
 {
-	local majversion="$(lsb_release -rs | cut -f1 -d.)"
+	local majversion="$1"
 
 	case "$majversion" in
 		"6" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo"
@@ -125,6 +125,8 @@ get_rcmurl()
 if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	declare distro="$(lsb_release -is)"
+	declare majversion="$(lsb_release -rs | cut -f1 -d.)"
+	declare arch=$(uname -m)
 	declare rhpkgurl=""
 	declare rcmurl=""
 	declare installagent""
@@ -138,7 +140,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	elif [[ "$distro" == *"RedHat"* ]]; then
 		rhpkgurl="http://download.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
-		rcmurl="$(get_rcmurl)"
+		rcmurl="$(get_rcmurl $majversion)"
 		installagent="yum"
 	else
 		echo "Unrecognized distro: "$distro""
@@ -174,6 +176,35 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	rhpkg \
 	koji \
 	brewkoji
+
+	mkdir -p /work/us
+	cd /work/us
+	git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+	cd /work/us/linux
+
+	if [[ "$arch" == "aarch64" ]]; then
+		git remote add rhelsa git://git.app.eng.bos.redhat.com/rhelsa7.git
+		git remote update
+		git fetch
+		git checkout -b rhelsa rhelsa/master
+	else
+		case $majversion in
+			"6" ) 	git remote add rh6 git://git.app.eng.bos.redhat.com/rhel6.git
+				git remote update
+				git fetch
+				git checkout -b rh6 rh6/master
+				;;
+			"7" )	git remote add rh7 git://git.app.eng.bos.redhat.com/rhel7.git
+				git remote update
+				git fetch
+				git checkout -b rh7 rh7/master
+				;;
+			* )	echo "No handler for major version: $majversion"
+				exit 1
+				;;
+		esac
+	fi
+	cd
 fi
 
 # set +x
