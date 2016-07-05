@@ -198,6 +198,7 @@ function git_comment2commitsfile {
 
 		echo $srcfile
 		linenumber=0
+		commitparity=0
 
 		# We're going to assume that the commit number consists of 40
 		# hexadecimal digits, using egrep for extended regex
