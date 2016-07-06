@@ -199,6 +199,7 @@ function git_restore_head {
 
 	while true; do
 		getuser "Enter your choice from above list: " choice
+		[[ $choice =~ ^-?[0-9]+$ ]] || continue
 		(( ($choice >= 1) && ($choice <= $index) )) && break
 	done
 
