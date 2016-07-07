@@ -1,5 +1,5 @@
 #!/bin/bash
-cores=$(cpusockets)
+cores=$(cpucount)
 
 usage=$(
 cat <<EOF
@@ -54,7 +54,7 @@ START1=$(date +%s)
 [ $level -gt 3 ] && level=3
 
 echo "make -j$cores $verbose C=$sparse 2>&1 | tee ../make.log"
-make -j$cores $verbose C=$sparse $kabi 2>&1 | tee ../make.log
+make -j$cores $verbose $kabi C=$sparse $kabi 2>&1 | tee ../make.log
 makestat=$?
 
 END=$(date +%s)
