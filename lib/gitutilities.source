@@ -252,8 +252,8 @@ function git_comment2commitsfile {
 				echo -en "Enter number between 1 and $cmtindex : "$attr_OFF""
 				read -n1 linenumber
 				echo
-				[ $linenumber == "q" ] && exit 1
-				[ $linenumber == "x" ] && ui_sh_spawn
+				[[ $linenumber == "q" ]] && exit 1
+				[[ $linenumber == "x" ]] && ui_sh_spawn
 				if [[ $linenumber != [1-$cmtindex] ]]; then
 					linenumber=0
 					continue
