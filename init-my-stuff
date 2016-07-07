@@ -3,15 +3,14 @@
 # init-my-stuff 1.0
 # set -x
 
-[ -d ~/ark ] || mkdir ~/ark
-cd ~/ark
-
 declare remotename="$1"
 declare owneropt=""
 declare logfile="$HOME/.initmystuff.log"
 declare filelist=""
 
 #[ "$remotename" ] && owneropt="--no-same-owner"
+
+cd	# make sure we're home
 
 touch "$logfile"
 cat /dev/null > "$logfile"
@@ -28,6 +27,9 @@ mv -fv scripts bin 2>&1 | tee -a $logfile
 
 # Unpack the archives and save them in the ~/ark directory
 #
+[ -d ~/ark ] || mkdir ~/ark
+cd ~/ark
+
 filelist="$(ls -1 ~/ark)"
 
 echo "***************************" >> "$logfile" 2>&1
@@ -124,12 +126,22 @@ get_rcmurl()
 
 if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
-	declare distro="$(lsb_release -is)"
-	declare majversion="$(lsb_release -rs | cut -f1 -d.)"
+	declare distro
+	declare majversion
 	declare arch=$(uname -m)
 	declare rhpkgurl=""
 	declare rcmurl=""
 	declare installagent""
+
+
+	# Apparently, RHEL does not come with lsb_release installed.
+	# We will need another method to determine whether this is Fedora or RHEL
+	# If it's RHEL, we'll install lsb_release to make our lives easier.
+	#
+	# distro="$(lsb_release -is)"
+	#
+	foo=$(find /etc  -maxdepth 1 -type f -name fedora-release)
+	[[ $foo ]] && distro="Fedora" || distro="RedHat"
 
 	# Get the additional repos according to distro
 	#
@@ -139,6 +151,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 		installagent="dnf"
 
 	elif [[ "$distro" == *"RedHat"* ]]; then
+		yum install -y redhat-lsb-core
+		majversion="$(lsb_release -rs | cut -f1 -d.)"
 		rhpkgurl="http://download.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
 		rcmurl="$(get_rcmurl $majversion)"
 		installagent="yum"
@@ -198,9 +212,6 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 				git remote update
 				git fetch
 				git checkout -b rh7 rh7/master
-				;;
-			* )	echo "No handler for major version: $majversion"
-				exit 1
 				;;
 		esac
 	fi
