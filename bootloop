@@ -62,10 +62,10 @@ bootloopfile="/tmp/bootloop.log"
 cmdline=$(cat /proc/cmdline)
 cmdtoks=$(echo $cmdline | wc -w)
 last=$(echo $cmdline | cut -d' ' -f $cmdtoks)
-echo "Command Line:"
-echo "$cmdline"
-echo
-echo "Last token in Command Line: $last"
+wall "Command Line:"
+wall "$cmdline"
+wall
+wall "Last token in Command Line: $last"
 
 if [ "$last" != "bootloop" ]; then
 #	[ -e $bootloopfile ] && rm -f $bootloopfile
@@ -74,7 +74,9 @@ fi
 
 # If there's been a crash, then exit with nonzero status.
 #
-[[ -e /var/crash/vmcore ]] && exit 1
+if [[ -e /var/crash/vmcore ]]; then
+	wall "Core dump detected. Exiting bootloop."
+	exit 1
 
 
 if [ -f $bootloopfile ]; then
@@ -86,12 +88,12 @@ fi
 
 # First write to the bootloopfile clears any preexisting contents.
 #
-echo "" 			| tee $bootloopfile
-echo "boot count: $bootcount" 	| tee -a $bootloopfile
-echo "" 			| tee -a $bootloopfile
+wall "" 			| tee $bootloopfile
+wall "boot count: $bootcount" 	| tee -a $bootloopfile
+wall "" 			| tee -a $bootloopfile
 
 if [ "$action" ]; then
-	echo "Executing ..."
+	wall "Executing ..."
 	$action
 	stat=$?
 fi
@@ -100,27 +102,26 @@ fi
 # passed, then reboot. Default value of stat is 1, so it can
 # only be 0 if an "action" was executed and it returned a 0.
 #
-echo "***************************************************************"
+wall "***************************************************************"
 if [ $stat -ne 0 ]; then
-	echo "Starting countdown for bootloop ..."
+	wall "Starting countdown for bootloop ..."
 
 	for (( i=0; i < 10; i++ )); do
 		countdown=$(( 10 - $i ))
-		echo  " $countdown"
+		wall  " $countdown"
 		sleep 1
 	done
 
 	countdown=$(( 10 - $i ))
-	echo " $countdown"
-	echo "Rebooting now ..."
-	echo "***************************************************************"
-	# init 6
+	wall " $countdown"
+	wall "Rebooting now ..."
+	wall "***************************************************************"
 	shutdown -r now
 else
-	echo "\""$action"\" ..." 		| tee -a $bootloopfile
-	echo "Successfully executed." 		| tee -a $bootloopfile
-	echo "Boot loop halted." 		| tee -a $bootloopfile
-	echo "Number of boot loops: $bootcount" | tee -a $bootloopfile
+	wall "\""$action"\" ..." 		| tee -a $bootloopfile
+	wall "Successfully executed." 		| tee -a $bootloopfile
+	wall "Boot loop halted." 		| tee -a $bootloopfile
+	wall "Number of boot loops: $bootcount" | tee -a $bootloopfile
 	echo "" >> $bootloopfile
 
 	# Stop the bootloop by removing the "bootloop" kernel parameter
@@ -128,5 +129,5 @@ else
 	#
 	cp -f /boot/grub/grub.conf /boot/grub/grub.save
 	sed -i 's/bootloop//g' /boot/grub/grub.conf
-	echo "***************************************************************"
+	wall "***************************************************************"
 fi
