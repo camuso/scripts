@@ -7,8 +7,10 @@
 #	With the help of a kernel parameter, puts the system in
 #	an infinite boot loop only terminated when the kernel
 #	param is removed from the kernel line, or when a different
-#	kernel image is booted.
+#	kernel image is booted, or when there is a crash dump.
+#	i.e, [ -e /etc/crash/vmcore ]
 #
+# RHEL6
 #	In order to implement a bootloop, add the following line
 #	to the end of the /etc/rc.local script, assuming that this
 #	bootloop script is in the /root/bin directory.
@@ -47,6 +49,12 @@
 #	have the bootloop parameter in it, or edit the kernel line
 #	while in grub before booting the OS.
 #
+# RHEL7
+# 	Either set this up as a service to be executed after
+# 	getty.target, or add it to the crontab.
+#
+# 	All other things remain the same as in RHEL6.
+#
 
 action="$@"	# action consists of all the parameters
 stat=1
@@ -63,6 +71,11 @@ if [ "$last" != "bootloop" ]; then
 #	[ -e $bootloopfile ] && rm -f $bootloopfile
 	exit 0
 fi
+
+# If there's been a crash, then exit with nonzero status.
+#
+[[ -e /var/crash/vmcore ]] && exit 1
+
 
 if [ -f $bootloopfile ]; then
 	bootcount=$(cat $bootloopfile | cut -d':' -f2)
