@@ -4,56 +4,17 @@
 #
 #	This file should be located in /root/bin.
 #
-#	With the help of a kernel parameter, puts the system in
-#	an infinite boot loop only terminated when the kernel
-#	param is removed from the kernel line, or when a different
-#	kernel image is booted, or when there is a crash dump.
-#	i.e, [ -e /etc/crash/vmcore ]
+#	Puts the system in an infinite boot loop only terminated when
+#	the script finds a file named "stop" in /root or when a crash
+#	dump is detected as /etc/crash/vmcore.
 #
-# RHEL6
-#	In order to implement a bootloop, add the following line
-#	to the end of the /etc/rc.local script, assuming that this
-#	bootloop script is in the /root/bin directory.
+#	To stop the bootloop without a crash dump, simply do the
+#	following as root in the /root directory.
 #
-#		/root/bin/bootloop
+#		touch stop
 #
-#	You can also use this bootloop script to call another
-#	script, for example, to troll dmesg for a specific string.
-#
-#		/root/bin/bootloop <script> <script-parameters>
-#
-#	If the script called by bootloop returns status of 1, then
-#	a reboot ensues. If the action returns a status of 0, then
-#	the "bootloop" kernel parameter is removed from every kernel
-#	line in the grub.conf file and no reboot occurs.
-#
-#	You may want to check that this line also appears in rc2.d
-#	through rc5.d. It should, since these files are all linked
-#	back to /etc/rc.local -> rc.d/rc.local, as shown below.
-#
-#	/etc/rc2.d/S99local -> ../rc.local*
-#	/etc/rc3.d/S99local -> ../rc.local*
-#	/etc/rc4.d/S99local -> ../rc.local*
-#	/etc/rc5.d/S99local -> ../rc.local*
-#	/etc/rc.local -> rc.d/rc.local*
-#
-#	Once you have edited the /etc/rc.local script to include a
-#	call to this bootloop script, you can initiate a boot loop
-#	by adding the following kernel parameter to the end of the
-#	kernel line in grub.conf. It must be the last token in the
-#	kernel line.
-#
-#		bootloop
-#
-#	To stop the loop, simply boot a kernel line that does not
-#	have the bootloop parameter in it, or edit the kernel line
-#	while in grub before booting the OS.
-#
-# RHEL7
-# 	Either set this up as a service to be executed after
-# 	getty.target, or add it to the crontab.
-#
-# 	All other things remain the same as in RHEL6.
+#	The timeout before the next reboot is 2 minutes, so that
+#	should be plenty enough time to create the stop file.
 #
 
 # Need path for script to run in cron
@@ -63,44 +24,41 @@ PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
 action="$@"	# action consists of all the parameters
 stat=1
 bootloopfile="/tmp/bootloop.log"
-cmdline=$(cat /proc/cmdline)
-cmdtoks=$(echo $cmdline | wc -w)
-last=$(echo $cmdline | cut -d' ' -f $cmdtoks)
-wall -n "Command Line:"
-wall -n "$cmdline"
-wall -n "Last token in Command Line: "$last""
+countdown=120
 
-if [ "$last" != "bootloop" ]; then
-#	[ -e $bootloopfile ] && rm -f $bootloopfile
-	wall -n "bootloop exiting with 0 ..."
-	exit 0
-fi
+wall -n "pid: ""$$"
 
 # If there's been a crash, then exit with nonzero status.
 #
 if [[ -e /var/crash/vmcore ]]; then
 	wall -n "Core dump detected. Exiting bootloop."
+	echo "Core dump detected. Exiting bootloop." >> $bootloopfile
 	exit 1
 fi
 
+# If the bootloopfile exists, then update it, else create it and
+# initialize it.
+#
 if [ -f $bootloopfile ]; then
 	bootcount=$(cat $bootloopfile | cut -d':' -f2)
 	bootcount=$(( bootcount + 1 ))
 else
+	echo "@reboot /root/bin/bootloop" | crontab
 	bootcount=1
+	> $bootloopfile
 fi
 
-# First write to the bootloopfile clears any preexisting contents.
-#
-wall -n "boot count: "$bootcount"" 	| tee -a $bootloopfile
+wall -n "boot count: "$bootcount""
+echo $bootcount >> $bootloopfile
 
 if [ "$action" ]; then
-	wall -n "Executing ..."
+	wall -n "Executing: "$action""
+	echo "Executing: "$action"" >> $bootloopfile
 	$action
 	stat=$?
 fi
 
-# If "action" returns error status, or if there was no "action"
+# If "action" returns nonzero status, or if there was no "action"
 # passed, then reboot. Default value of stat is 1, so it can
 # only be 0 if an "action" was executed and it returned a 0.
 #
@@ -108,28 +66,35 @@ wall -n "***************************************************************"
 if [ $stat -ne 0 ]; then
 	wall -n "Starting countdown for bootloop ..."
 
-	for (( i=0; i < 10; i++ )); do
-		countdown=$(( 10 - $i ))
-		wall -n  " $countdown"
+	for (( i=$countdown; i > 0; --i )); do
+		(( $i % 20 )) || wall -n  " $i"
 		sleep 1
+
+		if [[ -e $HOME/stop ]]; then
+			wall -n "\"stop\" file detected."
+			wall -n "bootloop exiting ..."
+			echo "\"stop\" file detected, bootloop exiting ..." \
+				>> $bootloopfile
+			crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
+			rm -vf /root/stop
+			exit 1
+		fi
 	done
 
-	countdown=$(( 10 - $i ))
-	wall -n " $countdown"
+	wall -n " $i"
 	wall -n "Rebooting now ..."
 	wall -n "***************************************************************"
 	shutdown -r now
 else
-	wall -n "\""$action"\" ..." 		| tee -a $bootloopfile
-	wall -n "Successfully executed." 		| tee -a $bootloopfile
-	wall -n "Boot loop halted." 		| tee -a $bootloopfile
-	wall -n "Number of boot loops: $bootcount" | tee -a $bootloopfile
-	echo "" >> $bootloopfile
+	echo "\""$action"\" ..." 			>> $bootloopfile
+	echo "Successfully executed." 			>> $bootloopfile
+	echo "Boot loop halted." 			>> $bootloopfile
+	echo "Number of boot loops: "$bootcount"" 	>> $bootloopfile
+	echo "" 					>> $bootloopfile
 
-	# Stop the bootloop by removing the "bootloop" kernel parameter
-	# from the kernel command line.
+	# Delete the crontab line that calls this script on reboot.
 	#
-	cp -f /boot/grub/grub.conf /boot/grub/grub.save
-	sed -i 's/bootloop//g' /boot/grub/grub.conf
+	crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
+
 	wall -n "***************************************************************"
 fi
