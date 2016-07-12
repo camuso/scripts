@@ -56,28 +56,32 @@
 # 	All other things remain the same as in RHEL6.
 #
 
+# Need path for script to run in cron
+#
+PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
+
 action="$@"	# action consists of all the parameters
 stat=1
 bootloopfile="/tmp/bootloop.log"
 cmdline=$(cat /proc/cmdline)
 cmdtoks=$(echo $cmdline | wc -w)
 last=$(echo $cmdline | cut -d' ' -f $cmdtoks)
-wall "Command Line:"
-wall "$cmdline"
-wall
-wall "Last token in Command Line: $last"
+wall -n "Command Line:"
+wall -n "$cmdline"
+wall -n "Last token in Command Line: "$last""
 
 if [ "$last" != "bootloop" ]; then
 #	[ -e $bootloopfile ] && rm -f $bootloopfile
+	wall -n "bootloop exiting with 0 ..."
 	exit 0
 fi
 
 # If there's been a crash, then exit with nonzero status.
 #
 if [[ -e /var/crash/vmcore ]]; then
-	wall "Core dump detected. Exiting bootloop."
+	wall -n "Core dump detected. Exiting bootloop."
 	exit 1
-
+fi
 
 if [ -f $bootloopfile ]; then
 	bootcount=$(cat $bootloopfile | cut -d':' -f2)
@@ -88,12 +92,10 @@ fi
 
 # First write to the bootloopfile clears any preexisting contents.
 #
-wall "" 			| tee $bootloopfile
-wall "boot count: $bootcount" 	| tee -a $bootloopfile
-wall "" 			| tee -a $bootloopfile
+wall -n "boot count: "$bootcount"" 	| tee -a $bootloopfile
 
 if [ "$action" ]; then
-	wall "Executing ..."
+	wall -n "Executing ..."
 	$action
 	stat=$?
 fi
@@ -102,26 +104,26 @@ fi
 # passed, then reboot. Default value of stat is 1, so it can
 # only be 0 if an "action" was executed and it returned a 0.
 #
-wall "***************************************************************"
+wall -n "***************************************************************"
 if [ $stat -ne 0 ]; then
-	wall "Starting countdown for bootloop ..."
+	wall -n "Starting countdown for bootloop ..."
 
 	for (( i=0; i < 10; i++ )); do
 		countdown=$(( 10 - $i ))
-		wall  " $countdown"
+		wall -n  " $countdown"
 		sleep 1
 	done
 
 	countdown=$(( 10 - $i ))
-	wall " $countdown"
-	wall "Rebooting now ..."
-	wall "***************************************************************"
+	wall -n " $countdown"
+	wall -n "Rebooting now ..."
+	wall -n "***************************************************************"
 	shutdown -r now
 else
-	wall "\""$action"\" ..." 		| tee -a $bootloopfile
-	wall "Successfully executed." 		| tee -a $bootloopfile
-	wall "Boot loop halted." 		| tee -a $bootloopfile
-	wall "Number of boot loops: $bootcount" | tee -a $bootloopfile
+	wall -n "\""$action"\" ..." 		| tee -a $bootloopfile
+	wall -n "Successfully executed." 		| tee -a $bootloopfile
+	wall -n "Boot loop halted." 		| tee -a $bootloopfile
+	wall -n "Number of boot loops: $bootcount" | tee -a $bootloopfile
 	echo "" >> $bootloopfile
 
 	# Stop the bootloop by removing the "bootloop" kernel parameter
@@ -129,5 +131,5 @@ else
 	#
 	cp -f /boot/grub/grub.conf /boot/grub/grub.save
 	sed -i 's/bootloop//g' /boot/grub/grub.conf
-	wall "***************************************************************"
+	wall -n "***************************************************************"
 fi
