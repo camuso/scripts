@@ -4,10 +4,31 @@
 #
 #	This file should be located in /root/bin.
 #
-#	Puts the system in an infinite boot loop only terminated when
-#	the script finds a file named "stop" in /root or when a crash
-#	dump is detected as /etc/crash/vmcore.
+#	Puts the system in an infinite boot loop. The infinite boot
+#	loop is accomplished by creating a cron job that calls this
+#	script on every boot.
 #
+#	The infinite loop is terminated when any one of the following
+#	conditions is met.
+#
+#	1. The script finds finds a file named "stop" in /root. The root
+#	   user can simply type "touch stop" in the root directory to do
+#	   this.
+#
+#	2. Root user can clear the cron job with "crontab -r". However,
+#	   this will clear all of root's cron jobs. If there are no
+#	   other cron jobs, this is not a problem. However if root has a
+#	   number of cron jobs that you want to keep, use the following.
+#
+#	   crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
+#
+#	3. A new crash dump is detected in /var/crash. At the beginning
+#	   of the script, the current number of crash dumps is written
+#	   to a file in the /tmp directory. On each reboot, that number
+#	   is compared to a recalculaton of the number of files under
+#	   the /var/crash directory. If the number has increased, then
+#	   bootloop script will clear its cron job and exit.
+
 #	To stop the bootloop without a crash dump, simply do the
 #	following as root in the /root directory.
 #
@@ -24,20 +45,16 @@ PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
 action="$@"	# action consists of all the parameters
 stat=1
 bootloopfile="/tmp/bootloop.log"
-countdown=120
+crashcountfile="/tmp/crashcount.log"
+countdown=20
+crashcount=$(ls /var/crash/* | wc -l)
 
 wall -n "pid: ""$$"
 
-# If there's been a crash, then exit with nonzero status.
-#
-if [[ -e /var/crash/vmcore ]]; then
-	wall -n "Core dump detected. Exiting bootloop."
-	echo "Core dump detected. Exiting bootloop." >> $bootloopfile
-	exit 1
-fi
-
 # If the bootloopfile exists, then update it, else create it and
 # initialize it.
+# Else, create the cron job for the bootloop. initialize the bootcount,
+# and create the bootloop file and the crashcountfile.
 #
 if [ -f $bootloopfile ]; then
 	bootcount=$(cat $bootloopfile | cut -d':' -f2)
@@ -46,10 +63,23 @@ else
 	echo "@reboot /root/bin/bootloop" | crontab
 	bootcount=1
 	> $bootloopfile
+	echo $crashcount > $crashcountfile
+fi
+
+# If there's been a crash, then exit with nonzero status.
+# We can tell there's been a crash if there are any files under
+# /var/crash.
+#
+oldcount=$(cat $crashcountfile)
+if [[ $crashcount != $oldcount ]]; then
+	wall -n "New core dump detected. Exiting bootloop."
+	echo "New core dump detected. Exiting bootloop." >> $bootloopfile
+	crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
+	exit 1
 fi
 
 wall -n "boot count: "$bootcount""
-echo $bootcount >> $bootloopfile
+echo "boot count: "$bootcount"" > $bootloopfile
 
 if [ "$action" ]; then
 	wall -n "Executing: "$action""
@@ -62,7 +92,6 @@ fi
 # passed, then reboot. Default value of stat is 1, so it can
 # only be 0 if an "action" was executed and it returned a 0.
 #
-wall -n "***************************************************************"
 if [ $stat -ne 0 ]; then
 	wall -n "Starting countdown for bootloop ..."
 
@@ -83,8 +112,7 @@ if [ $stat -ne 0 ]; then
 
 	wall -n " $i"
 	wall -n "Rebooting now ..."
-	wall -n "***************************************************************"
-	shutdown -r now
+	# shutdown -r now
 else
 	echo "\""$action"\" ..." 			>> $bootloopfile
 	echo "Successfully executed." 			>> $bootloopfile
@@ -95,6 +123,4 @@ else
 	# Delete the crontab line that calls this script on reboot.
 	#
 	crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
-
-	wall -n "***************************************************************"
 fi
