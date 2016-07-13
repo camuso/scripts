@@ -28,15 +28,12 @@
 #	   is compared to a recalculaton of the number of files under
 #	   the /var/crash directory. If the number has increased, then
 #	   bootloop script will clear its cron job and exit.
+#
+#	The default timeout before the next reboot is 20 seconds, but
+#	that can be changed by modifying the countdown variable below.
+#
 
-#	To stop the bootloop without a crash dump, simply do the
-#	following as root in the /root directory.
-#
-#		touch stop
-#
-#	The timeout before the next reboot is 2 minutes, so that
-#	should be plenty enough time to create the stop file.
-#
+countdown=20
 
 # Need path for script to run in cron
 #
@@ -47,9 +44,7 @@ stat=1
 bootloopfile="/tmp/bootloop.log"
 rebootlogfile="/root/reboot.log"
 crashcountfile="/tmp/crashcount.log"
-countdown=20
 crashcount=$(ls /var/crash/* | wc -l)
-
 
 # Find the serial console
 # If we can't find an active console, direct output to /dev/null
@@ -69,7 +64,7 @@ fi
 # $1 - the string
 # $2 - optional file
 # $3 - new, any string in this argument will cause the file to be
-#	opened for wriging, which deletes the previous contents.
+#	opened for writing, which deletes the previous contents.
 #
 putcon()
 {
@@ -141,7 +136,7 @@ if [ $stat -ne 0 ]; then
 	done
 
 	putcon " $i\nRebooting now ..."
-	# shutdown -r now
+	shutdown -r now
 else
 	putcon "\""$action"\" ... Successfully executed." $rebootlogfile
 	putcon "Boot loop halted." $rebootlogfile
