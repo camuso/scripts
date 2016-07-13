@@ -45,11 +45,45 @@ PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
 action="$@"	# action consists of all the parameters
 stat=1
 bootloopfile="/tmp/bootloop.log"
+rebootlogfile="/root/reboot.log"
 crashcountfile="/tmp/crashcount.log"
 countdown=20
 crashcount=$(ls /var/crash/* | wc -l)
 
-wall -n "pid: ""$$"
+
+# Find the serial console
+# If we can't find an active console, direct output to /dev/null
+#
+console=$(cat /proc/tty/driver/serial | grep RTS | grep CTS | grep DTR)
+if [[ $console ]]; then
+	console="/dev/ttyS"$(echo $console | cut -d':' -f1)
+else
+	console="/dev/null"
+fi
+
+# putcon() - ouput to serial console
+#
+# 	Write strings to the console and optionally write the same
+# 	string to a file.
+#
+# $1 - the string
+# $2 - optional file
+# $3 - new, any string in this argument will cause the file to be
+#	opened for wriging, which deletes the previous contents.
+#
+putcon()
+{
+	echo -e "$1" > $console
+	if [[ $2 ]]; then
+		if [[ $3 ]]; then
+			echo -e "$1" > $2
+		else
+			echo -e "$1" >> $2
+		fi
+	fi
+}
+
+putcon "bootloop pid: ""$$"
 
 # If the bootloopfile exists, then update it, else create it and
 # initialize it.
@@ -57,8 +91,7 @@ wall -n "pid: ""$$"
 # and create the bootloop file and the crashcountfile.
 #
 if [ -f $bootloopfile ]; then
-	bootcount=$(cat $bootloopfile | cut -d':' -f2)
-	bootcount=$(( bootcount + 1 ))
+	bootcount=$(( $(cat $bootloopfile | cut -d':' -f2) + 1 ))
 else
 	echo "@reboot /root/bin/bootloop" | crontab
 	bootcount=1
@@ -66,24 +99,23 @@ else
 	echo $crashcount > $crashcountfile
 fi
 
+putcon "boot count: "$bootcount"" $bootloopfile new
+echo $(cat $bootloopfile) > $rebootlogfile
+
 # If there's been a crash, then exit with nonzero status.
 # We can tell there's been a crash if there are any files under
 # /var/crash.
 #
 oldcount=$(cat $crashcountfile)
 if [[ $crashcount != $oldcount ]]; then
-	wall -n "New core dump detected. Exiting bootloop."
-	echo "New core dump detected. Exiting bootloop." >> $bootloopfile
+	putcon "New core dump detected. Exiting bootloop." $rebootlogfile
 	crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
 	exit 1
 fi
 
-wall -n "boot count: "$bootcount""
-echo "boot count: "$bootcount"" > $bootloopfile
-
 if [ "$action" ]; then
-	wall -n "Executing: "$action""
-	echo "Executing: "$action"" >> $bootloopfile
+	# wall -n "Executing: "$action""
+	putcon "Executing: "$action"" $bootloopfile
 	$action
 	stat=$?
 fi
@@ -93,32 +125,27 @@ fi
 # only be 0 if an "action" was executed and it returned a 0.
 #
 if [ $stat -ne 0 ]; then
-	wall -n "Starting countdown for bootloop ..."
+	putcon "Starting countdown for bootloop ..."
 
 	for (( i=$countdown; i > 0; --i )); do
-		(( $i % 20 )) || wall -n  " $i"
+		# (( $i % 20 )) || wall -n  " $i"
+		(( $i % 20 )) || putcon " $i"
 		sleep 1
 
 		if [[ -e $HOME/stop ]]; then
-			wall -n "\"stop\" file detected."
-			wall -n "bootloop exiting ..."
-			echo "\"stop\" file detected, bootloop exiting ..." \
-				>> $bootloopfile
+			putcon "\"stop\" file detected.\nbootloop exiting ...\n" $rebootlogfile
 			crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
 			rm -vf /root/stop
 			exit 1
 		fi
 	done
 
-	wall -n " $i"
-	wall -n "Rebooting now ..."
+	putcon " $i\nRebooting now ..."
 	# shutdown -r now
 else
-	echo "\""$action"\" ..." 			>> $bootloopfile
-	echo "Successfully executed." 			>> $bootloopfile
-	echo "Boot loop halted." 			>> $bootloopfile
-	echo "Number of boot loops: "$bootcount"" 	>> $bootloopfile
-	echo "" 					>> $bootloopfile
+	putcon "\""$action"\" ... Successfully executed." $rebootlogfile
+	putcon "Boot loop halted." $rebootlogfile
+	putcon "Number of boot loops: "$bootcount"\n" $rebootlogfile
 
 	# Delete the crontab line that calls this script on reboot.
 	#
