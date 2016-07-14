@@ -1,60 +1,54 @@
 #!/bin/bash
 #
-# bootloop
-#
-#	This file should be located in /root/bin.
-#
-#	Puts the system in an infinite boot loop. The infinite boot
-#	loop is accomplished by creating a cron job that calls this
-#	script on every boot.
-#
-#	The infinite loop is terminated when any one of the following
-#	conditions is met.
-#
-#	1. The script finds finds a file named "stop" in /root. The root
-#	   user can simply type "touch stop" in the root directory to do
-#	   this.
-#
-#	2. Root user can clear the cron job with "crontab -r". However,
-#	   this will clear all of root's cron jobs. If there are no
-#	   other cron jobs, this is not a problem. However if root has a
-#	   number of cron jobs that you want to keep, use the following.
-#
-#	   crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
-#
-#	3. A new crash dump is detected in /var/crash. At the beginning
-#	   of the script, the current number of crash dumps is written
-#	   to a file in the /tmp directory. On each reboot, that number
-#	   is compared to a recalculaton of the number of files under
-#	   the /var/crash directory. If the number has increased, then
-#	   bootloop script will clear its cron job and exit.
-#
-#	The default timeout before the next reboot is 20 seconds, but
-#	that can be changed by modifying the countdown variable below.
-#
 
-countdown=20
+usagestr=$(
+cat <<EOF
+
+$0 [script]
+
+	Where "script" is an optional script to be executed on every
+	loop.
+
+	The boot loop is accomplished by creating a cron job that calls
+	this script on every boot.
+
+	The boot loop is terminated when any one of the following
+	conditions is met.
+
+	1. bootloop finds finds a file named "stop" in /root. The root
+	   user can simply type "touch stop" in the root directory to
+   	   do this.
+
+	2. bootloop detects a new crash dump under /var/crash.
+
+	3. The optional script returns with a zero status.
+
+	4. Root user can clear the cron job with "crontab -r". However,
+	   this will clear all of the root cron jobs. If there are no
+	   other cron jobs, this is not a problem. However if root has a
+	   number of cron jobs that you want to keep, use the following.
+
+	   crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
+
+	The default timeout before the next reboot is 20 seconds, but
+	that can be changed by modifying the countdown variable below.
+\0
+EOF
+)
 
 # Need path for script to run in cron
 #
 PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
 
+countdown=20
+mindelay=20
+maxdelay=600
 action="$@"	# action consists of all the parameters
 stat=1
 bootloopfile="/tmp/bootloop.log"
 rebootlogfile="/root/reboot.log"
 crashcountfile="/tmp/crashcount.log"
-crashcount=$(ls /var/crash/* | wc -l)
-
-# Find the serial console
-# If we can't find an active console, direct output to /dev/null
-#
-console=$(cat /proc/tty/driver/serial | grep RTS | grep CTS | grep DTR)
-if [[ $console ]]; then
-	console="/dev/ttyS"$(echo $console | cut -d':' -f1)
-else
-	console="/dev/null"
-fi
+crashcount=$(ls /var/crash/* 2> /dev/null | wc -l)
 
 # putcon() - ouput to serial console
 #
@@ -78,6 +72,110 @@ putcon()
 	fi
 }
 
+# getchar()
+#
+# Returns character in $1
+#
+getchar() {
+	local char
+	read -n1 char
+	echo
+	[ $# -gt 0 ] && eval $1=$char
+}
+
+# promptgetchar()
+#
+# Prints a prompt passed in $1 and returns the char in $2
+#
+promptgetchar() {
+	local prompt=$1
+	echo -ne "$prompt"
+	getchar $2
+}
+
+function getuser {
+	local promptstring="$1"
+	local var
+
+	echo -ne "$promptstring"
+	read var
+	eval $2=$var
+}
+
+# loop_yn()
+#
+# Loop until user gives either a y or n answer.
+#
+# $1 - prompt string
+# $2 - the character to be returned
+#
+loop_yn() {
+	local ans
+	local x
+	while true; do
+		promptgetchar "$1" ans
+		for x in {y,Y,n,N}; do
+			[[ $x == $ans ]] && eval $2=$ans && return
+		done
+		echo -e "Please enter 'y' or 'n'."
+	done
+}
+
+# loop_range()
+#
+# Loop until user gives a number in the range defined by the args
+#
+# $1 - prompt string
+# $2 - the value to be returned
+# $3 - minimum
+# $4 - maximum
+#
+loop_range() {
+	local number
+	local min=$3
+	local max=$4
+	while true; do
+		getuser "$1" number
+		if [[ $number =~ ^-?[0-9]+$ ]]  && \
+		   [[ $number -ge $min ]]       && \
+		   [[ $number -le $max ]]; then
+			eval $2=$number
+			return 0
+		fi
+		echo -e "Please enter a number between $min and $max."
+	done
+}
+
+start_bootloop() {
+	local answer
+
+	echo -e "$usagestr"
+	loop_yn "Do you want to continue? [y/n]: " answer
+	if [[ $answer == "n" ]] || [[ $answer == "N" ]]; then
+		exit 0
+	fi
+
+	echo "Current delay between reboots is $countdown seconds."
+	loop_yn "Do you want to change it? [y/n] : " answer
+	if [[ $answer == "y" ]] || [[ $answer == "Y" ]]; then
+		loop_range "Seconds delay between reboots: " countdown $mindelay $maxdelay
+	fi
+}
+
+#####################################
+# Start of Execution
+####################################
+
+# Find the serial console
+# If we can't find an active console, direct output to /dev/null
+#
+console=$(cat /proc/tty/driver/serial | grep RTS | grep CTS | grep DTR)
+if [[ $console ]]; then
+	console="/dev/ttyS"$(echo $console | cut -d':' -f1)
+else
+	console="/dev/null"
+fi
+
 putcon "bootloop pid: ""$$"
 
 # If the bootloopfile exists, then update it, else create it and
@@ -92,6 +190,7 @@ else
 	bootcount=1
 	> $bootloopfile
 	echo $crashcount > $crashcountfile
+	start_bootloop
 fi
 
 putcon "boot count: "$bootcount"" $bootloopfile new
@@ -138,7 +237,7 @@ if [ $stat -ne 0 ]; then
 	putcon " $i\nRebooting now ..."
 	shutdown -r now
 else
-	putcon "\""$action"\" ... Successfully executed." $rebootlogfile
+	putcon ""$action": returned zero status." $rebootlogfile
 	putcon "Boot loop halted." $rebootlogfile
 	putcon "Number of boot loops: "$bootcount"\n" $rebootlogfile
 
