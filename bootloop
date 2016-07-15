@@ -146,6 +146,11 @@ loop_range() {
 	done
 }
 
+# start_bootloop() - query the user.
+#
+# If user wants to continue, present option to change default timeout
+# between boots.
+#
 start_bootloop() {
 	local answer
 
@@ -176,12 +181,12 @@ else
 	console="/dev/null"
 fi
 
-putcon "bootloop pid: ""$$"
+putcon "bootloop pid: "$$""
 
-# If the bootloopfile exists, then update it, else create it and
-# initialize it.
+# If the bootloopfile exists, then update it.
 # Else, create the cron job for the bootloop. initialize the bootcount,
-# and create the bootloop file and the crashcountfile.
+# and create the bootloop file and the crashcountfile, and query the
+# user.
 #
 if [ -f $bootloopfile ]; then
 	bootcount=$(( $(cat $bootloopfile | cut -d':' -f2) + 1 ))
