@@ -5,6 +5,11 @@
 # Author: Eric Zhiqiang Ma (http://www.ericzma.com)
 # How to use this script:
 # http://www.systutorials.com/3826/setting-default-entry-in-grub2-and-grub/
+#
+# Original source code:
+# https://github.com/zma/usefulscripts/blob/master/script/grub2-select.bash
+#
+# Modified by Tony Camuso
 
 # Text attributes
 #
