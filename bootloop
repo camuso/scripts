@@ -1,16 +1,33 @@
 #!/bin/bash
 #
 
+# Need path for script to run in cron
+#
+PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
+
+countdown=20
+mindelay=20
+maxdelay=600
+action="$@"	# action consists of all the parameters
+stat=1
+bootloopfile="/tmp/bootloop.log"
+rebootlogfile="/root/reboot.log"
+stopfile="/root/stop"
+crashcountfile="/tmp/crashcount.log"
+crashcount=$(ls /var/crash/* 2> /dev/null | wc -l)
+
 usagestr=$(
 cat <<EOF
 
 $0 [script]
 
-	Where "script" is an optional script to be executed on every
-	loop.
+	"script" is an optional script to be executed on every loop.
 
-	The boot loop is accomplished by creating a cron job that calls
-	this script on every boot.
+	The bootloop is accomplished by creating a cron job that calls
+	this script and the optional script, if present, on every boot.
+
+	The number of boots is printed on the serial console along
+	with other messages, e.g. the seconds remaining to reboot.
 
 	The boot loop is terminated when any one of the following
 	conditions is met.
@@ -23,32 +40,17 @@ $0 [script]
 
 	3. The optional script returns with a zero status.
 
-	4. Root user can clear the cron job with "crontab -r". However,
-	   this will clear all of the root cron jobs. If there are no
-	   other cron jobs, this is not a problem. However if root has a
-	   number of cron jobs that you want to keep, use the following.
+	When the boot loop is terminated, its temp files are deleted,
+	the cron job is deleted from crontab, leaving any other cron
+	jobs intact, and a log file is left in "$rebootlogfile".
 
-	   crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
-
-	The default timeout before the next reboot is 20 seconds, but
-	that can be changed by modifying the countdown variable below.
+	The default timeout before the next reboot is 20 seconds. You
+	will be given an opportunity to change this before starting,
+	but the minimum delay is 20 seconds, to allow enough time to
+	manually terminate the bootloop.
 \0
 EOF
 )
-
-# Need path for script to run in cron
-#
-PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
-
-countdown=20
-mindelay=20
-maxdelay=600
-action="$@"	# action consists of all the parameters
-stat=1
-bootloopfile="/tmp/bootloop.log"
-rebootlogfile="/root/reboot.log"
-crashcountfile="/tmp/crashcount.log"
-crashcount=$(ls /var/crash/* 2> /dev/null | wc -l)
 
 # putcon() - ouput to serial console
 #
@@ -157,7 +159,7 @@ start_bootloop() {
 	echo -e "$usagestr"
 	loop_yn "Do you want to continue? [y/n]: " answer
 	if [[ $answer == "n" ]] || [[ $answer == "N" ]]; then
-		exit 0
+		exit_bootloop 0
 	fi
 
 	echo "Current delay between reboots is $countdown seconds."
@@ -165,6 +167,14 @@ start_bootloop() {
 	if [[ $answer == "y" ]] || [[ $answer == "Y" ]]; then
 		loop_range "Seconds delay between reboots: " countdown $mindelay $maxdelay
 	fi
+}
+
+exit_bootloop() {
+	[[ -e "$bootloopfile" ]] && mv "$bootloopfile" "$rebootlogfile"
+	[[ -e "$stopfile" ]] && rm -f "$stopfile"
+	[[ -e "$crashcountfile" ]] && rm -f "$crashcountfile"
+	crontab -l | grep -v "@reboot /root/bin/bootloop "$action"" | crontab -
+	exit $1
 }
 
 #####################################
@@ -191,7 +201,7 @@ putcon "bootloop pid: "$$""
 if [ -f $bootloopfile ]; then
 	bootcount=$(( $(cat $bootloopfile | cut -d':' -f2) + 1 ))
 else
-	echo "@reboot /root/bin/bootloop" | crontab
+	echo "@reboot /root/bin/bootloop $action" | crontab
 	bootcount=1
 	> $bootloopfile
 	echo $crashcount > $crashcountfile
@@ -199,7 +209,6 @@ else
 fi
 
 putcon "boot count: "$bootcount"" $bootloopfile new
-echo $(cat $bootloopfile) > $rebootlogfile
 
 # If there's been a crash, then exit with nonzero status.
 # We can tell there's been a crash if there are any files under
@@ -207,14 +216,13 @@ echo $(cat $bootloopfile) > $rebootlogfile
 #
 oldcount=$(cat $crashcountfile)
 if [[ $crashcount != $oldcount ]]; then
-	putcon "New core dump detected. Exiting bootloop." $rebootlogfile
-	crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
-	exit 1
+	putcon "New core dump detected. Exiting bootloop." $bootloopfile
+	exit_bootloop 1
 fi
 
 if [ "$action" ]; then
 	# wall -n "Executing: "$action""
-	putcon "Executing: "$action"" $bootloopfile
+	putcon "Executing: "$action""
 	$action
 	stat=$?
 fi
@@ -224,7 +232,7 @@ fi
 # only be 0 if an "action" was executed and it returned a 0.
 #
 if [ $stat -ne 0 ]; then
-	putcon "Starting countdown for bootloop ..."
+	putcon "Starting countdown to next reboot ..."
 
 	for (( i=$countdown; i > 0; --i )); do
 		# (( $i % 20 )) || wall -n  " $i"
@@ -232,21 +240,16 @@ if [ $stat -ne 0 ]; then
 		sleep 1
 
 		if [[ -e $HOME/stop ]]; then
-			putcon "\"stop\" file detected.\nbootloop exiting ...\n" $rebootlogfile
-			crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
-			rm -vf /root/stop
-			exit 1
+			putcon "\"stop\" file detected.\nbootloop exiting ...\n" $bootloopfile
+			exit_bootloop 0
 		fi
 	done
 
 	putcon " $i\nRebooting now ..."
 	shutdown -r now
 else
-	putcon ""$action": returned zero status." $rebootlogfile
-	putcon "Boot loop halted." $rebootlogfile
-	putcon "Number of boot loops: "$bootcount"\n" $rebootlogfile
-
-	# Delete the crontab line that calls this script on reboot.
-	#
-	crontab -l | grep -v '@reboot /root/bin/bootloop' | crontab -
+	putcon ""$action": returned zero status." $bootloopfile
+	putcon "Boot loop halted." $bootloopfile
+	putcon "Number of boot loops: "$bootcount"\n" $rbootloopfile
+	exit_bootloop 0
 fi
