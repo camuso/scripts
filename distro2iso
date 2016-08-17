@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# /home/tcamuso/bin/distro2iso
+#
+
+cmdline=/home/tcamuso/bin/distro2iso
+
+usagestr=$(
+cat <<EOF
+
+/home/tcamuso/bin/distro2iso <distro-dir> <iso-dir> <Vol-ID> <Vol-Hdr-Str> <Output-File>
+
+distro-dir	: Directory containing the distro tree, e.g. /work/distro
+iso-dir		: Directory that will contain the resulting iso image, e.g. /work/iso
+Vol-ID		: Volume id, e.g. "RHEL6.8-Workstation-X86_64"
+Vol-Hdr-Str	: volume Header String, e.g. "RHEL6.8-Workstation-20160815-test"
+Output-FIle	: e.g. "RHEL6.8-Workstation-20160815-test-x86_643-DVD.iso"
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 5 ] || usage
+
+declare disdir="$1"	# directory containing the distro file tree
+declare isodir="$2"	# directory to receive the iso file
+declare volid="$3"	# Volume ID
+declare volhdr="$4"	# Volume Header String
+declare outfile=$5	# the filemane of the resulting iso file
+declare discinfo=""	# first line of the .dicinfo file
+declare xmlfile=""
+
+[[ $(which anaconda) ]] || yum install -y anaconda
+[[ $(which anaconda-runtime) ]] || yum install -y anaconda runtime
+[[ $(which createrepo) ]] || yum install -y createrepo
+
+cd "$disdir"
+discinfo=$(head -1 .discinfo)
+
+cd repodata
+xmlfile=$(ls *comps*.xml | cut -d'-' -f2-)
+
+createrepo -u "media://"$discinfo"#1 -g "$xmlfile""
+
+mkisofs -r -R -J -T -v \
+     -no-emul-boot \
+     -boot-load-size 4 \
+     -boot-info-table \
+     -V "$volid" \
+     -p "tcamuso" \
+     -A "$volhdr" \
+     -b isolinux/isolinux.bin -c isolinux/boot.cat \
+     -x "lost+found" \
+     -o "$isodir"/"$outfile" \
+     "$disdir"
+
+implantisomd5 "$isodir"/"$outfile"
