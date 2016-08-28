@@ -1,0 +1,130 @@
+#!/bin/bash
+#
+# lsdif
+#
+
+cmdline=diffdir
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] d1 d2
+
+d1	- first directory
+d2	- second directory
+
+Compares the names of the text files in two directories and prints to
+stdout the file names each directory has that the other does not.
+
+Options
+-------
+-n	depth of search, where "-n 1" is topmost directory.
+	space between switch and number is mandatory.
+
+-h	this help text
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 0
+}
+
+# rm_topdir 	- removes the top directory name, leaving only the sub
+# 		  directories
+# $1 - pathname
+# $2 - return pathname with top directory stripped off
+#
+rm_topdir() {
+	local path="$1"
+	local len;
+
+	[[ "${path:0:1}" == "/" ]] && path="${path:1}"
+	[[ "${path:0:2}" == "./" ]] && path=${path:2}
+	path="$(echo "$path" | cut -d'/' -f2-)"
+	len=${#path}
+	((len--))
+	[[ -d "$path" ]] && [[ "${path:$len:1}" != "/" ]] && path="$path""/"
+	eval $2=$path
+}
+
+# is_diff() - Compares two files. If they are different, prints the full
+# 	      path names of the files side-by-side to stdout.
+#
+# $1 - first file
+# $2 - second file
+#
+is_diff() {
+	local f1=$1
+	local f2=$2
+
+	diff $f1 $f2 1> /dev/null
+	[[ $? != 0 ]] && echo -e ""$f1"\t"$f2""
+}
+
+
+
+[ $# -gt 0 ] || usage
+
+declare dir1
+declare dir2
+declare outfile
+declare maxdepth
+declare maxdepthstr=""
+
+while getopts "n:h" OPTION; do
+    case "$OPTION" in
+
+        n ) maxdepth=$OPTARG
+	    maxdepthstr="-maxdepth $maxdepth"
+	    shift
+	    shift
+	    ;;
+        h ) usage
+	    ;;
+        * ) echo "unrecognized option"
+            echo "$usage"
+            exit 1
+	    ;;
+    esac
+done
+
+dir1="$1"
+dir2="$2"
+
+export -f rm_topdir
+export -f is_diff
+export dir1
+export dir2
+
+echo "Checking $dir1"
+echo "--------------"
+find $dir1 $maxdepthstr -type f \
+	-exec grep -Iq . {} \; \
+	-exec sh -c \
+	' \
+		declare fspec; \
+		rm_topdir $1 fspec; \
+		ls $dir2/$fspec > /dev/null 2>&1; \
+		[[ $? != 0 ]] && echo "$dir1/$fspec"; \
+	' \
+	sh {} \;
+
+echo
+echo "Checkint $dir2"
+echo "--------------"
+find $dir2 $maxdepthstr -type f \
+	-exec grep -Iq . {} \; \
+	-exec sh -c \
+	' \
+		declare fspec; \
+		rm_topdir $1 fspec; \
+		ls $dir1/$fspec > /dev/null 2>&1; \
+		[[ $? != 0 ]] && echo "$dir2/$fspec"; \
+	' \
+	sh {} \;
+
+echo
+
