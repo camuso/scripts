@@ -18,7 +18,9 @@ the files that differ to stdout.
 
 Options
 -------
--n	non-recursive search
+-n	depth of search, where "-n 1" is topmost directory.
+	space between switch and number is mandatory.
+
 -h	this help text
 
 \0
@@ -27,7 +29,7 @@ EOF
 
 usage() {
 	echo -e "$usagestr"
-	exit
+	exit 0
 }
 
 # rm_topdir 	- removes the top directory name, leaving only the sub
@@ -67,12 +69,16 @@ is_diff() {
 declare dir1
 declare dir2
 declare outfile
-declare maxdepth=""
+declare maxdepth
+declare maxdepthstr=""
 
-while getopts "nh" OPTION; do
+while getopts "n:h" OPTION; do
     case "$OPTION" in
 
-        n ) maxdepth="-maxdepth 1"
+        n ) maxdepth=$OPTARG
+	    maxdepthstr="-maxdepth $maxdepth"
+	    shift
+	    shift
 	    ;;
         h ) usage
 	    ;;
@@ -81,7 +87,6 @@ while getopts "nh" OPTION; do
             exit 1
 	    ;;
     esac
-    shift
 done
 
 dir1="$1"
@@ -92,10 +97,14 @@ export -f is_diff
 export dir1
 export dir2
 
-find $dir1 $maxdepth -type f -exec grep -Iq . {} \; -exec sh -c ' \
-	fspec=$2; \
-	rm_topdir $1 fspec; \
-	ls $dir2/$fspec > /dev/null 2>&1; \
-	[[ $? == 0 ]] && is_diff $dir1/$fspec $dir2/$fspec;' \
-	sh '{}' ds \;
+find $dir1 $maxdepthstr -type f \
+	-exec grep -Iq . {} \; \
+	-exec sh -c \
+	' \
+		declare fspec; \
+		rm_topdir $1 fspec; \
+		ls $dir2/$fspec > /dev/null 2>&1; \
+		[[ $? == 0 ]] && is_diff $dir1/$fspec $dir2/$fspec; \
+	' \
+	sh {} \;
 
