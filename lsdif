@@ -64,7 +64,29 @@ is_diff() {
 	[[ $? != 0 ]] && echo -e ""$f1"\t"$f2""
 }
 
+# find_files() - locate the files in d1 that are not in d2
+#
+# $1 - d1, directory_1
+# $2 - d2, directory_2
+#
+find_files() {
+	local d1=$1
+	local d2=$2
 
+	echo "Checking $d1"
+	echo "-----------------------"
+	find $d1 $maxdepthstr -type f \
+		-exec grep -Iq . {} \; \
+		-exec sh -c \
+		' \
+			declare fspec; \
+			rm_topdir $1 fspec; \
+			ls $3/$fspec > /dev/null 2>&1; \
+			[[ $? != 0 ]] && echo "$2/$fspec"; \
+		' \
+		sh {} $d1 $d2 \;
+	echo
+}
 
 [ $# -gt 0 ] || usage
 
@@ -79,8 +101,7 @@ while getopts "n:h" OPTION; do
 
         n ) maxdepth=$OPTARG
 	    maxdepthstr="-maxdepth $maxdepth"
-	    shift
-	    shift
+	    shift; shift
 	    ;;
         h ) usage
 	    ;;
@@ -96,35 +117,8 @@ dir2="$2"
 
 export -f rm_topdir
 export -f is_diff
-export dir1
-export dir2
 
-echo "Checking $dir1"
-echo "--------------"
-find $dir1 $maxdepthstr -type f \
-	-exec grep -Iq . {} \; \
-	-exec sh -c \
-	' \
-		declare fspec; \
-		rm_topdir $1 fspec; \
-		ls $dir2/$fspec > /dev/null 2>&1; \
-		[[ $? != 0 ]] && echo "$dir1/$fspec"; \
-	' \
-	sh {} \;
+find_files $dir1 $dir2
+find_files $dir2 $dir1
 
-echo
-echo "Checkint $dir2"
-echo "--------------"
-find $dir2 $maxdepthstr -type f \
-	-exec grep -Iq . {} \; \
-	-exec sh -c \
-	' \
-		declare fspec; \
-		rm_topdir $1 fspec; \
-		ls $dir1/$fspec > /dev/null 2>&1; \
-		[[ $? != 0 ]] && echo "$dir2/$fspec"; \
-	' \
-	sh {} \;
-
-echo
-
+exit
