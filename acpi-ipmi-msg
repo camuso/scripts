@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# /root/bin/acpi-ipmi-msg
+#
+
+cmdline=/root/bin/acpi-ipmi-msg
+
+usagestr=$(
+cat <<EOF
+
+/root/bin/acpi-ipmi-msg <outputfile>
+
+Messages pertaining to ipmi and acpi from dmesg and lsmod are sent to
+outfile.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+# [ $# -ne 1 ] || usage
+
+[ "$1" ] && file="$1" || file="/dev/stdout"
+
+echo > $file
+[ -e localversion ] && cat localversion >> $file
+echo '-----------------------------' >> $file
+echo >> $file
+echo "# dmesg | grep -i acpi" >> $file
+dmesg | grep -i acpi >> $file
+
+echo >> $file
+echo "# lsmod | grep -i acpi" >> $file
+lsmod | grep -i acpi >> $file
+echo >> $file
+
+echo >> $file
+echo "# dmesg | grep -i ipmi" >> $file
+dmesg | grep -i ipmi >> $file
+
+echo >> $file
+echo "# lsmod | grep -i ipmi" >> $file
+lsmod | grep -i ipmi >> $file
+
