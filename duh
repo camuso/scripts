@@ -30,6 +30,11 @@ while getopts h OPTION; do
 done
 
 [ -d "$1" ] && cd "$1"
-for d in $(ls -d */ .*/); do du -hs $d; done
+
+for d in $(ls -d */ .*/); do
+	[[ "$d" == "../" ]] && continue
+	du -hs $d;
+done
+
 [ -d "$1" ] && cd -
 
