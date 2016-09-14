@@ -17,11 +17,11 @@ while : ; do
 	str="$1"
 	firstchr=${str:0:1}
 	if [[ "$firstchr" == "-" ]]; then
-		gitopts=$gitopts"$str"
+		gitopts=$gitopts"$str "
 		shift
 		continue
 	fi
 	break
 done
 
-git log --follow "$gitopts" -S"$1" -- $2
+git log --follow $gitopts -S"$1" -- $2
