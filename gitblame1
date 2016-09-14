@@ -7,5 +7,21 @@ usage () {
 	exit
 }
 
-[ $# -ne 2 ] && usage
-git log --follow -S"$1" -- $2
+[ $# -lt 2 ] && usage
+
+declare str
+declare firstchr
+declare gitopts""
+
+while : ; do
+	str="$1"
+	firstchr=${str:0:1}
+	if [[ "$firstchr" == "-" ]]; then
+		gitopts=$gitopts"$str"
+		shift
+		continue
+	fi
+	break
+done
+
+git log --follow "$gitopts" -S"$1" -- $2
