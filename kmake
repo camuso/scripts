@@ -29,6 +29,11 @@ level=3		# set for complete build/install
 sparse=0	# no sparse
 verbose=""	# no verbose
 kabi=""		# no kabitools database
+version="$1"	# to be written into localversion
+
+
+[[ "${version:0:1}" == "-" ]] && version="" || shift
+echo "$version" > localversion
 
 while getopts l:c:vkh OPTION; do
     case "$OPTION" in
