@@ -65,11 +65,12 @@ echo >> "$logfile" 2>&1
 # Get the full pathname so we can use that to copy from.
 # If the file or directory already exists, then copy it into a .orig before
 # performing the rsync and possibley overwriting it with new content.
+# If the .orig file already exists, do not write over it.
 #
 for f in $(ls -rtd1 rcbak/{*,.*}); do
 	name=$(basename $f);
 	if [ -f $f ] && [ -f "$name" ]; then
-		cp -v $name $name.orig 2>&1 | tee -a $logfile
+		[[ -f $name.orig ]] || cp -v $name $name.orig 2>&1 | tee -a $logfile
 	fi
 done
 
@@ -82,8 +83,8 @@ if [ "$remotename" == "root" ]; then
 	do
 		echo "--------------" >> "$logfile" 2>&1
 		echo "Checking $file" >> "$logfile" 2>&1
-		[ -f /etc/"$file".orig ] || cp -vf /etc/$file /etc/$file.orig >> "$logfile" 2>&1
-		[ ~/etcbk/"$file" -nt /etc/"$file" ] && cp -vf ~/etcbk/$file /etc/$file >> "$logfile" 2>&1
+		[ -f /etc/"$file".orig ] || cp -vf /etc/$file /etc/$file.orig 2>&1 | tee -a "$logfile"
+		[ ~/etcbk/"$file" -nt /etc/"$file" ] && cp -vf ~/etcbk/$file /etc/$file 2>&1 | tee -a "$logfile"
 		echo "* * * * * * * * * " >> "$logfile" 2>&1
 		echo "" >> "$logfile" 2>&1
 	done
@@ -162,7 +163,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	fi
 
 	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
-	culr -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
+	curl -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
 
 	$installagent groupinstall -y 'X Window System' 'GNOME'
 

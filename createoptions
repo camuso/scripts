@@ -1,5 +1,7 @@
-#####################################################################
 #!/bin/bash
+
+#####################################################################
+#
 #
 # createoptions v0.1
 #
@@ -13,6 +15,29 @@
 # usage creatoptions file "opt opt opt:arg opt"
 #####################################################################
 
+usagestr=$(
+cat <<EOF
+
+$(basename "$0") script "opt opt opt:arg"
+
+Appends the lines required to implement parsing an options list to a
+bash script.
+
+script	- the script file to receive the options
+
+options	- string containing a list of space separated option flags and
+	  optional corresponding arguments.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
 
 # Declarations are unnecessary, but they are helpful
 #

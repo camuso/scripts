@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# duh
+#
+
+cmdline=du+
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) [-h] [directory]
+
+Performs du -hs on current directory or optional directory argument.
+
+-h option prints this help.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 0
+}
+
+while getopts h OPTION; do
+    case "$OPTION" in
+        h ) usage ;;
+    esac
+done
+
+[ -d "$1" ] && cd "$1"
+
+for d in $(ls -d */ .*/); do
+	[[ "$d" == "../" ]] && continue
+	du -hs $d;
+done
+
+[ -d "$1" ] && cd -
+

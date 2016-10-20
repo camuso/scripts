@@ -84,7 +84,7 @@ function git_file2patchset {
 
 	while read line; do
 		[ "${line:0:1}" == "#" ] && continue
-		commit=$(echo $line | cut -d' ' -f1 | tr -dc [[:xdigit:]])
+		commit=$(echo $line | cut -d' ' -f1 | tr -dc "[[:xdigit:]]")
 		commitnum=$(echo $commit | tr -s 0)
 		pfx=$(printf "%04d" $index)
 		if [ ${#commitnum} -gt 1 ]; then

@@ -1,0 +1,1 @@
+foo=$(gitblame1 --oneline "$1"  drivers/char/ipmi/ipmi_si_intf.c | cut -d' ' -f1); for commit in $foo; do git log -n1 --oneline $commit; git show $commit | grep -B2 "$1"; read; done
