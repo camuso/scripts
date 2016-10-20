@@ -27,26 +27,43 @@ usage() {
 
 [ $# -eq 5 ] || usage
 
+info () {
+	[[ "$1" ]] && echo -e "$1"
+	echo -n "Press any key to continue..."
+	read -n1
+}
+
 declare disdir="$1"	# directory containing the distro file tree
 declare isodir="$2"	# directory to receive the iso file
 declare volid="$3"	# Volume ID
 declare volhdr="$4"	# Volume Header String
 declare outfile=$5	# the filemane of the resulting iso file
+
+declare origdir=$PWD	# Save Present Working Directory
 declare discinfo=""	# first line of the .dicinfo file
 declare xmlfile=""
 
 [[ $(which anaconda) ]] || yum install -y anaconda
-[[ $(which anaconda-runtime) ]] || yum install -y anaconda runtime
 [[ $(which createrepo) ]] || yum install -y createrepo
+[[ $(rpm -qa | grep anaconda-core) ]] || yum install -y anaconda-core
 
 cd "$disdir"
 discinfo=$(head -1 .discinfo)
 
 cd repodata
-xmlfile=$(ls *comps*.xml | cut -d'-' -f2-)
+xmlfile=$(ls *comps*.xml)
+cutxmlfile=$(echo $xmlfile | cut -d'-' -f2-)
+info "xmlfile: $xmlfile\ncut xmlfile: $cutxmlfile"
+mv -vf $xmlfile $cutxmlfile
 
-createrepo -u "media://"$discinfo"#1 -g "$xmlfile""
+cd "$disdir"
+info "$(ls repodata)"
+set -x
+createrepo -u "media://$discinfo#1" -g repodata/$cutxmlfile ./
+set +x
+info "$(ls -1 repodata/*comp*.xml)"
 
+cd "$origdir"
 mkisofs -r -R -J -T -v \
      -no-emul-boot \
      -boot-load-size 4 \
@@ -54,7 +71,8 @@ mkisofs -r -R -J -T -v \
      -V "$volid" \
      -p "tcamuso" \
      -A "$volhdr" \
-     -b isolinux/isolinux.bin -c isolinux/boot.cat \
+     -b isolinux/isolinux.bin \
+     -c isolinux/boot.cat \
      -x "lost+found" \
      -o "$isodir"/"$outfile" \
      "$disdir"
