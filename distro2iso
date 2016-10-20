@@ -33,6 +33,30 @@ info () {
 	read -n1
 }
 
+# parse_config()
+# $1 - section name, delimiteed by '[' and ']'
+# $2 - parameter name
+# $3 - path to config file
+# $4 - value of parameter in section
+#
+# returns 0 if [section] and name are found, else returns nonzero.
+#
+parse_config() {
+	local section=$1
+	local name=$2
+	local configfile=$3
+	local value=$4
+	local line=0
+	local text=""
+
+	[[ ${section:0:1} == "[" ]] || section="[$section]"
+	line=$(grep -F -m1 -n $section $configfile | cut -d':' -f1)
+	text=$(awk "/$name/ && NR > $line { print; exit }" $configfile)
+	text=$(echo $text | cut -d'=' -f2-)
+	text=${text##*( )}
+	eval $value=$text
+}
+
 declare disdir="$1"	# directory containing the distro file tree
 declare isodir="$2"	# directory to receive the iso file
 declare volid="$3"	# Volume ID
