@@ -8,13 +8,24 @@ cmdline=/home/tcamuso/bin/distro2iso
 usagestr=$(
 cat <<EOF
 
-/home/tcamuso/bin/distro2iso <distro-dir> <iso-dir> <Vol-ID> <Vol-Hdr-Str> <Output-File>
+$(basename $0) distro-dir iso-dir optional-tag
 
-distro-dir	: Directory containing the distro tree, e.g. /work/distro
-iso-dir		: Directory that will contain the resulting iso image, e.g. /work/iso
-Vol-ID		: Volume id, e.g. "RHEL6.8-Workstation-X86_64"
-Vol-Hdr-Str	: volume Header String, e.g. "RHEL6.8-Workstation-20160815-test"
-Output-FIle	: e.g. "RHEL6.8-Workstation-20160815-test-x86_643-DVD.iso"
+distro-dir	: Directory containing the distro tree
+iso-dir		: Directory that will contain the resulting iso image
+optional-tag	: Tag to be added to the end of the output filename
+
+Example: $(basename $0) /work/distro-tree /work/iso "foo-test"
+
+Creates a DVD iso image from a RHEL DVD tree. The idea is to use an
+existing RHEL released DVD or DVD iso image to create your own custom DVD
+iso having different kernel, initrd, drivers or user space applications.
+
+Mount the existing RHEL DVD and copy its contents to a directory where you
+can add and delete files in the DVD tree.
+
+This script will use the information in the .treeinfo file at the top of
+the DVD tree and a timestamp formatted as YYYYMMDD-hhmm to create a file
+name for the new DVD iso image.
 
 \0
 EOF
@@ -25,12 +36,37 @@ usage() {
 	exit
 }
 
-[ $# -eq 5 ] || usage
+[ $# -ge 2 ] || usage
+[[ ("$1" == "-h") || ($1 == "--help") ]] && usage
 
 info () {
 	[[ "$1" ]] && echo -e "$1"
 	echo -n "Press any key to continue..."
 	read -n1
+}
+
+#####################
+# Error enumerations
+#####################
+declare notreeinfo=1
+declare nodiscinfo=2
+
+errexit() {
+	local error=$1
+	local usrstr="$2"
+	local errstr=""
+
+	case $error in
+		notreeinfo ) errstr=$(printf "%s: has no .treeinfo file." "$usrstr")
+			;;
+		nodiscinfo ) errstr=$(printf "%s: has no .discinfo file." "$usrstr")
+			;;
+		* ) errstr="Unkown error! Exiting ..."
+		    error=255
+			;;
+	esac
+	printf "\n%s\n" $errstr
+	exit $error
 }
 
 # parse_config()
@@ -53,52 +89,83 @@ parse_config() {
 	line=$(grep -F -m1 -n $section $configfile | cut -d':' -f1)
 	text=$(awk "/$name/ && NR > $line { print; exit }" $configfile)
 	text=$(echo $text | cut -d'=' -f2-)
-	text=${text##*( )}
+	text=$(echo $text)
 	eval $value=$text
 }
 
 declare disdir="$1"	# directory containing the distro file tree
 declare isodir="$2"	# directory to receive the iso file
-declare volid="$3"	# Volume ID
-declare volhdr="$4"	# Volume Header String
-declare outfile=$5	# the filemane of the resulting iso file
+declare userstr="$3"
+#declare volid="$3"	# Volume ID
+#declare volhdr="$4"	# Volume Header String
+#declare outfile=$5	# the filemane of the resulting iso file
 
+declare tstamp=$(date +"%Y%m%d-%H%M")
 declare origdir=$PWD	# Save Present Working Directory
 declare discinfo=""	# first line of the .dicinfo file
 declare xmlfile=""
+declare treeinfo=""	# .treeinfo file in top directory of DVD
 
-[[ $(which anaconda) ]] || yum install -y anaconda
+[[ ${isodir:(-1)} == '/' ]] || isodir=$isodir"/"
+
+[[ $(which anaconda) ]] || yum install -y anaconda anaconda-core
 [[ $(which createrepo) ]] || yum install -y createrepo
-[[ $(rpm -qa | grep anaconda-core) ]] || yum install -y anaconda-core
 
 cd "$disdir"
+[[ -e ".treeinfo" ]] || errexit $notreeinfo "$disdir"
+[[ -e ".discinfo" ]] || errexit $nodiscinfo "$disdir"
 discinfo=$(head -1 .discinfo)
+# Create Volume-ID, Volume Header String, and DVD iso filename
+# from the .treeinfo file as follows.
+#
+# Volume_ID: [product].short-[product].version-[tree].variants-[tree].arch
+# Volume_Hdr_Str: $Volume_ID-$tstamp-$userstr"
+# DVD_ISO_file: $Volume_Hdr_Str-DVD.iso
+#
+declare namestr
+declare verstrd
+declare varstr
+declare archstr
+parse_config .treeinfo product short namestr
+parse_config .treeinfo product version verstr
+parse_config .treeinfo tree variant varstr
+parse_config .treeinfo tree arch archstr
+declare Volume_ID=$namestr-$verstr-$varstr-$archstr
+declare Volume_Hdr=$Volume_ID-$tstamp
+[[ "$userstr" ]] && Volume_Hdr=$Volume_Hdr-"$userstr"
+declare DVD_iso=$Volume_Hdr-"DVD.iso"
+
+echo -e \
+"\nCreating DVD iso image:\n" \
+"  Volume ID     : $Volume_ID\n" \
+"  Volume Header : $Volume_Hdr\n" \
+"  DVD iso file  : $isodir$DVD_iso\n"
+
+echo -n "Press ctrl-C to exit, any other key to continue."
+read -n1
 
 cd repodata
 xmlfile=$(ls *comps*.xml)
 cutxmlfile=$(echo $xmlfile | cut -d'-' -f2-)
-info "xmlfile: $xmlfile\ncut xmlfile: $cutxmlfile"
-mv -vf $xmlfile $cutxmlfile
+# info "xmlfile: $xmlfile\ncut xmlfile: $cutxmlfile"
+mv -f $xmlfile $cutxmlfile
 
 cd "$disdir"
-info "$(ls repodata)"
-set -x
+# info "$(ls repodata)"
 createrepo -u "media://$discinfo#1" -g repodata/$cutxmlfile ./
-set +x
-info "$(ls -1 repodata/*comp*.xml)"
+# info "$(ls -1 repodata/*comp*.xml)"
 
 cd "$origdir"
 mkisofs -r -R -J -T -v \
      -no-emul-boot \
      -boot-load-size 4 \
      -boot-info-table \
-     -V "$volid" \
-     -p "tcamuso" \
-     -A "$volhdr" \
+     -V "$Volume_ID" \
+     -A "$Volume_Hdr" \
      -b isolinux/isolinux.bin \
      -c isolinux/boot.cat \
      -x "lost+found" \
-     -o "$isodir"/"$outfile" \
+     -o "$isodir""$DVD_iso" \
      "$disdir"
 
-implantisomd5 "$isodir"/"$outfile"
+implantisomd5 "$isodir""$DVD_iso"
