@@ -34,17 +34,17 @@ info () {
 }
 
 # parse_config()
-# $1 - section name, delimiteed by '[' and ']'
-# $2 - parameter name
-# $3 - path to config file
-# $4 - value of parameter in section
+# $1 - path to config file
+# $2 - section name, delimiteed by '[' and ']'
+# $3 - parameter name
+# $4 - will contain the return value of parameter in section
 #
 # returns 0 if [section] and name are found, else returns nonzero.
 #
 parse_config() {
-	local section=$1
-	local name=$2
-	local configfile=$3
+	local configfile=$1
+	local section=$2
+	local name=$3
 	local value=$4
 	local line=0
 	local text=""
