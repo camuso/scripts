@@ -1,0 +1,90 @@
+#!/bin/bash
+#
+# foreachfile
+#
+
+cmdline=foreachfile
+
+usagestr=$(
+cat <<EOF
+
+foreachfile filespec body
+
+filespec - file specification, can have wildcards
+
+body	 - body of the loop
+
+Both filespec and body must be enclosed in double quotes.
+In the body of the loop, the current file is denoted by
+three dashes, '---'.
+
+Example:
+	foreachfile "*.patch" "echo ---; grep -m1 'Subject' ---"
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+# strindex string-1 string-2
+#
+# Return zero-based index of string-2 in string-1
+# Returns -1 if string-2 is not found in string-1
+#
+function strindex {
+	local x="${1%%$2*}"
+	[[ $x = $1 ]] && echo -1 || echo ${#x}
+}
+
+# parse_cmd
+#
+# If the command contains '---', then replace it with the current filename
+# and execute the command.
+#
+# $1 - current filename
+# $2 - command
+#
+parse_cmd() {
+	local file="$1"		# get the name of the current file
+	shift			# shift past the filename
+	local cmd="$@"		# remainder of command line is command string
+	local ary=($cmd)	# create an array from the command string
+	local index=0		# index for the array
+
+	for index in "${!ary[@]}"; do
+		[[ ${ary[$index]} == "---" ]] && ary[$index]="$file"
+	done
+
+	${ary[@]}	# execute the command
+}
+
+
+[ $# -gt 0 ] || usage
+
+# shopt -s extglob
+
+declare filespec="$1"		 # file specification including wildcards
+declare files=$(ls -1 $filespec)	# list of files
+echo "$files"
+shift				# shift past the file specification
+declare body="$@"		# remainder of command line is loop body
+declare cmdary			# array of commands to be executed in loop
+
+# Tokenize the loop body into an array using ';' as the IFS separator.
+#
+IFS=";" read -ra cmdary <<<"$body"
+for key in "${!cmdary[@]}"; do echo $key ${cmdary[$key]}; done
+
+# For each for the files in the list, execute the body of commands
+#
+for f in $files; do
+
+	# Execute each command in the loop body
+	#
+	for key in "${!cmdary[@]}"; do
+		parse_cmd $f "${cmdary[$key]}"
+	done
+done
