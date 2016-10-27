@@ -3,7 +3,10 @@
 # foreachfile
 #
 
-cmdline=foreachfile
+# filename placeholder token to be used from the command line and for
+# substitution in the individual commands
+#
+token="%"
 
 usagestr=$(
 cat <<EOF
@@ -16,10 +19,12 @@ body	 - body of the loop
 
 Both filespec and body must be enclosed in double quotes.
 In the body of the loop, the current file is denoted by
-three dashes, '---'.
+this token: '$token'
+
+Use  \\  to escape  \\ , %, $, etc.
 
 Example:
-	foreachfile "*.patch" "echo ---; grep -m1 'Subject' ---"
+	foreachfile "*.patch" "echo $token; grep -m1 'Subject' $token"
 \0
 EOF
 )
@@ -29,19 +34,9 @@ usage() {
 	exit
 }
 
-# strindex string-1 string-2
-#
-# Return zero-based index of string-2 in string-1
-# Returns -1 if string-2 is not found in string-1
-#
-function strindex {
-	local x="${1%%$2*}"
-	[[ $x = $1 ]] && echo -1 || echo ${#x}
-}
-
 # parse_cmd
 #
-# If the command contains '---', then replace it with the current filename
+# If the command contains the token, then replace it with the current filename
 # and execute the command.
 #
 # $1 - current filename
@@ -55,10 +50,10 @@ parse_cmd() {
 	local index=0		# index for the array
 
 	for index in "${!ary[@]}"; do
-		[[ ${ary[$index]} == "---" ]] && ary[$index]="$file"
+		[[ ${ary[$index]} == "$token" ]] && ary[$index]="$file"
 	done
 
-	${ary[@]}	# execute the command
+	echo "${ary[@]}" >> /tmp/cmd
 }
 
 
@@ -68,23 +63,47 @@ parse_cmd() {
 
 declare filespec="$1"		 # file specification including wildcards
 declare files=$(ls -1 $filespec)	# list of files
+echo -e \
+	" List of Files\n"\
+	"============="
 echo "$files"
+
 shift				# shift past the file specification
 declare body="$@"		# remainder of command line is loop body
 declare cmdary			# array of commands to be executed in loop
 
+# Create a dummy script file to execute the commands
+#
+touch /tmp/cmd
+chmod +x /tmp/cmd
+
 # Tokenize the loop body into an array using ';' as the IFS separator.
 #
 IFS=";" read -ra cmdary <<<"$body"
+
+echo -e \
+	"\n List of Commands\n"\
+	  "================"
 for key in "${!cmdary[@]}"; do echo $key ${cmdary[$key]}; done
 
 # For each for the files in the list, execute the body of commands
 #
 for f in $files; do
 
-	# Execute each command in the loop body
+	> /tmp/cmd
+
+	# Substitute the token with the file name in each command that has
+	# a token and write the command line out to the /tmp/cmd file.
 	#
 	for key in "${!cmdary[@]}"; do
 		parse_cmd $f "${cmdary[$key]}"
 	done
+
+	# Execute the commands
+	#
+	/tmp/cmd
 done
+
+# Delete the dummy script file
+#
+rm -f /tmp/cmd
