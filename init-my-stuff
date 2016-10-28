@@ -163,7 +163,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	fi
 
 	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
-	curl -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
+	curl -L -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
 
 	$installagent groupinstall -y 'X Window System' 'GNOME'
 
