@@ -79,12 +79,13 @@ rsync -Pvat rcbak/ . 2>&1 | tee -a $logfile
 if [ "$remotename" == "root" ]; then
 	for file in \
 	"hosts" \
+	"vpnc.conf" \
 	"krb5.conf"
 	do
 		echo "--------------" >> "$logfile" 2>&1
 		echo "Checking $file" >> "$logfile" 2>&1
 		[ -f /etc/"$file".orig ] || cp -vf /etc/$file /etc/$file.orig 2>&1 | tee -a "$logfile"
-		[ ~/etcbk/"$file" -nt /etc/"$file" ] && cp -vf ~/etcbk/$file /etc/$file 2>&1 | tee -a "$logfile"
+		cp -vf ~/etcbk/$file /etc/$file 2>&1 | tee -a "$logfile"
 		echo "* * * * * * * * * " >> "$logfile" 2>&1
 		echo "" >> "$logfile" 2>&1
 	done
