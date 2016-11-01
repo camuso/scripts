@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# tarpm
+#
+
+cmdline=tar-kabitools
+
+usagestr=$(
+cat <<EOF
+
+tarpm name-version
+
+Example:
+	tarpm kabitools-3.5.1
+
+	The directory kabitools-3.5.1 must exist immediately below current
+	directory and contain the source files
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+nv="$1"
+
+tar czvf kabitools-"$nv".tar.gz kabitools-"$nv"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
+
