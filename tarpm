@@ -28,5 +28,5 @@ usage() {
 
 nv="$1"
 
-tar czvf kabitools-"$nv".tar.gz kabitools-"$nv"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
+tar czvf "$nv".tar.gz "$nv"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
 
