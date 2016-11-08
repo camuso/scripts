@@ -49,6 +49,7 @@ declare vr="$1"
 tar -cvzf rpmbuild/SOURCES/kabitools-"$vr".tar.gz \
 	kabitools-"$vr"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
 
+rsync -Pvat kabitools-"$vr"/kabitools.spec rpmbuild/SPECS/.
 cd rpmbuild
 rpmbuild --bb --clean SPECS/kabitools.spec
 cd -
