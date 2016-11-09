@@ -21,20 +21,18 @@ usage() {
 [ $# -gt 0 ] || usage
 
 cmd="$@"
+declare scriptfile="__timer__"
 
-START1=$(date +%s)
+echo 'START1=$(date +%s)' 		> $scriptfile
+echo "$cmd" 				>> $scriptfile
+echo 'END=$(date +%s)' 			>> $scriptfile
+echo 'DIFF=$(($END - $START1))' 	>> $scriptfile
+echo 'minutes=$(($DIFF / 60))'		>> $scriptfile
+echo 'seconds=$(($DIFF % 60))'		>> $scriptfile
+echo					>> $scriptfile
+echo 'echo "That took $minutes minutes and $seconds seconds."'	>> $scriptfile
+echo 'echo'				>> $scriptfile
 
-echo $cmd
-read -n1
-
-eval $cmd
-
-END=$(date +%s)
-DIFF=$(( $END - $START1 ))
-
-minutes=$(( $DIFF / 60 ))
-seconds=$(( $DIFF % 60 ))
-echo
-echo "That took $minutes minutes and $seconds seconds."
-echo
-
+chmod +x $scriptfile
+./$scriptfile
+rm -f $scriptfile
