@@ -46,8 +46,11 @@ declare vr="$1"
 [ -d "rpmbuild/SPECS" ]		|| mkdir -p rpmbuild/SPECS
 [ -d "rpmbuild/SRPMS" ]		|| mkdir -p rpmbuild/SRPMS
 
+# tar -cvzf rpmbuild/SOURCES/kabitools-"$vr".tar.gz \
+#	kabitools-"$vr"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
+
 tar -cvzf rpmbuild/SOURCES/kabitools-"$vr".tar.gz \
-	kabitools-"$vr"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
+	kabitools-"$vr"/{kabi-lookup,kabi-parser,kabi-dump,kabitools*,*.sh,README}
 
 rsync -Pvat kabitools-"$vr"/kabitools.spec rpmbuild/SPECS/.
 cd rpmbuild
