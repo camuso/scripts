@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# /home/tcamuso/bin/rsync-src
+#
+
+cmdline=/home/tcamuso/bin/rsync-src
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) directory
+
+Copies sources, patches, spec files and README to the destination
+directory at makerpm@localhost
+
+Simplifies transfer of source files to a directory in the makerpm
+account of the localhost for creation of an rpm file.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+declare directory="$1"
+declare scriptlist=$(grep -m1 -I '#!/bin/bash' * | cut -d':' -f1)
+alias rsyncp='rsync -Pvat -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"'
+
+rsyncp ./{$scriptlist,*.cpp,*.[ch],*.spec,*.patch,README} \
+	makerpm@localhost:"$directory"
