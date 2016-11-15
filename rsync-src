@@ -30,5 +30,5 @@ usage() {
 declare directory="$1"
 declare scriptlist=$(grep -m1 -I '#!/bin/bash' * | cut -d':' -f1)
 
-rsync -Pvat ./{$scriptlist,*.cpp,*.[ch],*.a,*.spec,*.patch,README,Makefile} \
+rsync -Pvat ./{$scriptlist,*.cpp,*.[ch],*.a,*.spec,*.patch,README,Makefile,include} \
 	makerpm@localhost:"$directory"
