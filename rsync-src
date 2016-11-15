@@ -10,8 +10,8 @@ cat <<EOF
 
 $(basename $0) directory
 
-Copies sources, patches, spec files and README to the destination
-directory at makerpm@localhost
+Copies sources, patches, spec files, Makefiles and README to the
+destination directory at makerpm@localhost
 
 Simplifies transfer of source files to a directory in the makerpm
 account of the localhost for creation of an rpm file.
@@ -29,7 +29,6 @@ usage() {
 
 declare directory="$1"
 declare scriptlist=$(grep -m1 -I '#!/bin/bash' * | cut -d':' -f1)
-alias rsyncp='rsync -Pvat -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"'
 
-rsyncp ./{$scriptlist,*.cpp,*.[ch],*.spec,*.patch,README} \
+rsync -Pvat ./{$scriptlist,*.cpp,*.[ch],*.a,*.spec,*.patch,README,Makefile} \
 	makerpm@localhost:"$directory"

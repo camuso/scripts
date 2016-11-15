@@ -30,6 +30,5 @@ usage() {
 
 declare directory="$1"
 declare exelist=$(find ./ -maxdepth 1 -type f -executable)
-alias rsyncp='rsync -Pvat -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"'
 
-rsyncp ./{$exelist,*.spec,*.patch,README} makerpm@localhost:"$directory"
+rsyncp -Pvat ./{$exelist,*.spec,*.patch,README} makerpm@localhost:"$directory"
