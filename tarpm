@@ -8,13 +8,32 @@ cmdline=tar-kabitools
 usagestr=$(
 cat <<EOF
 
-tarpm name-version
+$(basename $0) name version
+
+name 	- the name of the package
+version	- the version-release of the package
+
+It is assumed that the files to be contained by the rpm are in a diectory
+named using the name-version command line variables. 
+
+This is intended to be run from the directory above rpmbuild. If rpmbuild
+directory does not exist, then this script will create it and its directory
+tree. The tar and rpm files will be created in that tree in the places
+specified in the spec file.
+
+rpmbuild/
+    BUILD/
+    BUILDROOT/
+    RPMS/
+    SOURCES/
+    SPECS/
+    SRPMS/
 
 Example:
-	tarpm kabitools-3.5.1
+	tarpm kabitools 3.5.1
 
 	The directory kabitools-3.5.1 must exist immediately below current
-	directory and contain the source files
+	directory and contain the files to put into the rpm.
 \0
 EOF
 )
@@ -24,9 +43,27 @@ usage() {
 	exit
 }
 
-[ $# -gt 0 ] || usage
+[ $# -eq 2 ] || usage
 
-nv="$1"
+declare name="$1"
+declare version="$2"
 
-tar czvf "$nv".tar.gz "$nv"/{*.sh,*.cpp,*.[ch],Makefile,*.patch}
+[ -d "rpmbuild" ]	 	|| mkdir rpmbuild
+[ -d "rpmbuild/BUILD" ] 	|| mkdir -p rpmbuild/BUILD
+[ -d "rpmbuild/BUILDROOT" ] 	|| mkdir -p rpmbuild/BUILDROOT
+[ -d "rpmbuild/RPMS" ] 		|| mkdir -p rpmbuild/RPMS
+[ -d "rpmbuild/SOURCES" ] 	|| mkdir -p rpmbuild/SOURCES
+[ -d "rpmbuild/SPECS" ]		|| mkdir -p rpmbuild/SPECS
+[ -d "rpmbuild/SRPMS" ]		|| mkdir -p rpmbuild/SRPMS
+
+tar -cvzf rpmbuild/SOURCES/"$name"-"$version".tar.gz \
+	"$name"-"$version"/*
+
+#tar -cvzf rpmbuild/SOURCES/kabitools-"$vr".tar.gz \
+#	kabitools-"$vr"/{kabi-lookup,kabi-parser,kabi-dump,kabitools*,*.sh,README}
+
+rsync -Pvat "$name"-"$version"/"$name".spec rpmbuild/SPECS/.
+cd rpmbuild
+rpmbuild --ba --clean -vv SPECS/"$name".spec
+cd -
 
