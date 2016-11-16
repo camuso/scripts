@@ -1,0 +1,33 @@
+#!/bin/bash
+#
+# rpmtree
+#
+
+cmdline=rpmtree
+
+usagestr=$(
+cat <<EOF
+
+rpmtree top
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+declare top="$1"
+
+[ -d "$top" ]	 	|| mkdir "$top"
+[ -d "$top"/BUILD ] 	|| mkdir -p "$top"/BUILD
+[ -d "$top"/BUILDROOT ] || mkdir -p "$top"/BUILDROOT
+[ -d "$top"/RPMS ] 	|| mkdir -p "$top"/RPMS
+[ -d "$top"/SOURCES ] 	|| mkdir -p "$top"/SOURCES
+[ -d "$top"/SPECS ]	|| mkdir -p "$top"/SPECS
+[ -d "$top"/SRPMS ]	|| mkdir -p "$top"/SRPMS
+
+
