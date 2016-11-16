@@ -28,7 +28,9 @@ usage() {
 [ $# -gt 0 ] || usage
 
 declare directory="$1"
-declare scriptlist=$(grep -m1 -I '#!/bin/bash' * | cut -d':' -f1)
+declare scriptlist=$(grep -sm1 -I '#!/bin/bash' * | cut -d':' -f1)
+declare srclist=$(ls {*.cpp,*.[ch],*.a,*.spec,*.patch})
+declare RSYNC="rsync -Pvat --cvs-exclude --exclude=*.swp"
 
-rsync -Pvat ./{$scriptlist,*.cpp,*.[ch],*.a,*.spec,*.patch,README,Makefile,include} \
+$RSYNC ./{$scriptlist,$srclist,README,Makefile} \
 	makerpm@localhost:"$directory"
