@@ -36,6 +36,7 @@ declare -i before=0
 declare -i center=0
 declare commitsfile=""
 declare path=""
+declare grepopts=""
 
 while getopts ha:b:c: OPTION; do
     case "$OPTION" in
@@ -53,14 +54,22 @@ while getopts ha:b:c: OPTION; do
     esac
 done
 
+for opt in $@; do
+	[[ "${opt:0:1}" == "-" ]] && shift
+done
+
 commitsfile=$1
 path=$2
+
+[[ $after > 0 ]]  && grepopts="$grepopts -A$after"
+[[ $before > 0 ]] && grepopts="$grepopts -B$before"
+[[ $center > 0 ]] && grepopts="$grepopts -C$center"
 
 while read line; do
 	commit=$(echo $line | cut -d' ' -f1)
 	echo $commit
-	git log $path | grep -A$after -B$before -C$center ^$commit
-	echo
+	git log $path | grep --color $grepopts $commit
+	[[ $? == 0 ]] && echo
 done < $commitsfile
 
 exit 0
