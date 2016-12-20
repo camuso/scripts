@@ -1,0 +1,58 @@
+#!/bin/bash
+#
+# gitfindcommits
+#
+
+cmdline=gitfindcommits
+
+usagestr=$(
+cat <<EOF
+
+gitfindcommits [OPTION] commitsfile
+
+Where commitsfile is a list of commits with the commit in the first field
+of each line.
+
+  -h  - this help screen
+  -a  - number of lines after (grep -A)
+  -b  - number of lines before (grep -B)
+  -c  - number of lines around center (grep -C)
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -gt 0 ] || usage
+
+declare after
+declare before
+declare center
+
+while getopts ha:b:c: OPTION; do
+    case "$OPTION" in
+
+	h ) usage 1
+	    ;;
+	a ) after=$OPTARG
+	    ;;
+	b ) before=$OPTARG
+	    ;;
+	c ) center=$OPTARG
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    usage 127
+    esac
+done
+
+while read line; do
+	commit=$(echo $line | cut -d' ' -f1)
+	echo $commit
+	git log | grep $commit
+	echo
+done < $commitsfile
+
+exit 0
