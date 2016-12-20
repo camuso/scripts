@@ -2,8 +2,7 @@
 
 #####################################################################
 #
-#
-# createoptions v0.1
+# createoptions v1.0
 #
 # Appends the lines required to implement parsing an options list in
 # a bash script.
@@ -28,6 +27,13 @@ script	- the script file to receive the options
 options	- string containing a list of space separated option flags and
 	  optional corresponding arguments.
 
+Example:
+	createoptions myscript.sh "n:number f:file d:directory x h"
+
+	Creates options for -n number,  -f file, -d directory, -x and -h
+	with no arguments, presumably to invoke a function. These options
+	and their corresponding case statement are appended ons and case
+	statement to myscript.sh.
 \0
 EOF
 )
@@ -85,7 +91,7 @@ optcount=$index
 # writing stuff into the file.
 #
 echo "" >> $file
-echo "usage=\$(
+echo "usagestr=\$(
 cat <<EOF
 \$0 [OPTION]" >> $file
 
@@ -108,7 +114,7 @@ echo "EOF
 echo "" $file
 
 # Create the internal options string before writing it out to the file.
-# We will re-use the "optstr" variable that was set to an inpug arg
+# We will re-use the "optstr" variable that was set to an input arg
 # at the beginning.
 #
 index=0
@@ -131,16 +137,16 @@ while [ $index -lt $optcount ]; do
 	optflg=${optflgarray[$index]}
 	optflg=${optflg:0:1}
 	optarg=${optargarray[$index]}
-	printf "        %s )\n" $optflg >> $file
-	printf "            %s=\n" $optarg >> $file
-	printf "            ;;\n" >> file
+	echo -en "\t$optflg ) " >> $file
+	[[ $optarg ]] && echo -en "$optarg=\$OPTARG" >> $file
+	echo -en "\n\t    ;;\n" >> $file
 	let index++
 done
 
-echo "        * )" >> $file
-echo "            echo \"unrecognized option\"" >> $file
-echo "            echo \"\$usage\"" >> $file
-echo "            exit 1" >> $file
+echo -en "\t* ) " >> $file
+echo -en "echo \"unrecognized option -\$OPTION\"\n" >> $file
+echo -en "\t    echo -e \"\$usagestr\"\n" >> $file
+echo -en "\t    exit 127\n" >> $file
 echo "    esac" >> $file
 echo "done" >> $file
 echo "" >> $file
