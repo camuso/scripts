@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# gitbranchtags
+#
+
+cmdline=gitbranchtags
+
+usagestr=$(
+cat <<EOF
+
+gitbranchtags branch
+
+Lists all the tags for the given branch. The branch argument could be -1,
+or HEAD^ or any commit, as well as a named branch.
+
+Also shows other branches that share a given tag.
+
+Example:
+	gitbranchtags rh7
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+branch=$1
+
+set -x
+git log --simplify-by-decoration --decorate --pretty=oneline $branch | fgrep 'tag: '
+set +x
