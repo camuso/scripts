@@ -66,6 +66,7 @@ path=$2
 [[ $center > 0 ]] && grepopts="$grepopts -C$center"
 
 while read line; do
+	[[ "${line:0:1}" == "#" ]] && continue
 	commit=$(echo $line | cut -d' ' -f1)
 	echo $commit
 	git log $path | grep --color $grepopts $commit
