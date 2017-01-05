@@ -14,6 +14,7 @@ $0 [OPTION]
 		1 - sparse only for newly compiled sources
 		2 - sparse for all sources
 
+	-b build versioning string
 	-v verbose make
 	-k make kabitools database
 	-h this help screen
@@ -29,14 +30,11 @@ level=3		# set for complete build/install
 sparse=0	# no sparse
 verbose=""	# no verbose
 kabi=""		# no kabitools database
-version="$1"	# to be written into localversion
 
-
-[[ "${version:0:1}" == "-" ]] && version="" || shift
-echo "$version" > localversion
-
-while getopts l:c:vkh OPTION; do
+while getopts b:l:c:vkh OPTION; do
     case "$OPTION" in
+	b ) echo "$OPTARG" > localversion
+		;;
 	l ) level=$OPTARG
 		;;
 	c ) sparse=$OPTARG
