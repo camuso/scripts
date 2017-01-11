@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# netspace
+#
+
+cmdline=netspace
+
+usagestr=$(
+cat <<EOF
+
+netspace
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+# Create the eth0 network namespace
+ip netns add eth0_ns
+
+# Create the virtual network pair
+ip link add v_eth0a type veth peer name v_eth0b
+
+# Move v_eth0a to the eth0_ns namespace, the virtual pair is now split
+# between two network namespaces.
+ip link set v_eth0a netns eth0_ns
+
+# Configure the ends of the virtual network pairs
+ip netns exec eth0_ns ifconfig v_eth0a up {{NAMESPACE_IP}} netmask {{NAMESPACE_NETMASK}}
+ifconfig v_eth0b up {{ROOT_NS_IP}} netmask {{ROOT_NS_NETMASK}}
+
+# Setup routing from namespace to root
+ip netns exec eth0_ns route add default gw {{ROOT_NS_UP}} dev v_eth0a
+
+# Setup IP forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+iptables \
+	-t nat \
+	-A POSTROUTING \
+	-s {{ROUTE_SOURCE}}/24 \
+	-o {{NETWORK_INTERFACE}} \
+	-j SNAT \
+	--to-source {{ROUTE_TARGET}
