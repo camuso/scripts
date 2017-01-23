@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# ../makeipmi
+#
+
+usagestr=$(
+cat <<EOF
+
+basename $0 modules-directory
+
+Make kmods from the top of the kernel tree given the kmod directory.
+
+Should have a valid .config file.
+
+Must run the following commands once per login.
+
+make prepare
+make modules_prepare
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 0 ] && usage
+[[ "$1" == "-h" ]] && usage
+
+declare kmoddir="$1"
+declare release=$(cat /etc/system-release | cut -d' ' -f7 | cut -d'.' -f1)
+declare libdir=$([[ release == 7 ]] && echo "/usr/lib/modules" || echo "/lib/modules")
+
+make M="$kmoddir"
+
+cd "$libdir"/$(uname -r)/kernel/"$kmoddir"
+
+# save the original kmods
+#
+for f in $(ls -1 *.ko); do
+	fname=$(basename $f .ko)
+	#
+	# if we already saved the originals, leave them alone.
+	#
+	[[ -e "$fname".old ]] || mv -v $f $fname.old
+done
+
+cd -
+rsync -Pvat  "$kmoddir"/*.ko "$libdir"/$(uname -r)/kernel/"$kmoddir"/.
