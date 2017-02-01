@@ -8,7 +8,7 @@ cmdline=/root/bin/acpi-ipmi-msg
 usagestr=$(
 cat <<EOF
 
-/root/bin/acpi-ipmi-msg <outputfile>
+$(basename $0)  <outputfile>
 
 Messages pertaining to ipmi and acpi from dmesg and lsmod are sent to
 outfile.
@@ -22,7 +22,7 @@ usage() {
 	exit
 }
 
-# [ $# -ne 1 ] || usage
+[ "$1" == "-h" ] && usage
 
 [ "$1" ] && file="$1" || file="/dev/stdout"
 
