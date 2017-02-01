@@ -1,0 +1,16 @@
+# Put this file in /usr/lib/systemd/system/ and put the bootloop script in
+# /root.
+# Then issue the following command to enable this service, so that the bootloop
+# script will run on every subsequent boot.
+#
+#     systemctl enable bootloop.service
+#
+[Unit]
+Description=Put the system into a reboot loop
+
+[Service]
+Type=oneshot
+ExecStart=/root/bootloop
+
+[Install]
+WantedBy=multi-user.target
