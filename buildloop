@@ -1,17 +1,115 @@
 #!/bin/bash
 
+usage=$(
+cat <<EOF
+
+$0 [OPTION]
+
+	Builds the kernel repeatedly in a loop.
+
+	This has been known to cause crashes with unstable hardware
+	or device drivers.
+
+	-l numeric level
+		1 - stop after make
+		2 - stop after make modules_install
+		3 - complete to make install
+	   Default is 3, complete to make install.
+
+	-c sparse level
+		1 - sparse only for newly compiled sources
+		2 - sparse for all sources
+
+	-j number of cpu cores to use (default is all cores)
+	-b build versioning string
+	-v verbose make
+	-h this help screen
+
+	With no options, each make in the loop will build and install
+	the kernel and kernel modules using all processors.
+
+	The loop stops if the build fails.
+EOF
+)
+
+# default settings
+#
+level=3		# set for complete build/install
+sparse=0	# no sparse
+verbose=""	# no verbose
+kabi=""		# no kabitools database
+cores=$(cat /proc/cpuinfo | grep processor | wc -l)
+
+while getopts b:c:j:l:vh OPTION; do
+    case "$OPTION" in
+	b ) echo "$OPTARG" > localversion
+		;;
+	l ) level=$OPTARG
+		;;
+	c ) sparse=$OPTARG
+		;;
+	j ) cores=$OPTARG
+		;;
+	v ) verbose="V=1"
+		;;
+	h ) echo "$usage"
+            exit 0
+		;;
+    esac
+done
+
 loopvar=1
 while [ $loopvar -ge 1 ]; do
+	START1=$(date +%s)
+
         echo "***************************************************"
         echo "**                                               **"
         echo "** Make Loop Number $loopvar                     **"
         echo "**                                               **"
         echo "***************************************************"
         loopvar=$((loopvar + 1))
+	echo "make clean"
         make clean;
-        make -j4;
-        make -j4 modules;
-        make -j4 modules_install;
+	echo -n "make -j $cores"
+	[ "$verbose" ] && echo -n "$verbose"
+	echo
+        make -j$cores $verbose;
+	makestat=$?
+
+	END=$(date +%s)
+	DIFF=$(( $END - $START1 ))
+	minutes=$(( $DIFF / 60 ))
+	seconds=$(( $DIFF % 60 ))
+	echo
+	echo "Elapsed time: $minutes : $seconds"
+	echo
+
+	[ $level -eq 1 ] && exit 0
+	[ $makestat -eq 0 ] || exit $makestat
+
+	make -j$cores modules_install $verbose
+	makestat=$?
+
+	END=$(date +%s)
+	DIFF=$(( $END - $START1 ))
+	minutes=$(( $DIFF / 60 ))
+	seconds=$(( $DIFF % 60 ))
+	echo
+	echo "Elapsed time: $minutes : $seconds"
+	echo
+
+	[ $level -eq 2 ] && exit 0
+	[ $makestat -eq 0 ] || exit $makestat
+
+	make -j$cores $verbose C=$sparse install 2>&1 | tee -a ../make.log
+	makestat=$?
+
+	END=$(date +%s)
+	DIFF=$(( $END - $START1 ))
+	minutes=$(( $DIFF / 60 ))
+	seconds=$(( $DIFF % 60 ))
+	echo
+	echo "Elapsed time: $minutes : $seconds"
+	echo
+	[ $makestat -eq 0 ] || exit $makestat
 done
-
-
