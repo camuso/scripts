@@ -1,5 +1,4 @@
 #!/bin/bash
-cores=$(cpucount)
 
 usage=$(
 cat <<EOF
@@ -9,18 +8,20 @@ $0 [OPTION]
 		1 - stop after make
 		2 - stop after make modules_install
 		3 - complete to make install
+	   Default is 3, complete to make install.
 
 	-c sparse level
 		1 - sparse only for newly compiled sources
 		2 - sparse for all sources
 
+	-j cpu cores (default is all cores)
 	-b build versioning string
 	-v verbose make
 	-k make kabitools database
 	-h this help screen
 
 	With no options, kmake will build and install the kernel
-	and kernel modules.
+	and kernel modules using all processors.
 EOF
 )
 
@@ -30,6 +31,7 @@ level=3		# set for complete build/install
 sparse=0	# no sparse
 verbose=""	# no verbose
 kabi=""		# no kabitools database
+cores=$(cat /proc/cpuinfo | grep processor | wc -l)
 
 while getopts b:l:c:vkh OPTION; do
     case "$OPTION" in
@@ -38,6 +40,8 @@ while getopts b:l:c:vkh OPTION; do
 	l ) level=$OPTARG
 		;;
 	c ) sparse=$OPTARG
+		;;
+	j ) cores=$OPTARG
 		;;
 	v ) verbose="V=1"
 		;;
