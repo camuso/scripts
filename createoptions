@@ -32,8 +32,8 @@ Example:
 
 	Creates options for -n number,  -f file, -d directory, -x and -h
 	with no arguments, presumably to invoke a function. These options
-	and their corresponding case statement are appended ons and case
-	statement to myscript.sh.
+	and their corresponding case statement are appended statement to
+	myscript.sh.
 \0
 EOF
 )
