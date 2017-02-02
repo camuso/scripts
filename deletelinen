@@ -3,6 +3,23 @@
 #
 #[ $1 -gt $lc ] && exit 1
 
+usagestr=$(
+cat <<EOF
+
+$(basename $0) n file
+
+	Deletes the nth line of the file.
+\0
+EOF
+)
+
+usage() {
+	echo -e $usagestr
+	exit 0
+}
+
+[ $# -eq 2 ] || usage
+
 awk -v line=$1 '{
         if (NR != line) {
                 print $0;
