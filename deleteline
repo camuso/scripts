@@ -4,6 +4,8 @@ usage() {
 	echo
 	echo -e "\tdeleteline string file"
 	echo
+	echo -e "\tdelete the line containing the string in file."
+	echo
 	exit 0
 }
 
