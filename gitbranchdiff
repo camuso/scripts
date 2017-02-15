@@ -2,7 +2,29 @@
 #
 # gitbranchdiff branch-1 branch-2 outfile path/to/file
 #
-# Creates a diff on a file $4 between two branches, $1 and $2,
-# and writes it to file $3.
+# Creates a diff on a file $3 between two branches, $1 and $2,
+# and writes it to file $4.
 
-git diff $1 $2 -- $4 >> $3
+usagestr=$(
+cat <<EOF
+
+$0 branch-1 branch-2 path/to/file outfile
+
+Creates a diff on "path/to/file" between two git branches and writes
+the diff to the outfile.
+
+Must be executed from the top of a git tree.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 4 ] || usage
+
+
+git diff $1 $2 -- $3 >> $4
