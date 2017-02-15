@@ -1,14 +1,12 @@
 #!/bin/bash
 #
-# gitfindcommits
+# gitseekcommits
 #
-
-cmdline=gitfindcommits
 
 usagestr=$(
 cat <<EOF
 
-gitfindcommits [OPTION] commitsfile [path]
+$0 [OPTION] commitsfile [path]
 
 Where commitsfile is a list of commits with the commit in the first field
 of each line (see ~/bin/gitprepcommits).
