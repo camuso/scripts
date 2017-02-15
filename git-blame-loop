@@ -1,1 +1,31 @@
-foo=$(gitblame1 --oneline "$1"  drivers/char/ipmi/ipmi_si_intf.c | cut -d' ' -f1); for commit in $foo; do git log -n1 --oneline $commit; git show $commit | grep -B2 "$1"; read; done
+#!/bin/bash
+#
+#
+
+usagestr=$(
+cat <<EOF
+
+$0 "string" path/to/file
+
+Find every commit that has the given string in the given file.
+Then, loop through each of those commits showing the first instance
+of that string in each of the commits.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+[ $# -eq 2 ] || usage
+
+foo=$(gitblame1 --oneline "$1"  "$2" | cut -d' ' -f1)
+
+for commit in $foo; do
+	git log -n1 --oneline $commit
+	git show $commit | grep -B2 "$1"
+	read
+done
