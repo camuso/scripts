@@ -4,6 +4,8 @@ usage () {
 	echo
 	echo "giblame1 "string" file"
 	echo
+	echo "Find the commit responsible for the \"string\" in \"file\"."
+	echo
 	exit
 }
 
