@@ -5,7 +5,7 @@ cat <<EOF
 
 githasdump file-of-hashes
 
-	where \"file-of-hashes\" is a file containing commit
+	where "file-of-hashes" is a file containing commit
 	hashes to be processed.
 
 EOF
