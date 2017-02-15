@@ -7,9 +7,13 @@ cmdline=gitfromdir
 
 usagestr=$(
 cat <<EOF
+$0 [OPTION] commithash
 
-gitfromdir
-\0
+Creates a merge of an upstream commit when the directory of one or more
+of the target files has been moved to a different upstream directory.
+
+  -d gitdir - optionial other git repository directory
+
 EOF
 )
 
@@ -20,25 +24,13 @@ usage() {
 
 [ $# -gt 0 ] || usage
 
-usage=$(
-cat <<EOF
-$0 [OPTION] commithash
-
-Creates a merge of an upstream commit when the directory of one or more
-of the target files has been moved to a different upstream directory.
-
-  -d gitdir - optionial other git repository directory
-EOF
-)
-
 while getopts d: OPTION; do
     case "$OPTION" in
 
         d ) gitdir="$OPTARG"
 	    ;;
         * ) echo "unrecognized option"
-            echo "$usage"
-            exit 1
+	    usage()
 	    ;;
     esac
 done
