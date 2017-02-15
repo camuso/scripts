@@ -20,6 +20,7 @@ Options
 -------
 -n	depth of search, where "-n 1" is topmost directory.
 	space between switch and number is mandatory.
+	Default depth is recursion through all subdirectories.
 
 -h	this help text
 
