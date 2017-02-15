@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# gitreview
+#
+
+cmdline=gitbatcom
+
+usagestr=$(
+cat <<EOF
+
+$0
+
+Review the diff of all files identified by git as "modified" using
+git diff --cached.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -eq 0 ] || usage
+
+declare gitstat="$(git status)"
+declare modfound=false
+
+for str in $gitstat; do
+	[  "$str" == "modified:" ] && { modfound=true; continue; }
+	if $modfound; then
+		echo $str
+		modfound=false
+		git diff --cached $str
+		read
+	fi
+done
