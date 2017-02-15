@@ -4,12 +4,13 @@
 
 # grepstr="$(alias grep)"
 # unalias grep
+echo
 for kmod in $(lsmod | grep "$*" | cut -f1 -d' ')
 do
-	echo
 	echo "$kmod:"
 	echo "****************************************************************"
-	modinfo $kmod | grep parm | sed -e 's/parm:/\nparm:/'
+	# modinfo $kmod | grep parm | sed -e 's/parm: /\nparm: /'
+	modinfo $kmod | grep parm
 	echo
 done
 # foo=$(echo $grepstr | cut -c2- | rev | cut -c2- | rev)
