@@ -6,7 +6,7 @@
 usagestr=$(
 cat <<EOF
 
-basename $0 modules-directory
+$(basename $0) modules-directory
 
 Make kmods from the top of the kernel tree given the kmod directory.
 
