@@ -1,5 +1,5 @@
 #!/bin/bash
-branch="$(git status | head -1 | cut -d' ' -f4)"
+branch="$(git status | head -1 | cut -d' ' -f3)"
 head="$(cat .git/refs/heads/"$branch")"
 git reset --hard "$head"
 git checkout .
