@@ -46,7 +46,7 @@ tostr=$(echo $argstr | cut -d' ' -f $topos)
 #
 [ $((argc - n_opts)) -ge 3 ] && pathspec=$(echo $argstr | cut -d' ' -f $pathpos-)
 
-# If we have any options, extract them from the artstr.
+# If we have any options, extract them from the argstr.
 #
 [ $n_opts -gt 0 ] && optstr="$(echo $argstr | cut -d ' ' -f -$n_opts)"
 
