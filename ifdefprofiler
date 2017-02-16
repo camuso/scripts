@@ -8,7 +8,12 @@ cmdline=ifdefprofiler
 usagestr=$(
 cat <<EOF
 
-ifdefprofiler
+ifdefprofiler <file>
+
+Helps determine if there is a mismatched #if/#endif pair.
+Prints every line that has #if, #ifdef, and #endif.
+Lines are artificially indented to help with the matching.
+
 \0
 EOF
 )
@@ -31,7 +36,7 @@ indent() {
 	done
 }
 
-if ![ -f "$1" ]; then
+if ! [ -f "$1" ]; then
 	echo "$1 is not a valid filename."
 	echo
 	exit 1
@@ -45,17 +50,19 @@ set -f	# disable pathname expansion
 #
 while read -r line || [[ -n $line ]]; do
 	let linenumber++
-	if [[ $line == *"#ifdef"* ]]; then
+	if [[ $line == *"#if"* ]]; then
+		printf "%5d: " $linenumber
 		indent $index
-		printf "%5d: %s\n" $linenumber $line
+		printf "%s\n" $line
 		let index++
 	fi
 
 	if [[ $line == *"#endif"* ]]; then
 		let index--
+		printf "%5d: " $linenumber
 		indent $index
-		printf "%5d: %s\n" $linenumber $line
-		[ $index -eq 0 ] && echo
+		printf "%s\n\n" $line
+		#[ $index -eq 0 ] && echo
 	fi
 
 done < "$file"
