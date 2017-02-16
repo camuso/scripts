@@ -10,8 +10,12 @@ cat <<EOF
 
 braceprofiler <file>
 
-Print every line in file that has either { or } in it.
 Helps to determine if there is a missing brace.
+
+Print every line in file that has either { or } in it.
+Line numbers are printed before the line, and the line is presented with
+the same indentation it has in the file.
+
 \0
 EOF
 )
@@ -23,9 +27,15 @@ usage() {
 
 [ $# -eq 1 ] || usage
 
+declare -i linenumber=0
+
+IFS=	# prevent stripping of leading and trailing spaces
+set -f	# disable pathname expansion
+
 # read -r processes backslashes as ordinary characters rather than escapes.
 #
-while read -r line; do 
-	[[ "$line" == *"{"* ]] && echo $line; 
-	[[ "$line" == *"}"* ]] && echo $line; 
+while read -r line; do
+	let linenumber++
+	[[ "$line" == *"{"* ]] && printf "%5d: %s\n" $linenumber $line
+	[[ "$line" == *"}"* ]] && printf "%5d: %s\n\n" $linenumber $line
 done < $1
