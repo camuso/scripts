@@ -3,14 +3,25 @@
 # gitbatcom
 #
 
-cmdline=gitbatcom
+# uses the getyn script, which must be in the same directory.
 
 usagestr=$(
 cat <<EOF
 
 gitbatcom
 
-Commit all files identified by git as "modified".
+Commit and optionally stage all files identified by git as "modified".
+
+\0
+EOF
+)
+
+prereqstr=$(
+cat <<EOF
+
+gitbatcom
+
+Requires the getyn script in the executable path.
 
 \0
 EOF
@@ -23,16 +34,29 @@ usage() {
 
 [ $# -eq 0 ] || usage
 
+which getyn
+[ $? -ne 0 ] && { echo -e "$prereqstr"; exit 1; }
+
 declare gitstat="$(git status)"
 declare modfound=false
+declare answer
+
+clear
 
 for str in $gitstat; do
 	[  "$str" == "modified:" ] && { modfound=true; continue; }
 	if $modfound; then
 		echo $str
 		modfound=false
-		git diff --cached $str
-		read
+		git diff $str
+		getyn "Do you want to stage and commit this file?"
+		[ $? -ne 0 ] && continue
+		echo "git add $str"
+		git add $str
+		echo "git commit $str"
 		git commit $str
+		echo -n "Press any key to continue..."
+		read -n1
+		clear
 	fi
 done
