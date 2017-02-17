@@ -1,0 +1,79 @@
+#!/bin/bash
+#
+# kmodcopy
+#
+
+declare kmod
+declare libdir="/lib/modules"
+declare arch=$(uname -i)
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) kmod
+
+Copies the kmod from the current kernel build tree to:
+$libdir/$(uname -r)/kernel/<kmod-subdir>/kmod
+
+Must be executed from the top of the kernel build tree.
+Do not include the pathnames. The script will find the kmod.
+
+The original kmod will be saved as:
+$libdir/$(uname -r)/kernel/<kmod-subdir>/*.orig
+
+The .orig file will not be overwritten once it is created.
+\0
+EOF
+)
+
+notktreestr=$(
+cat <<EOF
+
+$(basename $0) must be invoked from the top of a kernel tree.
+
+You are currently in $PWD
+\0
+EOF
+)
+
+nodir() {
+        echo "$1 for $2 does not seem to exist."
+        exit 1
+}
+
+# iskerneltree
+#
+# Returns 0 if we're at the top of a kernel tree, else returns 1
+#
+iskerneltree() {
+	[ -e README ] && [ -e Makefile ] && [ -d kernel ] || return 1
+	local line_1="$(head -1 README)"
+	[[ "$line_1" == *"Linux kernel"* ]] && return 0 || return 1
+}
+
+$(iskerneltree) || { echo -e "$notktreestr"; exit 1; }
+[ $# -eq 1 ] || { echo -e "$usagestr"; exit 1; }
+
+kmod=$1
+libpaths=$(find /$libdir/$(uname -r) -name $kmod)
+libpathspec=( $libpaths )
+libdirspec=${libpathspec%/*}
+
+bldpaths=$(find ./ -name "$kmod")
+bldpathspec=( $bldpaths )
+blddirspec=${bldpathspec%/*}
+
+filespec=${bldpathspec##*/}
+
+# echo libdirspec = $libdirspec
+# echo blddirspec = $blddirspec
+# echo filespec = $filespec
+
+[ -d "$libdirspec" ] || nodir "$libdirspec" "$filespec"
+cd $libdirspec
+fname=$(basename $kmod .ko)
+[[ -e "$fname".orig ]] || mv -v $kmod $fname.orig
+cd -
+
+echo "cp -vf $blddirspec/$filespec $libdirspec/$filespec"
+cp -vf $blddirspec/$filespec $libdirspec/$filespec
