@@ -1,0 +1,10 @@
+# iskerneltree
+#
+# Returns true if we're at the top of a kernel tree, else returns false
+#
+iskerneltree() {
+	[ -e README ] && [ -e Makefile ] && [ -d kernel ] || return 1
+	local line_1="$(head -1 README)"
+	[[ "$line_1" == *"Linux kernel"* ]] && return 0 || return 1
+}
+
