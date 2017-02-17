@@ -1,22 +1,50 @@
 #!/bin/bash
 #
-# ../makeipmi
+# mkmod
 #
 
+declare kmoddir
+declare libdir="/lib/modules"
+declare arch=$(uname -i)
+declare clean=false	# boolean to run "make clean"
+declare prep=false	# boolean to run "make prepare" and "make modules_prepare"
+declare mkcfg=false	# boolean to run "make rh-configs-prep"
+declare isktree=1	# boolean to determine whether script is being called from
+			# the top of a kernel tree.
 usagestr=$(
 cat <<EOF
 
-$(basename $0) modules-directory
+$(basename $0) [options] kmod-subdir
+
+Must be invoked from the top of a kernel build tree.
+
+  -c  - "make clean" before making the kmod. This will also cause a
+	"make modules" and "make modules_prep"
+  -m  - Will create the .config file for the system architecture using the
+	"make rh-configs" command. This will be followed by a "make clean",
+	"make modules", and "make modules_prep"
+  -p  - Initiate "make modules" and "make modules_prep" commands
+  -h  - Print this help.
 
 Make kmods from the top of the kernel tree given the kmod directory.
+The kmods in the buld directory will be copied to the corresponding
+kmod subdirectory in:
+$libdir/$(uname -r)/kernel/<kmod-subdir>
 
-Should have a valid .config file.
+The original kmods in $libdir will be saved as:
+$libdir/$(uname -r)/kernel/<kmod-subdir>/*.orig
 
-Must run the following commands once per login.
+The .orig files will not be overwritten once they are created.
+\0
+EOF
+)
 
-make prepare
-make modules_prepare
+notktreestr=$(
+cat <<EOF
 
+$(basename $0) must be invoked from the top of a kernel tree.
+
+You are currently in $PWD
 \0
 EOF
 )
@@ -26,14 +54,83 @@ usage() {
 	exit
 }
 
+# iskerneltree
+#
+# Returns 0 if we're at the top of a kernel tree, else returns 1
+#
+iskerneltree() {
+	[ -e README ] && [ -e Makefile ] && [ -d kernel ] || return 1
+	local line_1="$(head -1 README)"
+	[[ "$line_1" == *"Linux kernel"* ]] && return 0 || return 1
+}
+
+# getkver
+#
+# Echo "kernel-V.P.S", where:
+# 	V is the kernel version
+# 	P is the patch level
+# 	S is the sublevel
+# 	(see first three lines of kernel Makefile)
+#
+getkver() {
+	local verhdr=$(head -3 Makefile)
+	local line
+	local ver=""
+
+	while read line; do
+		ver="$ver".$(echo $line | cut -d' ' -f3)
+	done <<< "$verhdr"
+
+	ver=kernel${ver/./-}
+	echo $ver
+}
+
+mkconfig() {
+	local ver=$(getkver)
+	make rh-configs-prep
+	cp -vf configs/$ver-$arch.config .config
+}
+
+$(iskerneltree) || { echo -e "$notktreestr"; exit 1; }
 [ $# -eq 0 ] && usage
-[[ "$1" == "-h" ]] && usage
 
-declare kmoddir="$1"
-declare release=$(cat /etc/system-release | cut -d' ' -f7 | cut -d'.' -f1)
-declare libdir=$([[ release == 7 ]] && echo "/usr/lib/modules" || echo "/lib/modules")
+while getopts chpm OPTION; do
+    case "$OPTION" in
 
+	c ) clean=true
+	    prep=true
+	    shift
+	    ;;
+	h ) echo -e "$usagestr"
+	    exit 1
+	    ;;
+	p ) prep=true
+	    shift
+	    ;;
+	m ) clean=true
+	    mkcfg=true
+	    prep=true
+	    shift
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+kmoddir="$1"
+echo "Making: $kmoddir"
+
+$mkcfg && { echo "make rh-configs"; mkconfig; }
+$clean && { echo "make clean"; make clean; }
+$prep && { echo "make prepare"; make prepare; \
+	   echo "make modules_prepare"; make modules_prepare; }
 make M="$kmoddir"
+
+# remove any trailing slashes in the directory names
+#
+kmoddir="${kmoddir%/}"
+libdir="${libdir%/}"
 
 cd "$libdir"/$(uname -r)/kernel/"$kmoddir"
 
@@ -44,8 +141,10 @@ for f in $(ls -1 *.ko); do
 	#
 	# if we already saved the originals, leave them alone.
 	#
-	[[ -e "$fname".old ]] || mv -v $f $fname.old
+	[[ -e "$fname".orig ]] || mv -v $f $fname.orig
 done
 
 cd -
-rsync -Pvat  "$kmoddir"/*.ko "$libdir"/$(uname -r)/kernel/"$kmoddir"/.
+echo "rsync -Pvat "$kmoddir"/*.ko "$libdir"/$(uname -r)/kernel/"$kmoddir"/."
+rsync -Pvat "$kmoddir"/*.ko "$libdir"/$(uname -r)/kernel/"$kmoddir"/.
+
