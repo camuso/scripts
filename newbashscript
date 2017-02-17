@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+# Create an empty bash script with placeholders for help text and
+# a usage function
+#
 
 if [ -f "$1" ]; then
 	echo
@@ -7,31 +11,45 @@ if [ -f "$1" ]; then
 	exit 1
 fi
 
-echo -e "#!/bin/bash
-#
-# $1
-#
-
-cmdline="$@"" > $1
-
-echo -e "
-usagestr=\$(
+usagestr=$(
 cat <<EOF
 
-$1" >> $1
+$(basename $0) <bashscript>
 
-echo '\0' >> $1
+Create an empty bash script with placeholders for help text and
+a usage function
 
-echo "EOF
-)" >> $1
+\\0
+EOF
+)
 
-echo -e "
 usage() {
-	echo -e \"\$usagestr\"
+	echo -e "$usagestr"
 	exit
 }
 
-[ \$# -gt 0 ] || usage
-" >> $1
+[ $# -eq 1 ] || usage
+
+echo -e '#!/bin/bash
+#
+# '"$1"'
+#
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+\\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+' >> $1
 
 chmod +x "$1"
