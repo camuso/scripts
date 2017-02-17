@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# getyn
+#
+# getyn() $1
+#
+# Takes $1 for a prompt string
+# Places true or false command into $2, which is an optional argument.
+# User is prompted for (y/n) answer at the end of the prompt string.
+#
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) prompt
+
+Given a prompt string, user is prompted for a y/n answer. Only y or n are
+accepted as valid responses, so the prompt is presented in a loop until
+the user types either y or n.
+
+Returns 0 if response was y
+Returns 1 if response was n
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -gt 0 ] || usage
+
+declare promptstring="$1"
+declare answer
+
+while true; do
+
+	echo -en "$promptstring (y/n) : "
+	read -n1 answer
+	echo
+
+	[ "$answer" == "y" ] && exit 0
+	[ "$answer" == "n" ] && exit 1
+
+	echo "Please answer y or n."
+done
