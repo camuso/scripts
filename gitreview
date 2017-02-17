@@ -11,7 +11,7 @@ cat <<EOF
 $0
 
 Review the diff of all files identified by git as "modified" using
-git diff --cached.
+git diff.
 
 \0
 EOF
@@ -34,7 +34,7 @@ for str in $gitstat; do
 	if $modfound; then
 		echo $str
 		modfound=false
-		git diff --cached $str
+		git diff $str
 		read
 		clear
 	fi
