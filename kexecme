@@ -1,20 +1,57 @@
 #!/bin/bash
+#
+# kexecme
+#
 
-function usage {
-	echo
-	echo "kexecme kernel initrd"
-	echo -e "\t\"kernel\" - kernel image file path"
-	echo -e "\t\"initrd\" - initrd or initramfs filepath"
-	echo
-	exit 1
-}
+declare -a cmdline=$(cat /proc/cmdline)
 
-[ $# -ge 2 ] || usage
+usagestr="
+$(basename $0) kernel initrd
 
-cmdline=$(cat /proc/cmdline)
+	Calls kexec with the /proc/cmdline to boot a new kernel
+	without shutting down first.
+
+	kernel - kernel image file path
+	initrd - initrd or initramfs filepath
+"
+
+userstr="
+$(basename $0) must be invoked from root account.
+
+Please login as root or invoke $(basename $0) with sudo.
+"
+
+efistr="
+Sorry, but kexec does not work with efi systems.
+"
+
+# determine if we are running as root. If not, then explain.
+#
+user=$(id -u)
+[ $user -eq 0 ] || { echo -e "$userstr"; exit 1; }
+
+# If this is an efi system, this won't work.
+#
+[ -e /sys/firmware/efi ] && { echo -e "$efistr"; exit 1; }
+
+# If we don't have exactly 2 arguments, then exit.
+#
+[ $# -eq 2 ] || { echo -e "$usagestr"; exit 1; }
+
+# grub2 requires different cmdline handling than grub1
+#
+grubver=$(find /boot -type d -name grub2)
+
+# If this is grubv2, we need to manipulate the command line
+#
+if [ "$grubver" ]; then
+	cmdline=$(echo "$cmdline" | cut -d' ' -f2)
+	cmdline="BOOT_IMAGE=/""$(basename $1)""$cmdline"
+fi
 
 echo $cmdline
+read -n1 -p "Press any key to continue..."
 set -x
-kexec -l $1 --append='$cmdline' --initrd=$2
+kexec -d -l $1 --append="$cmdline" --initrd=$2
 kexec -e
 set +x
