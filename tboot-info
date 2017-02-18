@@ -34,5 +34,6 @@ dmidecode | grep -e Date -e Vendor -e Version -e Product -e "BIOS Revision" | he
 cpumod=$(cat /proc/cpuinfo | grep -m1 'model name')
 echo $cpumod | tee -a $outfile
 rpm -qa | grep -w tboot | tee -a $outfile
-[ -d "/boot/efi" ] && echo -e "\nEFI partition detected. tboot is not supported on UEFI systems.\n"  | tee -a $outfile
+[ -d "/sys/firmware/efi" ] && echo -e "\niBoot installed with UEFI. tboot is not supported on UEFI systems.\n"  | tee -a $outfile
+
 
