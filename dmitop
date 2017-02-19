@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# dmishow
+
+
+usagestr="
+$(basename $0)
+
+	Show the follwoing information about the system
+
+	BIOS Information
+		Vendor
+		Version
+		Release Date
+	System Information
+		Manufacturer
+		Product Name
+		Version
+		Serial Number
+"
+
+userstr="
+Must be root to invoke $(basename $0)
+"
+
+[ $(id -u) -eq 0 ] || { echo "$userstr";  exit 1; }
+[ "$1" == "-h" ] && { echo -e "$usagestr"; exit 1; }
+
+dmi=$(dmidecode)
+
+printnext=false
+
+echo
+while IFS= read line; do
+	[[ "$line" == "Handle"* ]] && { printnext=false; }
+	[[ "$line" == "BIOS Information"* ]] && { echo "$line"; printnext=true; }
+	[[ "$line" == "System Information"* ]] && { echo "$line"; printnext=true; }
+	[[ "$line" == *"Vendor"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Version"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Release"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Manufacturer"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Product Name"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Serial Number"* ]] && $printnext && echo -e "$line"
+done <<< "$dmi"
+echo
