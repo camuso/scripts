@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+#
+
+usagestr="
+$(basename $0) [option]
+
+	Create a load on the system using dd to move zeroes from /dev/zero
+	to /dev/null in an infinite loop.
+
+	Use ctrl-c to kill it.
+
+	options
+
+	-b block size, defaults to 1024
+	-c block count, defaults to 1,000,000
+	-h this help message
+
+	With no options, the defaults will move 1 GB of zeroes per loop.
+
+	while :;
+	  do dd if=/dev/zero of=/dev/null bs=<block-size> count=<block-count>;
+	done
+"
+
+blkcount=1000000
+blksize=1024
+
+while getopts b:c:h OPTION; do
+    case "$OPTION" in
+
+	b ) blksize=$OPTARG
+	    ;;
+	c ) blkcount=$OPTARG
+	    ;;
+	h ) echo -e "$usagestr"
+	    exit 1
+	    ;;
+	* ) echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+while :; do
+	dd if=/dev/zero of=/dev/null bs=$blksize count=$blkcount;
+done
+
