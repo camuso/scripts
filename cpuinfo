@@ -3,12 +3,14 @@
 function usage {
 	echo
 	echo "cpuinfo string"
-	echo "The \"string\" argument can be any string or substring"
-	echo "in the first field of /proc/cpuinfo"
+	echo
+	echo -e "\tThe \"string\" argument can be any string or substring"
+	echo -e "\tin the first field of /proc/cpuinfo"
 	echo
 	exit
 }
 
+[ "$1" == "-h" ] && usage
 [ -z "$1" ] && usage
 
 cpu_count=$(cat /proc/cpuinfo | grep processor | wc -l)

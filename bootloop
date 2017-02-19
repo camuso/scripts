@@ -19,7 +19,7 @@ crashcount=$(ls /var/crash/* 2> /dev/null | wc -l)
 usagestr=$(
 cat <<EOF
 
-$0 [script]
+$(basename $0) [script]
 
 	"script" is an optional script to be executed on every loop.
 
@@ -51,6 +51,10 @@ $0 [script]
 \0
 EOF
 )
+
+userstr="
+Must be root to invoke $(basename $0)
+"
 
 # putcon() - ouput to serial console
 #
@@ -180,6 +184,10 @@ exit_bootloop() {
 #####################################
 # Start of Execution
 ####################################
+
+[ $(id -u) -eq 0 ] || { echo -e "$userstr";  exit 1; }
+
+[ "$1" == "-h" ] && { echo -e "$usagestr"; exit 1; }
 
 # Find the serial console
 # If we can't find an active console, direct output to /dev/null

@@ -1,1 +1,12 @@
+#!/bin/bash
+#
+# cpumodel
+
+usagestr="
+$(basename $0)
+
+	Prints the cpu model name.
+"
+[ "$1" == "-h" ] && { echo "$usagestr"; exit 1; }
+
 cat /proc/cpuinfo | grep 'model name' | head -n1

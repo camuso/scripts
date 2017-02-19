@@ -1,4 +1,14 @@
 #!/bin/bash
+#
+# cpusockets
+
+usagestr="
+$(basename $0)
+
+	Prints the number cpu sockets.
+"
+
+[ "$1" == "-h" ] && { echo "$usagestr"; exit 1; }
 
 # check to see if this data exists.
 cat /proc/cpuinfo | grep "physical id" >& /dev/null

@@ -32,8 +32,7 @@ Example:
 
 	Creates options for -n number,  -f file, -d directory, -x and -h
 	with no arguments, presumably to invoke a function. These options
-	and their corresponding case statement are appended statement to
-	myscript.sh.
+	and their corresponding case statement are appended to myscript.sh.
 \0
 EOF
 )
@@ -43,6 +42,8 @@ usage() {
 	exit
 }
 
+
+[ "$1" == "-h" ] && usage
 [ $# -gt 0 ] || usage
 
 # Declarations are unnecessary, but they are helpful

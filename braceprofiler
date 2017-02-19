@@ -25,6 +25,7 @@ usage() {
 	exit
 }
 
+[ "$1" == "-h" ] && usage
 [ $# -eq 1 ] || usage
 
 declare -i linenumber=0

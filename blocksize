@@ -1,3 +1,21 @@
 #!/bin/bash
+#
+# blocksize
+#
+
+usagestr="
+$(basename $0) device
+
+Prints the blocksize of a block device, e.g. $(basename $0) /dev/sda1
+"
+
+userstr="
+Must be root to invoke $(basename $0)
+"
+
+[ $(id -u) -eq 0 ] || { echo "$userstr";  exit 1; }
+[ "$1" == "-h" ]   && { echo "$usagestr"; exit 1; }
+[ $# -eq 1 ]       || { echo "$usagestr"; exit 1; }
+
 dumpe2fs $1 | grep -i 'Block size'
 

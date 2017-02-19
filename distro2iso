@@ -36,8 +36,8 @@ usage() {
 	exit
 }
 
-[ $# -ge 2 ] || usage
 [[ ("$1" == "-h") || ($1 == "--help") ]] && usage
+[ $# -ge 2 ] || usage
 
 info () {
 	[[ "$1" ]] && echo -e "$1"

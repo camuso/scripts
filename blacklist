@@ -21,7 +21,8 @@ usage() {
 	exit
 }
 
-[ $# -gt 0 ] || usage
+[ "$1" == "-h" ] && usage
+[ $# -eq 1 ] || usage
 
 driver=$1
 set -x

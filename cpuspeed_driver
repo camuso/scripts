@@ -1,1 +1,14 @@
-cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_driver
+#!/bin/bash
+#
+# cpuspeed_driver
+
+usagestr="
+$(basename $0)
+
+	Names the cpu speed scaling driver.
+"
+
+[ "$1" == "-h" ] && { echo "$usagestr"; exit 1; }
+
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_driver | head -1
+

@@ -1,14 +1,12 @@
 #!/bin/bash
 #
-# cpucount
 #
 
 usagestr="
 $(basename $0)
 
-	Prints the number of cpu cores.
+	Prints the current cpu speed.
 "
 
 [ "$1" == "-h" ] && { echo "$usagestr"; exit 1; }
-
-cat /proc/cpuinfo | grep processor | wc -l
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq

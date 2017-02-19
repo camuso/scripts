@@ -1,4 +1,17 @@
 #!/bin/bash
+#
+# delete-my-stuff
+
+usagestr="
+$(basename $0)
+
+	Removes my environment and returns everything to the way it was
+	before I installed my environment.
+
+	However, it leaves a logfile of what was removed.
+"
+
+[ "$1" == "-h" ] && { echo -e "$usagestr"; exit 1; }
 
 cd $HOME
 
