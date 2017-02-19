@@ -1,7 +1,6 @@
 #!/bin/bash
-#lc=$(cat $2 | wc -l)
 #
-#[ $1 -gt $lc ] && exit 1
+# deletelinen
 
 usagestr=$(
 cat <<EOF
@@ -14,16 +13,22 @@ EOF
 )
 
 usage() {
-	echo -e $usagestr
+	echo -e "$usagestr"
 	exit 0
 }
 
+[ "$1" == "-h" ] && usage
 [ $# -eq 2 ] || usage
+
+tfil="__temp__file__"
+
+mode=$(stat --format '%a' $2)
+touch $tfil
+chmod $mode $tfil
 
 awk -v line=$1 '{
         if (NR != line) {
                 print $0;
         }
-}' $2 > __temp__file__
-mv __temp__file__ $2
-
+}' $2 > $tfil
+mv $tfil $2
