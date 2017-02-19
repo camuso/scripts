@@ -9,10 +9,13 @@ usage() {
 	exit 0
 }
 
-[ $# -lt 2 ] && usage
+[ "$1" == "-h" ] && usage
+[ $# -eq 2 ] || usage
 
+mode=$(stat --format '%a' $2)
 string="$1"
 file="$2"
 # set -v
 sed -i "/"$string"/d" "$file"
+chmod $mode $file
 # set +v
