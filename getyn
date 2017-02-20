@@ -21,6 +21,16 @@ the user types either y or n.
 Returns 0 if response was y
 Returns 1 if response was n
 
+Note:
+	You cannot use this script if there is a pending read. For example,
+	the following will not function properly, because "\$lines" string
+	is being read by the while loop, so the read in getyn encounters
+	a buffer of pending characters.
+
+	while IFS= read line; do
+		getyn "Show this line?"
+		[ $? -eq 0 ] && echo "\$line"
+	done <<< "\$lines"
 \0
 EOF
 )
@@ -30,7 +40,8 @@ usage() {
 	exit
 }
 
-[ $# -gt 0 ] || usage
+[ "$1" == "-h" ] && usage
+[ $# -gt 0 -a $# -le 1 ] || usage
 
 declare promptstring="$1"
 declare answer
