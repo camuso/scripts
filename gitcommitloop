@@ -1,0 +1,93 @@
+#!/bin/bash
+#
+# gitcommitloop
+#
+
+# uses the getyn script, which must be in the same directory.
+
+usagestr=$(
+cat <<EOF
+
+usage: $(basename $0) [mode]
+
+Optionally stage and commit all files identified by git as "modified",
+"new file", "deleted", or "renamed". 
+
+  modes
+  -b  - [default] batch mode, all staged files will go into one commit
+  -s  - single mode, each file will be committed separately
+
+\0
+EOF
+)
+
+prereqstr=$(
+cat <<EOF
+
+$(basename $0)
+
+Requires the getyn script in the executable path.
+
+\0
+EOF
+)
+
+declare gitstat="$(git status)"
+declare modfound=false
+declare answer=1
+declare batch=true
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -ge 0 -a $# -le 1 ] || usage
+
+which getyn
+[ $? -ne 0 ] && { echo -e "$prereqstr"; exit 1; }
+
+while getopts bsh OPTION; do
+    case "$OPTION" in
+
+	b ) batch=true
+	    ;;
+	s ) batch=false
+	    ;;
+	h ) usage
+	    ;;
+	* ) echo -e "\nunrecognized option"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+# because we are going to invoke "read" with the call to getyn, we
+# can't use "read .... <<< "$string", because the read buffer will
+# have stuff from the string in it when we call getyn, which also
+# uses read.
+#
+for str in $gitstat; do
+	mod=false; ren=false; del=false; new=false;
+	[  "$str" == "modified:" ] && mod=true
+	[  "$str" == "renamed:" ]  && ren=true
+	[  "$str" == "deleted:" ]  && del=true
+	[  "$str" == "file:" ] && new=true
+	$mod || $ren || $del || $new && { modfound=true; continue; }
+	if $modfound; then
+		clear
+		echo $str
+		modfound=false
+		[ -e "$str" ] && git diff $str || echo "Deleted file."
+		getyn "Do you want to stage and commit this file?"
+		[ $? -ne 0 ] && continue
+		echo "git add $str"
+		git add $str
+		echo "git commit $str"
+		$batch || git commit $str
+		filelist=$str" "$filelist
+		echo -n "Press any key to continue..."
+		read -n1
+	fi
+done
+
