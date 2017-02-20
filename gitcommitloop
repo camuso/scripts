@@ -36,6 +36,7 @@ declare gitstat="$(git status)"
 declare modfound=false
 declare answer=1
 declare batch=true
+declare filelist=""
 
 usage() {
 	echo -e "$usagestr"
@@ -79,15 +80,22 @@ for str in $gitstat; do
 		echo $str
 		modfound=false
 		[ -e "$str" ] && git diff $str || echo "Deleted file."
-		getyn "Do you want to stage and commit this file?"
+
+		getyn "Do you want to stage this file?"
 		[ $? -ne 0 ] && continue
+
 		echo "git add $str"
 		git add $str
-		echo "git commit $str"
-		$batch || git commit $str
-		filelist=$str" "$filelist
+
+		if $batch; then
+			filelist=$str" "$filelist
+		else
+			echo "git commit $str"
+			git commit $str
+		fi
+
 		echo -n "Press any key to continue..."
 		read -n1
 	fi
 done
-
+$batch && [ "$filelist" ] && { echo "git commit $filelist"; git commit $filelist; }
