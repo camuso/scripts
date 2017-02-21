@@ -1,4 +1,6 @@
 #!/bin/bash
 
-# grep ^menuentry /boot/grub2/grub.cfg | cut -d "'" -f2
-grep -w menuentry /boot/grub2/grub.cfg | cut -d "'" -f2
+grubconfigfile=$(find /boot -name grub.cfg)
+
+# grep ^menuentry $grubconfigfile | cut -d "'" -f2
+grep -w menuentry $grubconfigfile | cut -d "'" -f2
