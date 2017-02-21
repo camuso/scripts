@@ -33,7 +33,7 @@ verbose=""	# no verbose
 kabi=""		# no kabitools database
 cores=$(cat /proc/cpuinfo | grep processor | wc -l)
 
-while getopts b:l:c:vkh OPTION; do
+while getopts b:l:c:j:vkh OPTION; do
     case "$OPTION" in
 	b ) echo "$OPTARG" > localversion
 		;;
@@ -52,6 +52,10 @@ while getopts b:l:c:vkh OPTION; do
 		;;
     esac
 done
+
+echo -n "building localversion: "
+cat localversion
+read -n1 -p "press ctrl-C to quit, any other key to continue..."
 
 START1=$(date +%s)
 
