@@ -1,0 +1,152 @@
+#!/bin/bash
+#
+# patbatcmp
+#
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) dir1 dir2
+
+Compare the .patch files in two directories.
+The directories must have the same number of .patch files
+
+The comparison starts with the line that only has three dashes and a
+newline and ends with the line that has only two dashes and a newline.
+
+Lines beginning with @@ will be skipped, because these lines can be
+different while the actually patched code is the same.
+
+--- begin
+
+Patch contents
+@@ skipped
+
+--  end
+
+\0
+EOF
+)
+
+declare dir1="$1"
+declare dir2="$2"
+declare savedifs="$IFS"
+declare patch=false
+
+# get the list of files in each directory
+#
+declare flist1=$(ls -1 $dir1/*.patch)
+declare flist2=$(ls -1 $dir2/*.patch)
+
+# get the count of the files in each directory
+#
+declare -i fcount1=$(echo "$flist1" | wc -l)
+declare -i fcount2=$(echo "$flist2" | wc -l)
+
+# File descriptors
+#
+declare fd1
+declare fd2
+
+# Arrays to for lists of files
+#
+declare -a fary1
+declare -a fary2
+declare -i index	# array index
+
+#####################################################################
+#
+# press_any()
+#
+# Press any key to continue
+#
+press_any() {
+	echo -en "\nPress any key to continue ... "
+	read -n1
+}
+
+#####################################################################
+#
+# usage()
+#
+# Print usage string and exit with nonzero status
+#
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+#####################################################################
+#
+# fcount_err()
+#
+# Notify user that directories do not contain the same number of
+# .patch files
+#
+fcount_err() {
+	echo -en "
+$dir1 has $fcount1 .patch files.
+$dir2 has $fcount2 .patch files.
+
+Both directories must have the same number of .patch files.
+"
+	press_any
+	usage
+}
+
+# See if the user is asking for help
+#
+[ "$1" == "-h" ] && usage
+
+# Be sure we have only exactly two parameters
+#
+[ $# -eq 2 ] || usage
+
+# Be sure that both directories have the same number of patch files.
+#
+[ $fcount1 -eq $fcount2 ] || fcount_err
+
+# Populate the arrays of patch filenames, fary1 and fary2
+#
+index=0
+while IFS= read line; do
+	fary1[$index]="$line"
+	let index++
+done <<< "$flist1"
+
+index=0
+while IFS= read line; do
+	fary2[$index]="$line"
+	let index++
+done <<< "$flist2"
+
+
+for ((index = 0; index < $fcount1; ++index)); do
+
+	echo "fary1[$index]: "${fary1[$index]}
+	echo "fary2[$index]: "${fary2[$index]}
+	echo
+
+	# Open file descriptors based on the filenames in each array
+	#
+	exec 5<"${fary1[$index]}"	# open the files for reading
+	exec 6<"${fary2[$index]}"
+
+	patch=false
+
+	# find where the patch starts in both files
+	#
+	while read line; do
+		[[ "$line" == '---' ]] && patch=true
+		$patch && echo "$line"
+	done <&5
+
+	while read line; do
+		[[ "$line" == '---' ]] && patch=true
+		$patch && echo "$line"
+	done <&6
+
+
+done
+
+IFS="$savedifs"
