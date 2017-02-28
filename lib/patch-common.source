@@ -29,14 +29,14 @@ declare sesfile="sessions.log"
 declare commit_msg_file="commit-msg.txt"
 
 declare prj_indir
-declare pprj_outdir
-declare pprj_mailclient
-declare pprj_b_rename_infiles
-declare pprj_b_save_githead
-declare pprj_b_apply_patches
-declare pprj_b_fmt_upstream
-declare pprj_b_patcmp
-declare pprj_b_gitam_err_abort
+declare prj_outdir
+declare prj_mailclient
+declare prj_b_rename_infiles
+declare prj_b_save_githead
+declare prj_b_apply_patches
+declare prj_b_fmt_upstream
+declare prj_b_patcmp
+declare prj_b_gitam_err_abort
 
 
 function get_mailclient {
