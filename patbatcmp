@@ -6,7 +6,9 @@
 usagestr=$(
 cat <<EOF
 
-$(basename $0) [option] dirA dirB
+$(basename $0) Version 1.0
+
+usage: $(basename $0) [option] dirA dirB
 
 Options:
   -h  - Print this help screen
@@ -23,7 +25,11 @@ Options:
         NOTE: This will also exclude the diff stat, but will not exclude
         the paths.
 
-  -v  - Verbose prints the lines compared from each file
+  -v  - verbose prints whether the patch files are congruent or different
+
+  -V  - Very verbose also prints the lines compared from each file
+
+  -o <file> - sends the outputs to a file
 
 Compare the .patch files in two directories.
 The directories must have the same number of .patch files
@@ -42,13 +48,15 @@ EOF
 declare dirA
 declare dirB
 declare savedifs="$IFS"
+declare ofile="/dev/stdout"	# default output file
 
 # control boolean options
 #
 declare strict=false	# exclude lines whose first char is not + or -
 declare nopaths=false	# exclude the paths from comparison
 declare nodiffst=false	# exclude the diff stat at the top of patch
-declare verbose=false   # print each line compared
+declare verbose=false	# print whether or not files are congruent
+declare vverbose=false	# print each line compared
 declare -i optcnt=0	# count the options
 
 # list of files in each directory
@@ -117,7 +125,7 @@ Both directories must have the same number of .patch files.
 	usage
 }
 
-while getopts hdpsv OPTION; do
+while getopts hdpsvVo: OPTION; do
     case "$OPTION" in
 
 	h ) usage
@@ -131,7 +139,16 @@ while getopts hdpsv OPTION; do
 	s ) strict=true		# only compare lines starting with * or -
 	    let optcnt++
 	    ;;
-	v ) verbose=true	# print the lines being compared
+	v ) verbose=true	# print whether or not files are congruent
+	    let optcnt++
+	    ;;
+	V ) vverbose=true	# verbose, and print lines being compared
+	    verbose=true
+	    let optcnt++
+	    ;;
+	o ) ofile="$OPTARG"	# get the output file
+	    > $ofile		# zero the output file
+	    let optcnt++
 	    let optcnt++
 	    ;;
 	* ) echo "unrecognized option "
@@ -179,18 +196,29 @@ while IFS= read line; do
 	let index++
 done <<< "$flistB"
 
+fecho() {
+	echo "$1" >> $ofile
+}
+
+fprintf() {
+	format="$1"
+	shift
+	printf "$format" "$@" >> $ofile
+}
+
+
 pr_header() {
-	echo "================================================================"
-	printf "a %d: %s\n" $(($index+1)) "${faryA[$index]}"
-	printf "b %d: %s\n" $(($index+1)) "${faryB[$index]}"
-	echo "----------------------------------------------------------------"
+	fecho "================================================================"
+	fprintf "a %d: %s\n" $(($index+1)) "${faryA[$index]}"
+	fprintf "b %d: %s\n" $(($index+1)) "${faryB[$index]}"
+	fecho "----------------------------------------------------------------"
 }
 
 pr_start() {
-	printf "a %d: comparing from line: %5d\n" $(($index+1))	$((lcA+1))
-	printf "b %d: comparing from line: %5d\n" $(($index+1)) $((lcB+1))
-	$strict && echo "Only comparing lines beginning with + or -"
-	echo
+	fprintf "a %d: comparing from line: %5d\n" $(($index+1)) $((lcA+1))
+	fprintf "b %d: comparing from line: %5d\n" $(($index+1)) $((lcB+1))
+	$strict && fecho "Only comparing lines beginning with + or -"
+	fecho
 }
 
 get_firstline() {
@@ -212,7 +240,7 @@ for ((index = 0; index < $fcountA; ++index)); do
 	lcA=1
 	lcB=1
 
-	$verbose && pr_header
+	$vverbose && pr_header
 
 	# Open file descriptors based on the filenames in each array
 	#
@@ -220,7 +248,7 @@ for ((index = 0; index < $fcountA; ++index)); do
 	exec 6<"${faryB[$index]}"
 
 	$nodiffst && get_firstline_nodiffstat || get_firstline
-	$verbose && pr_start
+	$vverbose && pr_start
 
 	# Read lines from each patch file in a loop and compare them until
 	# a mismatch is detected or we've reached the end of the first
@@ -259,22 +287,25 @@ for ((index = 0; index < $fcountA; ++index)); do
 			[ "$firstch" == "+" ] || [ "$firstch" == "-" ] || continue
 		fi
 
-		if $verbose; then
-		printf "%5d: %s\n" $lcA "$lineA"
-		printf "%5d: %s\n" $lcB "$lineB"
-		echo
+		if $vverbose; then
+			fprintf "%5d: %s\n" $lcA "$lineA"
+			fprintf "%5d: %s\n" $lcB "$lineB"
+			fecho
 		fi
 
 		if [ "$lineA" != "$lineB" ]; then
-			printf "%d: != patches are different !=\n" $((index+1))
-			$verbose && echo
 			equiv=false
 			break
 		fi
 	done <&5
 
-	$equiv && printf "%d: == patches are congruent ==\n" $((index+1))
-	$verbose && echo
+	# How to do a if-then-if-then-else-fi-fi on one line ;)
+	#
+	$verbose && { $equiv \
+		&& fprintf "%d: == patches are congruent ==\n" $((index+1)) \
+		|| fprintf "%d: != patches are different !=\n" $((index+1)); }
+
+	$vverbose && fecho
 
 	# exit
 done
