@@ -31,16 +31,16 @@ Options:
 
   -o <file> - sends the outputs to a file
 
-Compare the .patch files in two directories.
-The directories must have the same number of .patch files
+Compare the .patch files in two directories as pairs, one pair at a time
+in a loop. The directories must have the same number of .patch files
 
-The comparison starts with the line that only has three dashes and a
-newline and ends with the line that has only two dashes and a newline.
+If a mismatch is detected, according to the options, the 1-based number
+of the mismatched pair of patches is printed to /dev/stdout by default,
+or to an optional file.
 
-Lines beginning with @@ will be skipped, because these lines can be
-different while the actually patched code is the same.
+Commit logs and hunk offset (@@) lines are omitted from the comparison.
 
-Comparison stops at the first mismatched line in the files.
+Comparison stops at the first mismatched line in the pair.
 \0
 EOF
 )
@@ -295,6 +295,7 @@ for ((index = 0; index < $fcountA; ++index)); do
 
 		if [ "$lineA" != "$lineB" ]; then
 			equiv=false
+			! $verbose && fecho $((index+1))
 			break
 		fi
 	done <&5
