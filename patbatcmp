@@ -6,7 +6,12 @@
 usagestr=$(
 cat <<EOF
 
-$(basename $0) dir1 dir2
+$(basename $0) [option] dir1 dir2
+
+Options:
+  -h  - Print this help screen
+  -s  - Strict. Only looks for actual patched lines, those lines whose
+        first character is either + or -
 
 Compare the .patch files in two directories.
 The directories must have the same number of .patch files
@@ -28,20 +33,20 @@ Patch contents
 EOF
 )
 
-declare dir1="$1"
-declare dir2="$2"
+declare dir1
+declare dir2
 declare savedifs="$IFS"
-declare patch=false
+declare strict=false
 
-# get the list of files in each directory
+# list of files in each directory
 #
-declare flist1=$(ls -1 $dir1/*.patch)
-declare flist2=$(ls -1 $dir2/*.patch)
+declare flist1
+declare flist2
 
-# get the count of the files in each directory
+# count of the files in each directory
 #
-declare -i fcount1=$(echo "$flist1" | wc -l)
-declare -i fcount2=$(echo "$flist2" | wc -l)
+declare -i fcount1
+declare -i fcount2
 
 # File descriptors
 #
@@ -94,13 +99,36 @@ Both directories must have the same number of .patch files.
 	usage
 }
 
-# See if the user is asking for help
-#
-[ "$1" == "-h" ] && usage
+while getopts hs OPTION; do
+    case "$OPTION" in
 
-# Be sure we have only exactly two parameters
+	h ) usage
+	    ;;
+	s ) strict=true
+	    shift
+	    ;;
+	* ) echo "unrecognized option "
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+# Be sure we have at exactly two parameters at this point
 #
 [ $# -eq 2 ] || usage
+
+dir1="$1"
+dir2="$2"
+
+# get the list of files in each directory
+#
+flist1=$(ls -1 $dir1/*.patch)
+flist2=$(ls -1 $dir2/*.patch)
+
+# get the count of the files in each directory
+#
+fcount1=$(echo "$flist1" | wc -l)
+fcount2=$(echo "$flist2" | wc -l)
 
 # Be sure that both directories have the same number of patch files.
 #
@@ -123,8 +151,12 @@ done <<< "$flist2"
 
 for ((index = 0; index < $fcount1; ++index)); do
 
+	equiv=false
+
+	echo "================================================================"
 	echo "fary1[$index]: "${fary1[$index]}
 	echo "fary2[$index]: "${fary2[$index]}
+	echo "----------------------------------------------------------------"
 	echo
 
 	# Open file descriptors based on the filenames in each array
@@ -132,21 +164,50 @@ for ((index = 0; index < $fcount1; ++index)); do
 	exec 5<"${fary1[$index]}"	# open the files for reading
 	exec 6<"${fary2[$index]}"
 
-	patch=false
-
 	# find where the patch starts in both files
 	#
-	while read line; do
-		[[ "$line" == '---' ]] && patch=true
-		$patch && echo "$line"
+	while read line; do [[ "${line:0:10}" == 'diff --git' ]] && break; done <&5
+	while read line; do [[ "${line:0:10}" == 'diff --git' ]] && break; done <&6
+
+	# Read lines from each file in a loop and compare them until
+	#
+	equiv=true
+
+	while read line1; do
+		read -u 6 line2;
+
+		# Exclude line positions, index markers, and diff statements.
+		# These can be different and yet the actual patched code is
+		# congruent.
+		#
+		[ "${line1:0:2}" == "@@" ] && continue
+		[ "${line1:0:6}" == "index " ] && continue
+		[ "${line1:0:6}" == "--- a/" ] && continue
+		[ "${line1:0:6}" == "+++ b/" ] && continue
+		[ "${line1:0:10}" == 'diff --git' ] && continue
+
+		# If strict is true, then user only wants to compare lines
+		# that have "+" or "-" as the first character in the line.
+		#
+		if $strict; then
+			firstch="${line1:0:1}"
+			[ "$firstch" == "+" ] || [ "$firstch" == "-" ] || continue
+		fi
+
+		echo "$line1"
+		echo "$line2"
+		echo
+
+		if [ "$line1" != "$line2" ]; then
+			echo "patches are different"
+			equiv=false
+			break
+		fi
 	done <&5
 
-	while read line; do
-		[[ "$line" == '---' ]] && patch=true
-		$patch && echo "$line"
-	done <&6
+	$equiv && echo "patches are congruent"
 
-
+	# exit
 done
 
 IFS="$savedifs"
