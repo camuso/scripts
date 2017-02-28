@@ -6,12 +6,24 @@
 usagestr=$(
 cat <<EOF
 
-$(basename $0) [option] dir1 dir2
+$(basename $0) [option] dirA dirB
 
 Options:
   -h  - Print this help screen
-  -s  - Strict. Only looks for actual patched lines, those lines whose
-        first character is either + or -
+
+  -d  - Exclude the diff stat at the top of the patch from comparison
+        Default: false
+
+  -p  - Exclude paths from comparison
+        Default: false
+
+  -s  - Exclude lines whose first character is not + or -
+        Limits comparison to only the actually patched lines.
+        Default: false
+        NOTE: This will also exclude the diff stat, but will not exclude
+        the paths.
+
+  -v  - Verbose prints the lines compared from each file
 
 Compare the .patch files in two directories.
 The directories must have the same number of .patch files
@@ -22,42 +34,48 @@ newline and ends with the line that has only two dashes and a newline.
 Lines beginning with @@ will be skipped, because these lines can be
 different while the actually patched code is the same.
 
---- begin
-
-Patch contents
-@@ skipped
-
---  end
-
+Comparison stops at the first mismatched line in the files.
 \0
 EOF
 )
 
-declare dir1
-declare dir2
+declare dirA
+declare dirB
 declare savedifs="$IFS"
-declare strict=false
+
+# control boolean options
+#
+declare strict=false	# exclude lines whose first char is not + or -
+declare nopaths=false	# exclude the paths from comparison
+declare nodiffst=false	# exclude the diff stat at the top of patch
+declare verbose=false   # print each line compared
+declare -i optcnt=0	# count the options
 
 # list of files in each directory
 #
-declare flist1
-declare flist2
+declare flistA
+declare flistB
 
 # count of the files in each directory
 #
-declare -i fcount1
-declare -i fcount2
+declare -i fcountA
+declare -i fcountB
 
 # File descriptors
 #
-declare fd1
-declare fd2
+declare fdA
+declare fdB
 
 # Arrays to for lists of files
 #
-declare -a fary1
-declare -a fary2
+declare -a faryA
+declare -a faryB
 declare -i index	# array index
+
+# line counters
+#
+declare -i lcA
+declare -i lcB
 
 #####################################################################
 #
@@ -90,8 +108,8 @@ usage() {
 #
 fcount_err() {
 	echo -en "
-$dir1 has $fcount1 .patch files.
-$dir2 has $fcount2 .patch files.
+$dirA has $fcountA .patch files.
+$dirB has $fcountB .patch files.
 
 Both directories must have the same number of .patch files.
 "
@@ -99,13 +117,22 @@ Both directories must have the same number of .patch files.
 	usage
 }
 
-while getopts hs OPTION; do
+while getopts hdpsv OPTION; do
     case "$OPTION" in
 
 	h ) usage
 	    ;;
-	s ) strict=true
-	    shift
+	d ) nodiffst=true	# exclude the diffstat if true
+	    let optcnt++
+	    ;;
+	p ) nopaths=true	# exclude the paths when true
+	    let optcnt++
+	    ;;
+	s ) strict=true		# only compare lines starting with * or -
+	    let optcnt++
+	    ;;
+	v ) verbose=true	# print the lines being compared
+	    let optcnt++
 	    ;;
 	* ) echo "unrecognized option "
 	    echo -e "$usagestr"
@@ -113,99 +140,141 @@ while getopts hs OPTION; do
     esac
 done
 
+# Shift past the options
+#
+for ((i = 0; i < optcnt; ++i)); do shift; done
+
 # Be sure we have at exactly two parameters at this point
 #
 [ $# -eq 2 ] || usage
 
-dir1="$1"
-dir2="$2"
+dirA="$1"
+dirB="$2"
 
 # get the list of files in each directory
 #
-flist1=$(ls -1 $dir1/*.patch)
-flist2=$(ls -1 $dir2/*.patch)
+flistA=$(ls -1 $dirA/*.patch)
+flistB=$(ls -1 $dirB/*.patch)
 
 # get the count of the files in each directory
 #
-fcount1=$(echo "$flist1" | wc -l)
-fcount2=$(echo "$flist2" | wc -l)
+fcountA=$(echo "$flistA" | wc -l)
+fcountB=$(echo "$flistB" | wc -l)
 
 # Be sure that both directories have the same number of patch files.
 #
-[ $fcount1 -eq $fcount2 ] || fcount_err
+[ $fcountA -eq $fcountB ] || fcount_err
 
-# Populate the arrays of patch filenames, fary1 and fary2
+# Populate the arrays of patch filenames, faryA and faryB
 #
 index=0
 while IFS= read line; do
-	fary1[$index]="$line"
+	faryA[$index]="$line"
 	let index++
-done <<< "$flist1"
+done <<< "$flistA"
 
 index=0
 while IFS= read line; do
-	fary2[$index]="$line"
+	faryB[$index]="$line"
 	let index++
-done <<< "$flist2"
+done <<< "$flistB"
 
-
-for ((index = 0; index < $fcount1; ++index)); do
-
-	equiv=false
-
+pr_header() {
 	echo "================================================================"
-	echo "fary1[$index]: "${fary1[$index]}
-	echo "fary2[$index]: "${fary2[$index]}
+	printf "a %d: %s\n" $(($index+1)) "${faryA[$index]}"
+	printf "b %d: %s\n" $(($index+1)) "${faryB[$index]}"
 	echo "----------------------------------------------------------------"
+}
+
+pr_start() {
+	printf "a %d: comparing from line: %5d\n" $(($index+1))	$((lcA+1))
+	printf "b %d: comparing from line: %5d\n" $(($index+1)) $((lcB+1))
+	$strict && echo "Only comparing lines beginning with + or -"
 	echo
+}
+
+get_firstline() {
+	while read line; do [ "$line" == "---" ] && break; let lcA++; done <&5
+	while read line; do [ "$line" == "---" ] && break; let lcB++; done <&6
+}
+
+get_firstline_nodiffstat() {
+	while read line; do [ "${line:0:10}" == "diff --git" ] && break; let lcA++; done <&5
+	while read line; do [ "${line:0:10}" == "diff --git" ] && break; let lcB++; done <&6
+}
+
+# Loop through the pairs of files and look for differences in each pair.
+# The first file in the pair is the control. When it ends, the comparison
+# ends, and the for loop moves to the next pair of files.
+#
+for ((index = 0; index < $fcountA; ++index)); do
+
+	lcA=1
+	lcB=1
+
+	$verbose && pr_header
 
 	# Open file descriptors based on the filenames in each array
 	#
-	exec 5<"${fary1[$index]}"	# open the files for reading
-	exec 6<"${fary2[$index]}"
+	exec 5<"${faryA[$index]}"	# open the files for reading
+	exec 6<"${faryB[$index]}"
 
-	# find where the patch starts in both files
+	$nodiffst && get_firstline_nodiffstat || get_firstline
+	$verbose && pr_start
+
+	# Read lines from each patch file in a loop and compare them until
+	# a mismatch is detected or we've reached the end of the first
+	# patch.
 	#
-	while read line; do [[ "${line:0:10}" == 'diff --git' ]] && break; done <&5
-	while read line; do [[ "${line:0:10}" == 'diff --git' ]] && break; done <&6
+	equiv=true	# will be set to false if a mismatch is detected
 
-	# Read lines from each file in a loop and compare them until
-	#
-	equiv=true
+	while read lineA; do		# get a line from the first patch file
+		read -u 6 lineB;	# get a line from the second patch file
 
-	while read line1; do
-		read -u 6 line2;
-
-		# Exclude line positions, index markers, and diff statements.
-		# These can be different and yet the actual patched code is
-		# congruent.
+		# We've read the next line, so increment the line counters
 		#
-		[ "${line1:0:2}" == "@@" ] && continue
-		[ "${line1:0:6}" == "index " ] && continue
-		[ "${line1:0:6}" == "--- a/" ] && continue
-		[ "${line1:0:6}" == "+++ b/" ] && continue
-		[ "${line1:0:10}" == 'diff --git' ] && continue
+		let lcA++
+		let lcB++
+
+		# Exclude line positions and index marker.  These can be
+		# different and yet the actual patched code is congruent.
+		#
+		# Exclude paths and diff stat if user set the options
+		#
+		[ "${lineA:0:2}" == "@@" ] && continue
+		[ "${lineA:0:6}" == "index " ] && continue
+		$nopaths && [ "${lineA:0:6}" == "--- a/" ] && continue
+		$nopaths && [ "${lineA:0:6}" == "+++ b/" ] && continue
+		$nodiffst && [ "${lineA:0:10}" == "diff --git" ] && continue
+
+		# break when we've found the end of the patch
+		#
+		[[ "$lineA" == "--" ]] && break
 
 		# If strict is true, then user only wants to compare lines
 		# that have "+" or "-" as the first character in the line.
 		#
 		if $strict; then
-			firstch="${line1:0:1}"
+			firstch="${lineA:0:1}"
 			[ "$firstch" == "+" ] || [ "$firstch" == "-" ] || continue
 		fi
 
-		echo "$line1"
-		echo "$line2"
+		if $verbose; then
+		printf "%5d: %s\n" $lcA "$lineA"
+		printf "%5d: %s\n" $lcB "$lineB"
 		echo
+		fi
 
-		if [ "$line1" != "$line2" ]; then
-			echo "patches are different"
+		if [ "$lineA" != "$lineB" ]; then
+			printf "%d: != patches are different !=\n" $((index+1))
+			$verbose && echo
 			equiv=false
 			break
 		fi
 	done <&5
 
-	$equiv && echo "patches are congruent"
+	$equiv && printf "%d: == patches are congruent ==\n" $((index+1))
+	$verbose && echo
 
 	# exit
 done
