@@ -1,0 +1,363 @@
+#!/bin/bash
+#
+# patbatcmpmgr
+#
+
+# Enable extglob for more specific directory actions
+#
+shopt -s extglob
+
+LIB="$HOME/bin/lib"
+
+#######################################
+# External Source Files
+#######################################
+source $LIB/ui.source
+source $LIB/project.source
+
+#######################################
+# Global variables
+#######################################
+declare -i prj_entries=0
+declare -i index=0
+declare -i boolcount=0
+declare -i boolindex=0
+
+declare b_found_first_bool=false
+declare b_nodiffst
+declare b_nopaths
+declare b_strict
+declare b_verbose
+declare b_veryverb
+
+# Project file offsets
+#
+declare -i prj_rhdir
+declare -i prj_usdir
+declare -i prj_ofile
+declare -i prj_b_nodiffst
+declare -i prj_b_nopaths
+declare -i prj_b_strict
+declare -i prj_b_verbose
+declare -i prj_b_veryverb
+
+declare prj_dir="$HOME/bin/.data"
+declare prj_file="$prj_dir/patbatcmpmgr.prj"
+
+declare rhdir	# directory containing RHEL patch files
+declare usdir	# directory containing upstream patch files
+declare ofile	# output file, default is /dev/stdout
+
+declare rhfcount=0
+declare usfcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [-h -r -u -o <file>]
+
+  -h       - This help text
+  -r rhdir - optional directory containing the RHEL patches
+  -u usdir - optional directory containing the upstream patches
+  -o ofile - optional output file. Default is /dev/stdout
+
+  The rhdir and usdir must have the same number of patch files.
+
+  Each patchfile in the rhdir is compared with its complement in the
+  usdir. If a mismatched line is found, the sequence number of that
+  patch pair is printed to the ofile.
+
+  More verbose output options are available
+
+  Menu choices:
+
+  r - change the directory containing the RHEL patch files
+  u - change the directory containing the upstream patch files
+  o - change the output file. default is /dev/stdout
+
+  If the directories do not exist, you will be prompted for them before
+  being presented with the menu.
+
+  1 - when true, excludes diff stat lines from the comparison.
+      It is possible for the patches to still be congruent even when
+      the diff stats are different. For example, when the RHEL patch is
+      a subset of the upstream patch
+
+  2 - when true, excludes path lines from the comparison
+      You will want to do this if the file being patched has been renamed
+      or moved to a different directory.
+
+  3 - when true, excludes lines that do not begin with + or -
+      You will want to do this if you are only concerned about the lines
+      that are actually being changed by the patch. When true, this will
+      automatically exclude the diff stat lines, but WILL NOT exclude
+      the path lines.
+\0
+EOF
+)
+
+########################################
+# Function Return Codes
+########################################
+declare rc_continue=0	# Continue for another pass
+declare rc_run=1	# Run comparison
+
+#######################################
+# Functions
+#######################################
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+init_defaults() {
+	set -x
+	for ((index=boolindex; index <= prj_entries; index++)); do
+		prj_set_item $index false
+	done
+	set +x
+	ofile="/dev/stdout"
+	prj_set_item $prj_ofile $ofile
+
+}
+
+# get_booleans
+#
+# Read the values of the program flow control booleans from the
+# project file.
+#
+get_booleans() {
+	index=$boolindex
+	for bool in \
+	b_nodiffst \
+	b_nopaths \
+	b_strict \
+	b_verbose \
+	b_veryverb
+	do
+		eval $bool=$(prj_get_item $index)
+		ui_digit2bool $bool
+		let index++
+	done
+}
+
+# set_booleans
+#
+# Write the current values of the program flow booleans into the
+# project file.
+#
+set_booleans() {
+	index=$boolindex
+	for bool in \
+	b_nodiffst \
+	b_nopaths \
+	b_strict \
+	b_verbose \
+	b_veryverb
+	do
+		prj_set_item $index ${!bool}
+		let index++
+	done
+	return 0
+}
+
+show_settings() {
+	settingstr=$(
+cat <<EOF
+$attr_bold
+     $attr_under\0Directories       $attr_OFF$attr_bold
+  R  Current RHEL directory	: $rhdir has $rhfcount patch files
+  U  Current upstream directory	: $usdir has $usfcount patch files
+  o  Optional output file.	: $ofile
+
+     $attr_under\0Lines to exclude  $attr_OFF$attr_bold
+  d  diff stats			: $b_nodiffst
+  p  file paths			: $b_nopaths
+  s  without leading + or -	: $b_strict
+
+     $attr_under\0Output Parameters $attr_OFF$attr_bold
+  v  verbose			: $b_verbose
+  V  Very verbose		: $b_veryverb
+
+     $attr_under\0Control           $attr_OFF$attr_bold
+  r  run the comparison
+  i  init to defaults
+  h  print the help
+  q  quit this script
+$attr_OFF
+EOF
+)
+	echo -e "$settingstr"
+}
+
+menu_parser() {
+	local setting
+
+	rhfcount=$(ls -1 $rhdir/*.patch | wc -l)
+	usfcount=$(ls -1 $usdir/*.patch | wc -l)
+	show_settings
+	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
+
+	case $setting in
+		R )	prj_set_directory "RHEL" $prj_rhdir rhdir quiet
+			;;
+		U )	prj_set_directory "Upstream" $prj_usdir usdir quiet
+			;;
+		o )	getuser "Output file: " ofile
+			prj_set_item $prj_ofile $ofile
+			;;
+		d )	ui_toggle b_nodiffst
+			;;
+		p )	ui_toggle b_nopaths
+			;;
+		s )	ui_toggle b_strict
+			;;
+		v )	ui_toggle b_verbose
+			;;
+		V )	ui_toggle b_veryverb
+			;;
+		r )	set_booleans
+			return $rc_run
+			;;
+		i )	init_defaults
+			get_booleans
+			;;
+		h )	echo -e "$usagestr"
+			;;
+		q )	exit -127
+			;;
+	esac
+	return $rc_continue
+}
+
+# check_dir
+# 	Checks whether the directory coming from the project file is valid.
+# 	If not, calls prj_set_directory to get the new directory name.
+# 	The prj_set_directory routine calls ui_getnewdir, which will ask
+# 	if the user wants to create the directory if it does not already
+# 	exist.
+#
+# $1 - index into the project file where the directory name string goes
+# $2 - string representing the directory type, e.g. "RHEL" or "Upstream"
+# $3 - returns the name of the directory
+#
+check_dir() {
+	local index=$1
+	local dirtype="$2"
+	local dirname=$(prj_get_item $index)
+	local blank="\n$attr_bold$dirtype$attr_OFF is blank\n"
+	local nofil="\n"$attr_bold""$dirname""$attr_OFF" does not exist.\n"
+	local getit=false
+
+	# If the filename is blank, print the blank statement
+	# Else if the filename does not exist, print the doesn't exist statement
+	#
+	[ "$dirname" ] || { getit=true; echo -e "$blank"; }
+	[ "$dirname" ] && [ -d "$dirname" ] || { getit=true; echo -e "$nofil"; }
+
+	if $getit; then
+		prj_set_directory "$dirtype" $index dirname quiet
+		dirname=$(prj_get_item $index)
+	fi
+
+	eval $3=$dirname
+}
+
+#############################
+# Start of Script Execution
+#############################
+
+# Parse the options, if any
+#
+while getopts hr:u: OPTION; do
+    case "$OPTION" in
+
+	h ) usage
+	    ;;
+	r ) rhdir=$OPTARG
+	    ;;
+	u ) usdir=$OPTARG
+	    ;;
+	* ) echo "unrecognized option"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+###########################################
+# Parameter Initialization
+###########################################
+
+# This loop enumerates and counts the items in the project file.
+# Add new booleans to the end of the list.
+# Add new non-boolean parameters to the top of the list.
+#
+for offset in \
+prj_rhdir \
+prj_usdir \
+prj_ofile \
+prj_b_nodiffst \
+prj_b_nopaths \
+prj_b_strict \
+prj_b_verbose \
+prj_b_veryverb
+do
+	let index++
+	let $offset=$index
+	if [ "${offset:3:3}" == "_b_" ]; then
+		let boolcount++
+		if ! $b_found_first_bool; then
+			boolindex=$index
+			b_found_first_bool=true
+		fi
+	fi
+done
+
+prj_entries=$index
+[ -d "$prj_dir" ] || mkdir $prj_dir
+[ -e "$prj_file" ] || touch $prj_file
+prj_init_prjfile $prj_file $prj_entries
+stat=$?
+
+# If the above call to prj_init_prjfile returns nonzero, it means that a
+# new project file has been created and its values must be initialized.
+#
+if [ $stat -ne 0 ]; then
+	[ -d "$rhdir" ] && prj_set_item $prj_rhdir $rhdir \
+			|| prj_set_directory "RHEL" $prj_rhdir rhdir quiet
+
+	[ -d "$usdir" ] && prj_set_item $prj_usdir $usdir \
+			|| prj_set_directory "Upstream" $prj_usdir usdir quiet
+	init_defaults
+fi
+
+##############################################
+# Main Program
+##############################################
+
+declare optstr=""
+
+get_booleans
+
+# get the RHEL and upstrea, directories.
+#
+check_dir $prj_rhdir "RHEL" rhdir
+check_dir $prj_usdir "Upstream" usdir
+ofile="$(prj_get_item $prj_ofile)"
+[ "$ofile" ] || ofile="/dev/stdout"
+
+while true; do
+	menu_parser
+	[ $? -eq $rc_run ] && break
+done
+
+$b_nodiffst && optstr="$optstr""-d "
+$b_nopaths  && optstr="$optstr""-p "
+$b_strict   && optstr="$optstr""-s "
+$b_verbose  && optstr="$optstr""-v "
+$b_veryverb && optstr="$optstr""-V "
+
+echo "patbatcmp $optstr -o $ofile $rhdir $usdir"
+patbatcmp $optstr -o $ofile $rhdir $usdir
+
