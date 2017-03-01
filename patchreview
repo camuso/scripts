@@ -1,8 +1,9 @@
 #!/bin/bash
 #
 # patchreview
-version="3.2"
-#
+
+version="4.0"
+
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
 # be considered.
@@ -15,14 +16,15 @@ version="3.2"
 # save.
 #
 # This script can also be used to compare any two patch sets.
-
+#
 # Calls on the following external scripts.#
 #
 # ~/bin/githead
 # ~/bin/gitreset
 # ~/bin/ren*pat
 # ~/bin/patcmp
-
+# ~/bin/patbatcmpmgr
+#
 # Requires to run ...
 #
 # lib/*.source
@@ -33,8 +35,12 @@ version="3.2"
 #
 shopt -s extglob
 
-LIB="$HOME/bin/lib"
-manual="$HOME/bin/man/patchreview.txt"
+#######################################
+# Default file locations
+#######################################
+BIN="$HOME/bin"		# must be in execution path
+LIB="$BIN/lib"
+manual="$BIN/man/patchreview.txt"
 
 #######################################
 # External Source Files
@@ -63,6 +69,11 @@ function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index true
 	done
+
+	# Set b_patcmp to false, leave b_patbatcmp true
+	# These must always have opposite boolean polarity.
+	#
+	prj_set_item $prj_b_patcmp false
 }
 
 # get_booleans
@@ -75,6 +86,9 @@ function init_booleans {
 #	b_clean_indir \
 #	b_clean_outdir \
 #
+# added in v 4.0
+#	b_patbatcmp
+#
 function get_booleans {
 	index=$boolindex
 	for bool in \
@@ -83,7 +97,8 @@ function get_booleans {
 	b_apply_patches \
 	b_fmt_upstream \
 	b_patcmp \
-	b_gitam_err_abort
+	b_gitam_err_abort \
+	b_patbatcmp
 	do
 		eval $bool=$(prj_get_item $index)
 		ui_digit2bool $bool
@@ -102,6 +117,9 @@ function get_booleans {
 #	b_clean_indir \
 #	b_clean_outdir \
 #
+# added in v 4.0
+#	b_patbatcmp
+#
 function set_booleans {
 	index=$boolindex
 	for bool in \
@@ -110,7 +128,8 @@ function set_booleans {
 	b_apply_patches \
 	b_fmt_upstream \
 	b_patcmp \
-	b_gitam_err_abort
+	b_gitam_err_abort \
+	b_patbatcmp
 	do
 		prj_set_item $index ${!bool}
 		let index++
@@ -171,8 +190,8 @@ $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
  b  Current git branch		: $gitbranch
  m  Mail client                 : $mailclient
- d  Patch directory		: $indir has $infilecount files
- w  Work directory		: $outdir
+ d  RHEL Patch directory	: $indir has $infilecount files
+ w  Upstream patch directory	: $outdir
 
     $attr_under\0Run Parameters     $attr_OFF$attr_bold
  1  Rename input files		: $b_rename_infiles
@@ -181,6 +200,7 @@ $attr_bold
  4  git am abort on error  	: $b_gitam_err_abort
  5  Format upstream patches	: $b_fmt_upstream
  6  Compare patchsets		: $b_patcmp
+ 7  Batch compare patchsets	: $b_patbatcmp
 
     $attr_under\0Control            $attr_OFF$attr_bold
  r  Run patch review
@@ -227,6 +247,10 @@ function menu_parser {
 		5 )	ui_toggle b_fmt_upstream
 			;;
 		6 )	ui_toggle b_patcmp
+			ui_toggle b_patbatcmp
+			;;
+		7 )	ui_toggle b_patcmp
+			ui_toggle b_patbatcmp
 			;;
 		P )	clean_dir "$indir"
 			;;
@@ -323,7 +347,8 @@ prj_b_save_githead \
 prj_b_apply_patches \
 prj_b_fmt_upstream \
 prj_b_patcmp \
-prj_b_gitam_err_abort
+prj_b_gitam_err_abort \
+prj_b_patbatcmp
 do
 	let index++
 	let $offset=$index

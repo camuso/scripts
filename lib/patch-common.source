@@ -37,7 +37,7 @@ declare prj_b_apply_patches
 declare prj_b_fmt_upstream
 declare prj_b_patcmp
 declare prj_b_gitam_err_abort
-
+declare prj_b_patbatcmp
 
 function get_mailclient {
 	echo $(prj_get_item $prj_mailclient)
