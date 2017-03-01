@@ -75,6 +75,10 @@ $(basename $0) [-h -R -U -o <file> -a <retstr>]
   ------------
 
   All menu items are sticky, persisting across invocations of this script.
+  You can use the verbose options to test the results.
+
+  When you get the results you want, set the verbose options to false and
+  press q to return to the previous execution environment.
 
   R - change the directory containing the RHEL patch files
   U - change the directory containing the Upstream patch files
@@ -82,7 +86,7 @@ $(basename $0) [-h -R -U -o <file> -a <retstr>]
   IF these directories were not passed as option arguments (-R and -U),
   AND this the first invocation of this script,
   OR either of these directories does not exist,
-  THEN you will be prompted the missing directory or directories before
+  THEN you will be prompted for the missing directory or directories before
   being presented with the menu.
 
   o - change the output file.
@@ -118,7 +122,7 @@ $(basename $0) [-h -R -U -o <file> -a <retstr>]
   r - run the comparison and exit
   i - init controls and output file to defaults
   h - print this help text
-  q - quit without executing
+  q - quit and return to previous execution environment
 \0
 EOF
 )
