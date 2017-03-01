@@ -56,7 +56,7 @@ declare usfcount=0
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [-h -R -U -o <file> -a <retstr>]
+$(basename $0) [-h -R -U -o <file>]
 
   -h        - Uses the less command to print this help text
   -R rhdir  - optional directory containing the RHEL patches
@@ -83,11 +83,11 @@ $(basename $0) [-h -R -U -o <file> -a <retstr>]
   R - change the directory containing the RHEL patch files
   U - change the directory containing the Upstream patch files
 
-  IF these directories were not passed as option arguments (-R and -U),
-  AND this the first invocation of this script,
-  OR either of these directories does not exist,
-  THEN you will be prompted for the missing directory or directories before
-  being presented with the menu.
+      IF these directories were not passed as option arguments (-R and -U),
+      AND this the first invocation of this script,
+      OR either of these directories does not exist,
+      THEN you will be prompted for the missing directory or directories
+      before being presented with the menu.
 
   o - change the output file.
       Default: /dev/stdout
@@ -119,7 +119,7 @@ $(basename $0) [-h -R -U -o <file> -a <retstr>]
       are congruent or not.
       Default: false
 
-  r - run the comparison and exit
+  r - run the comparison
   i - init controls and output file to defaults
   h - print this help text
   q - quit and return to previous execution environment
