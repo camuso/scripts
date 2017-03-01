@@ -44,9 +44,11 @@ declare -i prj_b_veryverb
 declare prj_dir="$HOME/bin/.data"
 declare prj_file="$prj_dir/patbatcmpmgr.prj"
 
-declare rhdir	# directory containing RHEL patch files
-declare usdir	# directory containing upstream patch files
-declare ofile	# output file, default is /dev/stdout
+declare rhdir		# directory containing RHEL patch files
+declare usdir		# directory containing upstream patch files
+declare ofile		# output file, default is /dev/stdout
+declare pfile="" 	# passed output file takes precedence over the
+			# : output file stored in the project file
 
 declare rhfcount=0
 declare usfcount=0
@@ -54,44 +56,69 @@ declare usfcount=0
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [-h -r -u -o <file>]
+$(basename $0) [-h -R -U -o <file> -a <retstr>]
 
-  -h       - This help text
-  -r rhdir - optional directory containing the RHEL patches
-  -u usdir - optional directory containing the upstream patches
-  -o ofile - optional output file. Default is /dev/stdout
+  -h        - Uses the less command to print this help text
+  -R rhdir  - optional directory containing the RHEL patches
+  -U usdir  - optional directory containing the Upstream patches
+  -o ofile  - optional output file. Default is /dev/stdout
 
   The rhdir and usdir must have the same number of patch files.
 
   Each patchfile in the rhdir is compared with its complement in the
   usdir. If a mismatched line is found, the sequence number of that
-  patch pair is printed to the ofile.
+  patch pair is printed to the ofile, which is /dev/stdout by default.
 
-  More verbose output options are available
+  Verbose output options are available
 
-  Menu choices:
+  Menu choices
+  ------------
 
-  r - change the directory containing the RHEL patch files
-  u - change the directory containing the upstream patch files
-  o - change the output file. default is /dev/stdout
+  All menu items are sticky, persisting across invocations of this script.
 
-  If the directories do not exist, you will be prompted for them before
+  R - change the directory containing the RHEL patch files
+  U - change the directory containing the Upstream patch files
+
+  IF these directories were not passed as option arguments (-R and -U),
+  AND this the first invocation of this script,
+  OR either of these directories does not exist,
+  THEN you will be prompted the missing directory or directories before
   being presented with the menu.
 
-  1 - when true, excludes diff stat lines from the comparison.
+  o - change the output file.
+      Default: /dev/stdout
+
+  d - when true, excludes diff stat lines from the comparison.
       It is possible for the patches to still be congruent even when
       the diff stats are different. For example, when the RHEL patch is
       a subset of the upstream patch
+      Default: false
 
-  2 - when true, excludes path lines from the comparison
+  p - when true, excludes path lines from the comparison
       You will want to do this if the file being patched has been renamed
       or moved to a different directory.
+      Default: false
 
-  3 - when true, excludes lines that do not begin with + or -
+  s - when true, excludes lines that do not begin with + or -
       You will want to do this if you are only concerned about the lines
       that are actually being changed by the patch. When true, this will
       automatically exclude the diff stat lines, but WILL NOT exclude
       the path lines.
+      Default: false
+
+  v - verbose prints the sequence numbers of all files and indicates which
+      are congruent and which are not
+      Default: false
+
+  V - Very verbose prints the sequence numbers of all the files, all the
+      lines being compared in each file, and indicates whether the files
+      are congruent or not.
+      Default: false
+
+  r - run the comparison and exit
+  i - init controls and output file to defaults
+  h - print this help text
+  q - quit without executing
 \0
 EOF
 )
@@ -108,15 +135,14 @@ declare rc_run=1	# Run comparison
 
 usage() {
 	echo -e "$usagestr"
-	exit
 }
 
 init_defaults() {
-	set -x
+
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index false
 	done
-	set +x
+
 	ofile="/dev/stdout"
 	prj_set_item $prj_ofile $ofile
 
@@ -183,8 +209,8 @@ $attr_bold
      $attr_under\0Control           $attr_OFF$attr_bold
   r  run the comparison
   i  init to defaults
-  h  print the help
-  q  quit this script
+  h  print the help using less command
+  q  quit without running the comparison
 $attr_OFF
 EOF
 )
@@ -223,9 +249,10 @@ menu_parser() {
 		i )	init_defaults
 			get_booleans
 			;;
-		h )	echo -e "$usagestr"
+		h )	usage | less
 			;;
-		q )	exit -127
+		q )	set_booleans
+			exit -127
 			;;
 	esac
 	return $rc_continue
@@ -270,14 +297,16 @@ check_dir() {
 
 # Parse the options, if any
 #
-while getopts hr:u: OPTION; do
+while getopts hR:U:o: OPTION; do
     case "$OPTION" in
 
-	h ) usage
+	h ) usage | less
 	    ;;
-	r ) rhdir=$OPTARG
+	R ) rhdir=$OPTARG
 	    ;;
-	u ) usdir=$OPTARG
+	U ) usdir=$OPTARG
+	    ;;
+	o ) pfile=$OPTARG
 	    ;;
 	* ) echo "unrecognized option"
 	    echo -e "$usagestr"
@@ -333,31 +362,38 @@ if [ $stat -ne 0 ]; then
 fi
 
 ##############################################
-# Main Program
+# Main Program Loop
 ##############################################
 
-declare optstr=""
-
-get_booleans
-
-# get the RHEL and upstrea, directories.
-#
-check_dir $prj_rhdir "RHEL" rhdir
-check_dir $prj_usdir "Upstream" usdir
-ofile="$(prj_get_item $prj_ofile)"
-[ "$ofile" ] || ofile="/dev/stdout"
-
 while true; do
-	menu_parser
-	[ $? -eq $rc_run ] && break
+	declare optstr=""
+
+	get_booleans
+
+	# get the RHEL and upstrea, directories.
+	#
+	check_dir $prj_rhdir "RHEL" rhdir
+	check_dir $prj_usdir "Upstream" usdir
+
+	# If the caller passed a desired output file name (pfile), then use
+	# that
+	# Else, if the ofile saved in the project file is an empty string,
+	# use the default /dev/stdout
+	#
+	[ "$pfile" ] && ofile="$pfile" || ofile="$(prj_get_item $prj_ofile)"
+	[ "$ofile" ] || ofile="/dev/stdout"
+
+	while true; do
+		menu_parser
+		[ $? -eq $rc_run ] && break
+	done
+
+	$b_nodiffst && optstr="$optstr""-d "
+	$b_nopaths  && optstr="$optstr""-p "
+	$b_strict   && optstr="$optstr""-s "
+	$b_verbose  && optstr="$optstr""-v "
+	$b_veryverb && optstr="$optstr""-V "
+
+	echo "patbatcmp $optstr -o $ofile $rhdir $usdir"
+	patbatcmp $optstr -o $ofile $rhdir $usdir
 done
-
-$b_nodiffst && optstr="$optstr""-d "
-$b_nopaths  && optstr="$optstr""-p "
-$b_strict   && optstr="$optstr""-s "
-$b_verbose  && optstr="$optstr""-v "
-$b_veryverb && optstr="$optstr""-V "
-
-echo "patbatcmp $optstr -o $ofile $rhdir $usdir"
-patbatcmp $optstr -o $ofile $rhdir $usdir
-
