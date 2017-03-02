@@ -119,10 +119,13 @@ $(basename $0) [-h -R -U -o <file>]
       are congruent or not.
       Default: false
 
+      If Very verbose is true, then verbose will automatically be set true.
+      If verbose is false, then Very verbose will automatically be set false.
+
   r - run the comparison
   l - if the output file is not /dev/stdout, run less on the output file
   i - init controls and output file to defaults
-  h - print this help text
+  h - less this help text
   x - spawn a shell
   q - quit and return to previous execution environment
 \0
@@ -197,29 +200,32 @@ set_booleans() {
 show_settings() {
 	settingstr=$(
 cat <<EOF
-$attr_bold
-     $attr_under\0Directories       $attr_OFF$attr_bold
-  R  Current RHEL directory	: $rhdir has $rhfcount patch files
-  U  Current upstream directory	: $usdir has $usfcount patch files
-  o  Optional output file.	: $ofile
+$BLD
+     $UND\0Batch Comparison of RHEL Patches with Upstream$OFF$BLD
 
-     $attr_under\0Lines to exclude  $attr_OFF$attr_bold
-  d  diff stats			: $b_nodiffst
-  p  file paths			: $b_nopaths
-  s  without leading + or -	: $b_strict
+     $UND\0Environment       $OFF$BLD
+     Most Recent Tag            : $OFF$(git describe --tags --abbrev=0)$BLD
+  R  RHEL directory             : $OFF$rhdir$BLD has $OFF$rhfcount$BLD patch files
+  U  Upstream directory         : $OFF$usdir$BLD has$OFF $usfcount$BLD patch files
+  o  Optional output file.      : $OFF$ofile$BLD
 
-     $attr_under\0Output Parameters $attr_OFF$attr_bold
-  v  verbose			: $b_verbose
-  V  Very verbose		: $b_veryverb
+     $UND\0Lines to exclude  $OFF$BLD
+  d  diff stats                 : $OFF$b_nodiffst$BLD
+  p  file paths                 : $OFF$b_nopaths$BLD
+  s  without leading + or -     : $OFF$b_strict$BLD
 
-     $attr_under\0Control           $attr_OFF$attr_bold
+     $UND\0Output Parameters $OFF$BLD
+  v  verbose                    : $OFF$b_verbose$BLD
+  V  Very verbose               : $OFF$b_veryverb$BLD
+
+     $UND\0Control           $OFF$BLD
   r  run the comparison
   l  if output file is not /dev/stdout, less the output file
   i  init to defaults
   h  print the help using less command
   x  spawn a shell
   q  quit and return to previous execution environment
-$attr_OFF
+$OFF
 EOF
 )
 	echo -e "$settingstr"
@@ -231,7 +237,7 @@ menu_parser() {
 	rhfcount=$(ls -1 $rhdir/*.patch | wc -l)
 	usfcount=$(ls -1 $usdir/*.patch | wc -l)
 	show_settings
-	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
+	promptgetchar ""$BLD"Enter one of the above: "$OFF"" setting
 
 	case $setting in
 		R )	prj_set_directory "RHEL" $prj_rhdir rhdir quiet
@@ -293,8 +299,8 @@ check_dir() {
 	local index=$1
 	local dirtype="$2"
 	local dirname=$(prj_get_item $index)
-	local blank="\n$attr_bold$dirtype$attr_OFF is blank\n"
-	local nofil="\n"$attr_bold""$dirname""$attr_OFF" does not exist.\n"
+	local blank="\n$dirtype$BLD is blank$OFF\n"
+	local nofil="\n$dirname$BLD does not exist.$OFF\n"
 	local getit=false
 
 	# If the filename is blank, print the blank statement

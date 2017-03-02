@@ -99,9 +99,9 @@ getpatchnumber() {
 	while true; do
 		getuser "Patch number: " index
 		if [ $index -lt 0 ] && [ $index -ge $mlcount ]; then
-			echo -e "$attr_bold"
+			echo -e "$BLD"
 			printf "Patch number %04d is not in this set" $index
-			echo -e "$attr_OFF"
+			echo -e "$OFF"
 			continue
 		else
 			index=$((index - 1 ))
@@ -255,38 +255,45 @@ inarray() {
 # Main program loop
 ############################################
 
-[ -f $usdir/mm.log ] && init_mismatch
+[ -f "$usdir/mm.log" ] && init_mismatch
 
 mmindex=0
 $b_runmismatch && index=${mismatch_array[$mmindex]} || index=0
-echo "starting index: $index"
+# echo "starting index: $index"
 
 while true; do
 
 	if [[ $index -ge $maxindex ]]; then
-		echo -e "$attr_bold"
-		printf "Patch %04d is the last patch in the set." $((maxindex + 1))
-		echo -e "$att_OFF"
+		echo -e "     ******$BLD"
+		printf "Patch$OFF %04d$BLD is the last patch in the set.\n" \
+			$((maxindex + 1))
+		echo -e "$OFF     ******\n"
 	fi
 
+	[ -e "$mismatch_file" ] || b_runmismatch=false
 	$b_runmismatch && [ $(ui_inarray $index $mismatch_array) -eq 0 ] \
 		&& index=mmindex
 
-	echo "-----------------------------------------------------------------"
-	echo "Comparing: ${mlfiles[$index]}"
-	grep "Subject: " "${mlfiles[$index]}"
-	echo
-	echo "With     : ${usfiles[$index]}"
-	grep -m1 "Subject: " "${usfiles[$index]}"
+	echo -e "$BLD\0Interactively Compare Patches"
+	echo -e "-----------------------------------------------------------------"
+	echo -en "$OFF"
+	echo -e "$BLD\0Compare :$OFF $(basename ${mlfiles[$index]})"
+	# grep "Subject: " "${mlfiles[$index]}"
+	echo -e "   $BLD\0With :$OFF $(basename ${usfiles[$index]})"
+	# grep -m1 "Subject: " "${usfiles[$index]}"
 	echo
 	if [[ $index -lt 0 ]] || [[ $index -gt $maxindex ]]; then
-		echo -e ""$attr_bold"There is no patch number: $((index + 1))."$att_OFF""
+		echo -e "$BLD\0There is no patch number:$OFF $((index + 1))."
 		index=0
 	fi
-	echo -en "$attr_bold"
-	[ -e $mismatch_file ] && { \
-	echo -e  "\tm - only examine mismatched patch files: $b_runmismatch"; \
-	echo -e  "\tc - run batch file comparison"; }
+	echo -en "$BLD"
+	echo -e  "\t    Last Tag :$OFF $(git describe --tags --abbrev=0)$BLD"
+	echo -e  "\t    RHEL dir :$OFF $mldir$BLD"
+	echo -e  "\tUpstream dir :$OFF $usdir$BLD"
+	echo -e "-----------------------------------------------------------------"
+	echo -e  "\tc - run batch file comparison"
+	[ -e "$mismatch_file" ] && \
+	echo -e  "\tm - only examine mismatched patch files:$OFF $b_runmismatch$BLD"
 	echo -e  "\tf - forward one patch"
 	echo -e  "\tb - back one patch"
 	echo -e  "\tn - prompt for a number for a specific patch"
@@ -295,7 +302,7 @@ while true; do
 	echo -e  "\td - done comparing patches"
 	echo -e  "\tq - quit execution"
 	[ $argc -eq 3 ] && echo -e  "\tz - "$spclstr""
-	echo -en "\tor any other key to continue ..."$attr_OFF""
+	echo -en "\tor any other key to continue ..."$OFF""
 	read -n1 answer
 	echo
 
@@ -316,17 +323,22 @@ while true; do
 		p )	replace_commit
 			;;
 		x )	ui_sh_spawn
+			echo
 			continue
 			;;
 		z )	[ $argc -eq 3 ] && exit $code_special_action || continue
 			;;
-		m )	ui_toggle b_runmismatch
+		m )	# Unless a mismatch file exists, this option is meaningless.
+			#
+			[ -e "$mismatch_file" ] || { echo; continue; }
+			ui_toggle b_runmismatch
 			$b_runmismatch && \
 				{ mmindex=0; index=${mismatch_array[0]}; } \
 				|| index=0
 			continue
 			;;
 		c )	patbatcmpmgr -R $mldir -U $usdir -o $usdir/mm.log
+			init_mismatch
 			continue
 			;;
 	esac

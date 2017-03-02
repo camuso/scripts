@@ -166,7 +166,7 @@ function git_reset_head {
 	local response=false
 	local gitbranch=$(git_getcurrentbranch)
 	local githead=$(cat $sesdir/$gitbranch)
-	local logstr=$attr_OFF$(git log -n1 --oneline $githead)$attr_bold
+	local logstr=$OFF$(git log -n1 --oneline $githead)$BLD
 
 	getyn "$resetquery\n$logstr\n\n" response
 	$response && gitreset $sesdir
@@ -186,35 +186,36 @@ Do you want to proceed?"
 function show_settings {
 	settingstr=$(
 cat <<EOF
-$attr_bold
-    $attr_under\0Environment        $attr_OFF$attr_bold
- b  Current git branch		: $gitbranch
- m  Mail client                 : $mailclient
- d  RHEL Patch directory	: $indir has $infilecount files
- w  Upstream patch directory	: $outdir
+$BLD
+    $UND\0Environment        $OFF$BLD
+    Most recent tag             :$OFF $(git describe --tags --abbrev=0)$BLD
+ b  Current git branch          :$OFF $gitbranch$BLD
+ m  Mail client                 :$OFF $mailclient$BLD
+ d  RHEL Patch directory        :$OFF $indir$BLD has$OFF $infilecount$BLD files
+ w  Upstream patch directory    :$OFF $outdir$BLD
 
-    $attr_under\0Run Parameters     $attr_OFF$attr_bold
- 1  Rename input files		: $b_rename_infiles
- 2  Save git head		: $b_save_githead
- 3  Apply patches (git am)	: $b_apply_patches
- 4  git am abort on error  	: $b_gitam_err_abort
- 5  Format upstream patches	: $b_fmt_upstream
- 6  Compare patchsets		: $b_patcmp
- 7  Batch compare patchsets	: $b_patbatcmp
+    $UND\0Run Parameters     $OFF$BLD
+ 1  Rename input files          : $OFF$b_rename_infiles$BLD
+ 2  Save git head               : $OFF$b_save_githead$BLD
+ 3  Apply patches (git am)      : $OFF$b_apply_patches$BLD
+ 4  git am abort on error       : $OFF$b_gitam_err_abort$BLD
+ 5  Format upstream patches     : $OFF$b_fmt_upstream$BLD
+ 6  Compare patchsets           : $OFF$b_patcmp$BLD
+ 7  Batch compare patchsets     : $OFF$b_patbatcmp$BLD
 
-    $attr_under\0Control            $attr_OFF$attr_bold
+    $UND\0Control            $OFF$BLD
  r  Run patch review
  i  Init to defaults
  p  Replace an upstream commit in the series
  G  Restore git head
- P  Clean Patch Directory
- W  Clean Work Directory
- C  Clean Patch and Work Directories
+ P  Clean RHEL Patch Directory
+ W  Clean Upstream Patch Directory
+ C  Clean RHEL and Upstream Directories
  S  Clean Session
  h  help text
  x  Exit to a shell
  q  Quit this script
-$attr_OFF
+$OFF
 EOF
 )
 	echo -e "$settingstr"
@@ -224,7 +225,7 @@ function menu_parser {
 
 	infilecount=$(ls "$indir" | wc -l)
 	show_settings
-	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
+	promptgetchar ""$BLD"Enter one of the above: "$OFF"" setting
 
 	case $setting in
 
@@ -246,11 +247,15 @@ function menu_parser {
 			;;
 		5 )	ui_toggle b_fmt_upstream
 			;;
+		#
+		# patcmp and patbatcmp cannot be simultaneous true
+		# but they can be simultaneously false.
+		#
 		6 )	ui_toggle b_patcmp
-			ui_toggle b_patbatcmp
+			$b_patcmp && $b_patbatcmp && ui_toggle b_patbatcmp
 			;;
-		7 )	ui_toggle b_patcmp
-			ui_toggle b_patbatcmp
+		7 )	ui_toggle b_patbatcmp
+			$b_patcmp && $b_patbatcmp && ui_toggle b_patcmp
 			;;
 		P )	clean_dir "$indir"
 			;;
@@ -286,8 +291,8 @@ function menu_loop {
 
 	# get the patch and work directories.
 	#
-	check_dir $prj_indir "Patch" indir
-	check_dir $prj_outdir "Work" outdir
+	check_dir $prj_indir "RHEL" indir
+	check_dir $prj_outdir "Upstream" outdir
 
 	# get the mail client
 	#
@@ -319,16 +324,16 @@ myshlvl=$SHLVL
 
 # Print the Herald
 #
-echo -e ""$attr_bold""$attr_under""
+echo -e ""$BLD""$UND""
 echo "Patch Review $version - Review patches and compare to upstream"
-echo -e "$attr_OFF"
+echo -e "$OFF"
 
 ! $(git_checkrepo) && git_invrepomsg && exit 1
 
-echo -en "$attr_bold"
+echo -en "$BLD"
 echo -en "Press \"q\" to quit or \"x\" to spawn a new shell "
 echo -e  "at any \"(y/n)\" prompt."
-echo -en "$attr_OFF"
+echo -en "$OFF"
 
 ###########################################
 # Parameter Initialization
