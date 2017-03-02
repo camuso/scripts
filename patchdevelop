@@ -1,8 +1,9 @@
 #!/bin/bash
 #
 # patchdevelop - based on patchreview v3.1
-version="3.2"
-#
+
+version="4.0"
+\
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
 # be considered.
@@ -16,10 +17,14 @@ version="3.2"
 #
 # This script can also be used to compare any two patch sets.
 
-# Calls on the following external scripts.#
+# Calls on the following external scripts.
 #
+# ~/bin/githead
+# ~/bin/gitreset
 # ~/bin/ren*pat
 # ~/bin/patcmp
+# ~/bin/patbatcmp
+# ~/bin/patbatcmpmgr
 
 # Requires to run ...
 #
@@ -31,7 +36,8 @@ version="3.2"
 #
 shopt -s extglob
 
-LIB="$HOME/bin/lib"
+BIN="$HOME/bin"		# must be in execution path
+LIB="$BIN/lib"
 manual="$HOME/bin/man/patchdevelop.txt"
 
 #######################################
@@ -61,7 +67,13 @@ function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index true
 	done
+
+	# Set b_patcmp to false, leave b_patbatcmp true
+	# These must always have opposite boolean polarity.
+	#
+	prj_set_item $prj_b_patcmp false
 }
+
 
 # get_booleans
 #
@@ -76,7 +88,8 @@ function get_booleans {
 	b_apply_patches \
 	b_fmt_upstream \
 	b_patcmp \
-	b_gitam_err_abort
+	b_gitam_err_abort \
+	b_patbatcmp
 	do
 		eval $bool=$(prj_get_item $index)
 		ui_digit2bool $bool
@@ -98,7 +111,8 @@ function set_booleans {
 	b_apply_patches \
 	b_fmt_upstream \
 	b_patcmp \
-	b_gitam_err_abort
+	b_gitam_err_abort \
+	b_patbatcmp
 	do
 		prj_set_item $index ${!bool}
 		let index++
@@ -109,28 +123,30 @@ function set_booleans {
 function show_settings {
 	settingstr=$(
 cat <<EOF
-$attr_bold
-    $attr_under\0Environment        $attr_OFF$attr_bold
- b  Current git branch		: $gitbranch
- m  Mail client                 : $mailclient
- d  Patch directory		: $indir has $infilecount files
- w  Work directory		: $outdir
+$BLD
+    $UND\0Environment        $OFF$BLD
+    Most recent tag             :$OFF $(git describe --tags --abbrev=0)$BLD
+ b  Current git branch		:$OFF $gitbranch$BLD
+ m  Mail client                 :$OFF $mailclient$BLD
+ d  Patch directory		:$OFF $indir$BLD has$OFF $infilecount$BLD files
+ w  Work directory		:$OFF $outdir$BLD
 
-    $attr_under\0Run Parameters     $attr_OFF$attr_bold
- 1  Rename input files		: $b_rename_infiles
- 2  Apply patches (git am)	: $b_apply_patches
- 3  git am abort on error  	: $b_gitam_err_abort
- 4  Format upstream patches	: $b_fmt_upstream
- 5  Compare patchsets		: $b_patcmp
+    $UND\0Run Parameters     $OFF$BLD
+ 1  Rename input files		:$OFF $b_rename_infiles$BLD
+ 2  Apply patches (git am)	:$OFF $b_apply_patches$BLD
+ 3  git am abort on error  	:$OFF $b_gitam_err_abort$BLD
+ 4  Format upstream patches	:$OFF $b_fmt_upstream$BLD
+ 5  Compare patchsets		:$OFF $b_patcmp$BLD
+ 6  Batch compare patchsets     :$OFF $b_patbatcmp$BLD
 
-    $attr_under\0Control            $attr_OFF$attr_bold
+    $UND\0Control            $OFF$BLD
  r  Run patch review
  i  Init to defaults
  p  Replace an upstream commit in the series
  h  help text
  x  Exit to a shell
  q  Quit this script
-$attr_OFF
+$OFF
 EOF
 )
 	echo -e "$settingstr"
@@ -140,7 +156,7 @@ function menu_parser {
 
 	infilecount=$(ls "$indir" | wc -l)
 	show_settings
-	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
+	promptgetchar ""$BLD"Enter one of the above: "$OFF"" setting
 
 	case $setting in
 
@@ -148,9 +164,9 @@ function menu_parser {
 			;;
 		m )	set_mailclient
 			;;
-		d )	prj_set_directory "Patch" $prj_indir indir quiet
+		d )	prj_set_directory "RHEL" $prj_indir indir quiet
 			;;
-		w )	prj_set_directory "Work" $prj_outdir outdir quiet
+		w )	prj_set_directory "Upstream" $prj_outdir outdir quiet
 			;;
 		1 )	ui_toggle b_rename_infiles
 			;;
@@ -160,7 +176,15 @@ function menu_parser {
 			;;
 		4 )	ui_toggle b_fmt_upstream
 			;;
+		#
+		# patcmp and patbatcmp cannot be simultaneous true
+		# but they can be simultaneously false.
+		#
 		5 )	ui_toggle b_patcmp
+			$b_patcmp && $b_patbatcmp && ui_toggle b_patbatcmp
+			;;
+		6 )	ui_toggle b_patbatcmp
+			$b_patcmp && $b_patbatcmp && ui_toggle b_patcmp
 			;;
 		i )	init_booleans
 			get_booleans
@@ -186,8 +210,8 @@ function menu_loop {
 
 	# get the patch and work directories.
 	#
-	check_dir $prj_indir "Patch" indir
-	check_dir $prj_outdir "Work" outdir
+	check_dir $prj_indir "RHEL" indir
+	check_dir $prj_outdir "Upstream" outdir
 
 	# get the mail client
 	#
@@ -219,16 +243,16 @@ myshlvl=$SHLVL
 
 # Print the Herald
 #
-echo -e ""$attr_bold""$attr_under""
+echo -e ""$BLD""$UND""
 echo "Patch Develop $version - Check backported patches with upstream"
-echo -e "$attr_OFF"
+echo -e "$OFF"
 
 ! $(git_checkrepo) && git_invrepomsg && exit 1
 
-echo -en "$attr_bold"
+
 echo -en "Press \"q\" to quit or \"x\" to spawn a new shell "
 echo -e  "at any \"(y/n)\" prompt."
-echo -en "$attr_OFF"
+echo -en "$OFF"
 
 ###########################################
 # Parameter Initialization
@@ -247,7 +271,8 @@ prj_b_rename_infiles \
 prj_b_apply_patches \
 prj_b_fmt_upstream \
 prj_b_patcmp \
-prj_b_gitam_err_abort
+prj_b_gitam_err_abort \
+prj_b_patbatcmp
 do
 	let index++
 	let $offset=$index
@@ -273,8 +298,8 @@ if [ $? -ne 0 ]; then
 	echo "A new project file has been created."
 	echo "We will need to know where your patches will be and where you"
 	echo "want us to put the output of this script."
-	prj_set_directory "Patch" $prj_indir indir quiet
-	prj_set_directory "Work" $prj_outdir outdir quiet
+	prj_set_directory "RHEL" $prj_indir indir quiet
+	prj_set_directory "Upstream" $prj_outdir outdir quiet
 	set_mailclient
 	init_booleans
 fi
@@ -317,6 +342,15 @@ while true; do
 	if $b_patcmp; then
 		patcmp $indir $outdir 'return to main menu'
 		stat=$?
+		[ $stat -eq 1 ] && continue
+		[ $stat -eq 2 ] && exit
+	fi
+
+	if $b_patbatcmp; then
+		patbatcmpmgr -R $indir -U $outdir -o $outdir/mm.log
+		patcmp $indir $outdir 'return to main menu'
+		stat=$?
+		rm -f $outdir/mm.log
 		[ $stat -eq 1 ] && continue
 		[ $stat -eq 2 ] && exit
 	fi
