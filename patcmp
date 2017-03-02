@@ -167,7 +167,7 @@ replace_commit() {
 backup() {
 	local idx
 
-	b_runmismatch && idx=$mmindex || idx=$index
+	$b_runmismatch && idx=$mmindex || idx=$index
 	let idx--
 
 	if (($idx <= 0)); then
@@ -177,7 +177,7 @@ backup() {
 		let idx--
 	fi
 
-	b_runmismatch && mmindex=$idx || index=$idx
+	$b_runmismatch && mmindex=$idx || index=$idx
 }
 
 # init_mismatch()
@@ -232,29 +232,32 @@ init_mismatch() {
 	current_mismatch=$first_mismatch
 }
 
-# get_next_mismatch
+# inarray()
 #
-# Increments the global index and sets the global current_mismatch
-# to the entry in the array that corresponds to the new index.
+# Looks for an integer in an integer array
+# Echoes and returns 0 if found, 1  if not.
 #
-get_next_mismatch() {
-	let index++
-	current_mismatch=${mismatch_aray[$index]}
-}
+# $1 value
+# $2 array
+#
+# Example:
+# 	[ $(inarray 12 $array) -eq 0 ] && echo "found" || echo "not found"
+#
+# returns 0 if found, nonzero if not found
+#
+inarray() {
+	local i
+	for i in ${@:2}; do
+		[ $i -eq $1 ] && echo 0 && return 0
+	done
 
-# get_prev_mismatch
-#
-# Decrements the global index and sets the global current_mismatch
-# to the entry in the array that corresponds to the new index.
-#
-get_prev_mismatch() {
-	let index--
-	current_mismatch=${mismatch_aray[$index]}
+	echo 1
+	return 1
 }
 
 #############################################
 # Main program loop
-#############################################
+############################################
 
 [ -f $usdir/mm.log ] && init_mismatch
 
@@ -269,6 +272,9 @@ while true; do
 		printf "Patch %04d is the last patch in the set." $((maxindex + 1))
 		echo -e "$att_OFF"
 	fi
+
+	$b_runmismatch && [ $(inarray $index $mismatch_array) -eq 0 ] \
+		&& index=mmindex
 
 	echo "-----------------------------------------------------------------"
 	echo "Comparing: ${mlfiles[$index]}"
