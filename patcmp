@@ -25,7 +25,6 @@ declare preindex=0
 
 declare b_runmismatch=false
 declare mismatch_file
-declare -i current_mismatch
 declare -i first_mismatch
 declare -i last_mismatch
 declare -i mmindex
@@ -186,10 +185,8 @@ backup() {
 # 	b_runmismatch
 # 	mismatch_file
 # 	mismatch_count
-# 	verbosity
 # 	first_mismatch
 # 	last_mismatch
-# 	current_mismatch
 # 	mmindex
 #
 init_mismatch() {
@@ -229,7 +226,6 @@ init_mismatch() {
 
 	last_mismatch=${mismatch_array[$(($mmindex - 1))]}
 	first_mismatch=${mismatch_array[0]}
-	current_mismatch=$first_mismatch
 }
 
 # inarray()
@@ -273,7 +269,7 @@ while true; do
 		echo -e "$att_OFF"
 	fi
 
-	$b_runmismatch && [ $(inarray $index $mismatch_array) -eq 0 ] \
+	$b_runmismatch && [ $(ui_inarray $index $mismatch_array) -eq 0 ] \
 		&& index=mmindex
 
 	echo "-----------------------------------------------------------------"
@@ -288,8 +284,9 @@ while true; do
 		index=0
 	fi
 	echo -en "$attr_bold"
-	[ -e $mismatch_file ] && \
-	echo -e  "\tm - only examine mismatched patch files: $b_runmismatch"
+	[ -e $mismatch_file ] && { \
+	echo -e  "\tm - only examine mismatched patch files: $b_runmismatch"; \
+	echo -e  "\tc - run batch file comparison"; }
 	echo -e  "\tf - forward one patch"
 	echo -e  "\tb - back one patch"
 	echo -e  "\tn - prompt for a number for a specific patch"
@@ -324,6 +321,12 @@ while true; do
 		z )	[ $argc -eq 3 ] && exit $code_special_action || continue
 			;;
 		m )	ui_toggle b_runmismatch
+			$b_runmismatch && \
+				{ mmindex=0; index=${mismatch_array[0]}; } \
+				|| index=0
+			continue
+			;;
+		c )	patbatcmpmgr -R $mldir -U $usdir -o $usdir/mm.log
 			continue
 			;;
 	esac

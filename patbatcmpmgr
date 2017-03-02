@@ -120,8 +120,10 @@ $(basename $0) [-h -R -U -o <file>]
       Default: false
 
   r - run the comparison
+  l - if the output file is not /dev/stdout, run less on the output file
   i - init controls and output file to defaults
   h - print this help text
+  x - spawn a shell
   q - quit and return to previous execution environment
 \0
 EOF
@@ -212,8 +214,10 @@ $attr_bold
 
      $attr_under\0Control           $attr_OFF$attr_bold
   r  run the comparison
+  l  if output file is not /dev/stdout, less the output file
   i  init to defaults
   h  print the help using less command
+  x  spawn a shell
   q  quit and return to previous execution environment
 $attr_OFF
 EOF
@@ -258,10 +262,14 @@ menu_parser() {
 		r )	set_booleans
 			return $rc_run
 			;;
+		l )	[ "$ofile" != "/dev/stdout" ] && less $ofile
+			;;
 		i )	init_defaults
 			get_booleans
 			;;
 		h )	usage | less
+			;;
+		x )	ui_sh_spawn
 			;;
 		q )	set_booleans
 			exit -127
