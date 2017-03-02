@@ -547,3 +547,28 @@ function ui_strindex {
 	local x="${1%%$2*}"
 	[[ $x = $1 ]] && echo -1 || echo ${#x}
 }
+
+# inarray()
+#
+# Looks for an integer in an integer array
+# Echoes and returns 0 if found, 1  if not.
+#
+# $1 value
+# $2 array
+#
+# Example:
+# 	[ $(inarray 12 $array) -eq 0 ] && echo "found" || echo "not found"
+#
+# returns 0 if found, nonzero if not found
+#
+ui_inarray() {
+	local i
+	for i in ${@:2}; do
+		[ $i -eq $1 ] && echo 0 && return 0
+	done
+
+	echo 1
+	return 1
+}
+
+ui_source_loaded=true
