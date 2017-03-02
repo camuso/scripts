@@ -436,6 +436,15 @@ while true; do
 		[ $stat -eq 2 ] && exit
 	fi
 
+	if $b_patbatcmp; then
+		patbatcmpmgr -R $indir -U $outdir -o $outdir/mm.log
+		patcmp $indir $outdir 'return to main menu'
+		stat=$?
+		rm -f $outdir/mm.log
+		[ $stat -eq 1 ] && continue
+		[ $stat -eq 2 ] && exit
+	fi
+
 	if [ $menu_stat -eq $rc_run ]; then
 
 		# Backout of any residual child shells.
