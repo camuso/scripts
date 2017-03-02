@@ -260,6 +260,11 @@ for ((index = 0; index < $fcountA; ++index)); do
 
 	$vverbose && pr_header
 
+	# If we're not sending output to sdtout, let the user know we're
+	# still alive.
+	#
+	[ "$ofile" == "/dev/stdout" ] || echo -n "."
+
 	# Open file descriptors based on the filenames in each array
 	#
 	exec 5<"${faryA[$index]}"	# open the files for reading
