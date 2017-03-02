@@ -17,12 +17,13 @@ version="4.0"
 #
 # This script can also be used to compare any two patch sets.
 #
-# Calls on the following external scripts.#
+# Calls on the following external scripts.
 #
 # ~/bin/githead
 # ~/bin/gitreset
 # ~/bin/ren*pat
 # ~/bin/patcmp
+# ~/bin/patbatcmp
 # ~/bin/patbatcmpmgr
 #
 # Requires to run ...
@@ -233,9 +234,9 @@ function menu_parser {
 			;;
 		m )	set_mailclient
 			;;
-		d )	prj_set_directory "Patch" $prj_indir indir quiet
+		d )	prj_set_directory "RHEL" $prj_indir indir quiet
 			;;
-		w )	prj_set_directory "Work" $prj_outdir outdir quiet
+		w )	prj_set_directory "Upstream" $prj_outdir outdir quiet
 			;;
 		1 )	ui_toggle b_rename_infiles
 			;;
@@ -379,8 +380,8 @@ if [ $? -ne 0 ]; then
 	echo "A new project file has been created."
 	echo "We will need to know where your patches will be and where you"
 	echo "want us to put the output of this script."
-	prj_set_directory "Patch" $prj_indir indir quiet
-	prj_set_directory "Work" $prj_outdir outdir quiet
+	prj_set_directory "RHEL" $prj_indir indir quiet
+	prj_set_directory "Upstream" $prj_outdir outdir quiet
 	set_mailclient
 	init_booleans
 fi
