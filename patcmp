@@ -23,6 +23,15 @@ declare maxindex=$((mlcount - 1))
 declare penindex=$((maxindex - 1))
 declare preindex=0
 
+declare b_runmismatch=false
+declare mismatch_file
+declare -i current_mismatch
+declare -i first_mismatch
+declare -i last_mismatch
+declare -i mmindex
+declare -i mismatch_count
+declare -a mismatch_array
+
 usage() {
 	echo
 	echo "usage: patcmp dir-1 dir-2 [special action string]"
@@ -156,8 +165,9 @@ replace_commit() {
 # 	penindex
 #
 backup() {
-	local idx=$index
+	local idx
 
+	b_runmismatch && idx=$mmindex || idx=$index
 	let idx--
 
 	if (($idx <= 0)); then
@@ -167,10 +177,91 @@ backup() {
 		let idx--
 	fi
 
-	index=$idx
+	b_runmismatch && mmindex=$idx || index=$idx
 }
 
-index=0
+# init_mismatch()
+#
+# initializes the following globals
+# 	b_runmismatch
+# 	mismatch_file
+# 	mismatch_count
+# 	verbosity
+# 	first_mismatch
+# 	last_mismatch
+# 	current_mismatch
+# 	mmindex
+#
+init_mismatch() {
+	local line
+	local verbosity
+	local swqno
+
+	mmindex=0
+	b_runmismatch=true
+	mismatch_file=$usdir/mm.log
+	mismatch_count=$(($(cat $mismatch_file | wc -l) -1))
+
+	# Determine the verbose level of the mismatch_file
+	#
+	line=$(readlinen 1 $mismatch_file)
+	verbosity=$(echo $line | cut -d':' -f2)
+
+	# create the array of mismatched patched file indexes. The index is
+	# 0-based, while the patch sequence number is 1-basd, so subtract 1
+	# from each sequence number to get the index into the mlfiles and
+	# usfiles arrays.
+	#
+	while read line; do
+		[ "${line:0:6}" == "PATCH:" ] || continue
+		(($verbosity > 0)) && { [[ "$line" == *"!="* ]] || continue; }
+
+		# No quotes around $line in the following, because we want
+		# to strip leading spaces. We are extracting integers, not
+		# strings.
+		#
+		seqno=$(echo $line | cut -d':' -f2)
+		mismatch_array[$mmindex]=$((seqno - 1))
+
+		echo ${mismatch_array[$mmindex]}
+		let mmindex++
+	done < $mismatch_file
+
+	last_mismatch=${mismatch_array[$(($mmindex - 1))]}
+	first_mismatch=${mismatch_array[0]}
+	current_mismatch=$first_mismatch
+}
+
+# get_next_mismatch
+#
+# Increments the global index and sets the global current_mismatch
+# to the entry in the array that corresponds to the new index.
+#
+get_next_mismatch() {
+	let index++
+	current_mismatch=${mismatch_aray[$index]}
+}
+
+# get_prev_mismatch
+#
+# Decrements the global index and sets the global current_mismatch
+# to the entry in the array that corresponds to the new index.
+#
+get_prev_mismatch() {
+	let index--
+	current_mismatch=${mismatch_aray[$index]}
+}
+
+#############################################
+# Main program loop
+#############################################
+
+[ -f $usdir/mm.log ] && init_mismatch
+
+mmindex=0
+$b_runmismatch && index=${mismatch_array[$mmindex]} || index=0
+echo "starting index: $index"
+
 while true; do
 
 	if [[ $index -ge $maxindex ]]; then
@@ -191,6 +282,8 @@ while true; do
 		index=0
 	fi
 	echo -en "$attr_bold"
+	[ -e $mismatch_file ] && \
+	echo -e  "\tm - only examine mismatched patch files: $b_runmismatch"
 	echo -e  "\tf - forward one patch"
 	echo -e  "\tb - back one patch"
 	echo -e  "\tn - prompt for a number for a specific patch"
@@ -224,11 +317,23 @@ while true; do
 			;;
 		z )	[ $argc -eq 3 ] && exit $code_special_action || continue
 			;;
+		m )	ui_toggle b_runmismatch
+			continue
+			;;
 	esac
 
 	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
 	preindex=$index
-	[[ $index -lt $maxindex ]] && let index++
+
+	if $b_runmismatch; then
+		[[ $index -lt $last_mismatch ]] && let mmindex++
+		for ((i = 0; i < last_mismatch; ++i)); do echo ${mismatch_array[$i]}; done
+		index=${mismatch_array[$mmindex]}
+		echo "mmindex: $mmindex index: $index"
+	else
+		[[ $index -lt $maxindex ]] && let index++
+	fi
+
 	echo
 done
 echo
