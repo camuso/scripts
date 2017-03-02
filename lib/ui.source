@@ -17,6 +17,10 @@ attr_bold="\033[1m"
 attr_under="\033[4m"
 attr_OFF="\033[0m"
 
+BLD="$attr_bold"
+UND="$attr_under"
+OFF="$attr_OFF"
+
 #########################
 # Shell Routines
 #########################
