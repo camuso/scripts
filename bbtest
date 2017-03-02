@@ -20,5 +20,5 @@ usage() {
 	exit
 }
 
-[ $# -ne 2 ] || usage
+[ $# -eq 2 ] || usage
 [[ "$1" == "$2" ]] && echo "true" || echo "false"
