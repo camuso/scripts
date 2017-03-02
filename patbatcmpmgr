@@ -214,7 +214,7 @@ $attr_bold
   r  run the comparison
   i  init to defaults
   h  print the help using less command
-  q  quit without running the comparison
+  q  quit and return to previous execution environment
 $attr_OFF
 EOF
 )
@@ -244,8 +244,16 @@ menu_parser() {
 		s )	ui_toggle b_strict
 			;;
 		v )	ui_toggle b_verbose
+			#
+			# veryverb cannot be set if verbose is not
+			#
+			$b_veryverb && { $b_verbose || ui_toggle b_veryverb; }
 			;;
 		V )	ui_toggle b_veryverb
+			#
+			# verbose must be set if veryverb is set
+			#
+			$b_veryverb && { $b_verbose || ui_toggle b_verbose; }
 			;;
 		r )	set_booleans
 			return $rc_run
