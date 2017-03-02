@@ -22,60 +22,41 @@ Runing the script
 -----------------
 
 The script must be run from the top of a git tree. If not, it will exit
-with the following message.
-_______________________________________________________________________
+with an error message.
 
-$ patchreview
-
-Patch Review 3.0 - Review patches and compare to upstream
-
-The current directory...  /work/us
-	 ...is not the top of a git tree.
-Please cd to the top of a git tree.
-
-_______________________________________________________________________
-
-A directory containing the user's patches must be scpecified as well as
-the directroy into which the script puts its output. These directories
-must not be the same.
+A directory containing the RHEL patches must be scpecified as well as a
+directroy for the upstream patches. These directories must not be the
+same.
 
 These directories are identified by the script as follows.
 
-Patch directory: the directory containing the user's patches
+RHEL patch directory: the directory containing the RHEL patches
 
-Work directory:  the directory into which the script will put upstream
-                 patches that were formatted using the upstream commit
-		 hashes in the commit logs of the user's patches.
+Upstream directory: the directory into which the script will put upstream
+                    patches that were formatted using the upstream commit
+		    hashes in the commit logs of the user's patches.
 
-The first time the script is run, the user is queried for these paths as
-follows.
-_________________________________________________________________________
+The first time the script is run, the user is queried for the following
+items.
 
-$ patchreview
+* The user's mail client. Currently only Thunderbird and Mutt are
+  supported.
 
-Patch Review 3.0 - Review patches and compare to upstream
+* The RHEL patch directory
 
-Press "q" to quit or "x" to spawn a new shell at any "(y/n)" prompt.
+* The Upstream patch directory
 
-A new project file has been created.
-We will need to know where your patches will be and where you
-want us to put the output of this script.
-New Patch directory: ~/Maildir/work/cur
-_________________________________________________________________________
+The very first item listed under "Environment", is the most recent tag
+in the current branch. This information is useful for knowing to which
+kernel the patches will be applied.
 
-After the New Patch directory is entered, the user is queried for the new
-Work directory as follows.
-_________________________________________________________________________
-
-New Work directory: ../temp
-_________________________________________________________________________
-
-Once these paths have been identified, the script presents the following
-menu.
+The next item is the current working git branch. This can be changed
+with the b option.
 _________________________________________________________________________
 
     Environment
     -------------------
+    Most Recent Tag		: kernel-3.10.0-516.el7
  b  Current git branch		: rh7.work
  m  Mail client                 : Mutt
  d  Patch directory		: /home/tcamuso/Maildir/work/cur has 0 files
@@ -87,7 +68,8 @@ _________________________________________________________________________
  3  Apply patches (git am)	: true
  4  git am abort on error  	: true
  5  Format upstream patches	: true
- 6  Compare patchsets		: true
+ 6  Compare patchsets		: false
+ 7  Batch compare patchsets	: true
 
     Control
     -------------------
@@ -95,9 +77,9 @@ _________________________________________________________________________
  i  Init to defaults
  p  Replace an upstream commit in the series
  G  Restore git head
- P  Clean Patch Directory
- W  Clean Work Directory
- C  Clean Patch and Work Directories
+ P  Clean RHEL Patch Directory
+ W  Clean Upstream Directory
+ C  Clean Upstream and RHEL Directories
  S  Clean Session
  h  help text
  x  Exit to a shell
@@ -110,46 +92,50 @@ _________________________________________________________________________
 Menu selections
 ---------------
 
+Some menu items are sticky and retain their values between invocations of
+the script. Sticky items will be indicated with a * in the help text below.
+
 The "Evironment" section of the menu sets up the operating environment
 for the patchreview script with the following selections.
 
-b - Set's the git branch from which you will be operating. It is assumed
-    that you have at least one RHEL branch and one upstream branch in
-    your git directory. When selecting this option, you will be
-    presented with a numbered choice as follows.
+b* - Set's the git branch from which you will be operating. It is assumed
+     that you have at least one RHEL branch and one upstream branch in
+     your git directory. When selecting this option, you will be
+     presented with a numbered choice as follows.
 
  1  master
  2  * rh7
  3  rh7.kabi
 
-    This user has three branches from which to choose. The master is the
-    Linus tree master, and the others are branches of rhel7.
+ Enter the number corresponding to the branch you want:
 
-m - Selects from which mail client the patches will be extracted.
-    Currently, there are only two choices: Thunderbird and Mutt.
+     Simply type the number of the desired branch at the prompt.
 
-d - Patch directory, as described above in "Running the script".
+m * Selects from which mail client the patches will be extracted.
+     Currently, there are only two choices: Thunderbird and Mutt.
 
-w - Work directory, as described above in "Running the script".
+d * RHEL directory, as described above in "Running the script".
+
+w * Upstream directory, as described above in "Running the script".
 
 The "Run Parameters" section controls what happens when the 'r' (Run)
 menu selection is pressed. These options can be toggled from true to
 false by pressing the corresponding option number.
 
-1 - When true, the files extracted from the mail client and residing in
-    the "Patch directory" are renamed using their subject line for the
+1 * When true, the files extracted from the mail client and residing in
+    the "RHEL directory" are renamed using their subject line for the
     name.
     Resets to false after a run.
 
-2 - If this is true, the current git head is saved and can be restored
+2 * If this is true, the current git head is saved and can be restored
     later using the 'G' control menu option.
     Resets to false after a run.
 
-3 - When true, the patches in the "Patch Directory" are applied to the
+3 * When true, the patches in the "RHEL Directory" are applied to the
     selected branch using "git am -3".
     Resets to false after a run.
 
-4 - When true, an abort from the attempt to 'git am' a patch will cause
+4 * When true, an abort from the attempt to 'git am' a patch will cause
     the script to exit. From that point, the user can decide how s/he
     wants to proceed.
 
@@ -166,10 +152,11 @@ false by pressing the corresponding option number.
     contain the fuzz report, if any, and the names and relative
     locations of of the reject files.
 
-    This switch retains its value after a run.
+    This switch is not only sticky between invocations of the script,
+    but also retains its value after a run.
 
-5 - When true, the commit logs of the patches in the "Patch directory"
-    are scanned for upstream commit hashes. If the script encounters
+5 * When true, the commit logs of the patches in the "RHEL directory"
+    are scanned for upstream commit hasAhes. If the script encounters
     more than one string that could be a commit hash, the user is
     presented with a list of candidate hashes from which to choose.
 
@@ -183,17 +170,45 @@ false by pressing the corresponding option number.
 
     Resets to false after a run.
 
-6 - When true, vimdiff is invoked to step through the patches, comparing
-    the patches in the "Patch directory" to those in the "Work
-    directory". The former will be in the left vimdiff window and the
-    latter will be in the right window.
+6 * When true, another script is invoked with a menu of its own to
+    vimdiff the RHEL patches with the Upstream patches. The RHEL
+    patches will be in the left vim window, and the Upstream patches
+    will be on the right.
 
-    Resets to false after a run.
+    To see the help for this script, type:
+
+    $ patcmp -h
+
+    If this option is set true, then option 7 will automatically be
+    set false. However, if this option is set false, option 7 is
+    unaffected.
+
+7 * When true, another script is invoked that presents options for
+    comparing the RHEL and Upstream patches in a batch, identifying
+    the patches that differ based on options presented in its own
+    menu.
+
+    To see the help for this script, type:
+
+    $ patbatcmpmgr -h
+
+    If this option is set true, then option 6 will automatically be
+    set false. However, if this option is set false, option 6 is
+    unaffected.
+
+    Once the batch comparison is finished, the interactive patch
+    comparison script is invoked to examine the patches that were
+    flagged by the batch comparison as sufficiently "different" to
+    warrant human inspection.
 
 The "Control" section of the menu executes operations as follows.
 
 r - Run the script on the patches according to the parameter settings as
     described above.
+
+    Options 1 through 5 are examined and the corresponding action takes
+    place. Then, either option 6 or 7 is executed. They cannot be true
+    simultaneously, so only one or the other will execute.
 
 i - Initialize the script's Parameters to their default settings, which
     is all in the "true" state.
@@ -224,10 +239,160 @@ S - Clear the sessions log file. This will delete all the heads that
     were saved by applying patch sets. Not something you want to do
     frequently but may be useful from time to time.
 
-h - Display this help file.
+h - Display this help text.
 
 x - Exit to a shell. Return to the running script by typing exit or
     ctrl-d in the new shell.
 
 q - Exit the script and return to bash.
+
+_________________________________________________________________________
+
+---------
+Sub Menus
+---------
+
+These menus are presented when "r" (run) is pressed and option 6 or 7
+is selected. Options 6 and 7 are mutually exclusive, so that enabling
+one disables the other. However, the may simultaneously be in the
+false state.
+
+These menus compare the patches in the RHEL directory with those in
+the Upstream directory.
+
+
+If option 6 is selected, you will see the the following menu presented
+after you press "r", which runs the the previous 5 options first.
+
+
+Interactively Compare Patches
+-----------------------------------------------------------------
+Compare : RHEL7.4-net-PATCH-v2-1-9-Clean-up-indentation-in.patch
+   With : 0001-Clean-up-indentation-in-net-ipv6-transp_v6.h.patch
+
+	Most Recent Tag: kernel-3.10.0-516.el7
+	    RHEL patches in: /home/tcamuso/Maildir/work/cur
+	Upstream patches in: ../temp
+-----------------------------------------------------------------
+	m - only examine mismatched patch files: false
+	c - run batch file comparison
+	f - forward one patch
+	b - back one patch
+	n - prompt for a number for a specific patch
+	p - replace current upstream patch with a different commit
+	x - exit to a shell
+	d - done comparing patches
+	q - quit execution
+	z - return to main menu
+	or any other key to continue ...
+
+All the menu items are pretty much self-explanatory, except for the first
+two.
+
+c - invokes the batch comparison script to generate a list of files that
+    are sufficiently different to warrant human inspection.
+
+m - this option only appears if the list of mismatched patches was compiled
+    by the batch comparison script.
+
+_________________________________________________________________________
+
+
+     Batch Comparison of RHEL Patches with Upstream
+     ----------------------------------------------
+
+     Batch Comparison of RHEL Patches with Upstream
+
+     Environment
+     ----------------------
+     Most Recent Tag            : kernel-3.10.0-516.el7
+  R  RHEL directory             : /home/tcamuso/Maildir/work/cur has 9 patch files
+  U  Upstream directory         : ../temp has 9 patch files
+  o  Optional output file.      : ../temp/mm.log
+
+     Lines to exclude
+     ----------------------
+  d  diff stats                 : false
+  p  file paths                 : false
+  s  without leading + or -     : false
+
+     Output Parameters
+     ----------------------
+  v  verbose                    : false
+  V  Very verbose               : false
+
+     Control
+     ----------------------
+  r  run the comparison
+  l  if output file is not /dev/stdout, less the output file
+  i  init to defaults
+  h  print the help using less command
+  x  spawn a shell
+  q  quit and return to previous execution environment
+
+Enter one of the above:
+_________________________________________________________________________
+
+  Each patchfile in the RHEL directory is compared with its complement in
+  the Upstream directory. If a mismatched line is found, the sequence
+  number of that patch pair is printed to the ofile, which is /dev/stdout
+  by default.
+
+  Verbose output options are available for examination of the files that
+  are congruent and the ones that differ.
+
+  Menu choices
+  ------------
+
+  All menu items are sticky, persisting across invocations of this script.
+  You can use the verbose options to test the results.
+
+  When you get the results you want, set the verbose options to false and
+  press q to return to the previous execution environment.
+
+  R - change the directory containing the RHEL patch files
+  U - change the directory containing the Upstream patch files
+
+  o - change the output file.
+      The default is /dev/stdout, but the patchreview and patcmp scripts
+      will call this with an output file defined that will exist in the
+      Upstream patch directory as mm.log. You may change the name and
+      location of this file with this option.
+
+  d - when true, excludes diff stat lines from the comparison.
+      It is possible for the patches to still be congruent even when
+      the diff stats are different. For example, when the RHEL patch is
+      a subset of the upstream patch
+      Default: false
+
+  p - when true, excludes path lines from the comparison
+      You will want to do this if the file being patched has been renamed
+      or moved to a different directory.
+      Default: false
+
+  s - when true, excludes lines that do not begin with + or -
+      You will want to do this if you are only concerned about the lines
+      that are actually being changed by the patch. When true, this will
+      automatically exclude the diff stat lines, but WILL NOT exclude
+      the path lines.
+      Default: false
+
+  v - verbose prints the sequence numbers of all files and indicates which
+      are congruent and which are not
+      Default: false
+
+  V - Very verbose prints the sequence numbers of all the files, all the
+      lines being compared in each file, and indicates whether the files
+      are congruent or not.
+      Default: false
+
+      If Very verbose is true, then verbose will automatically be set true.
+      If verbose is false, then Very verbose will automatically be set false.
+
+  r - run the comparison
+  l - run less on the output file
+  i - init the controls and output file to defaults
+  h - less this help text
+  x - spawn a shell
+  q - quit and return to previous execution environment
 
