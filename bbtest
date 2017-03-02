@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# bbtest
+#
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) arg1 arg2
+
+Performs:
+[[ "$1" == "$2" ]] && echo true || echo false
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+[ $# -ne 2 ] || usage
+[[ "$1" == "$2" ]] && echo "true" || echo "false"
