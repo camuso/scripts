@@ -57,7 +57,9 @@ declare nopaths=false	# exclude the paths from comparison
 declare nodiffst=false	# exclude the diff stat at the top of patch
 declare verbose=false	# print whether or not files are congruent
 declare vverbose=false	# print each line compared
+declare verbosity=0	# level of verbose-ness
 declare -i optcnt=0	# count the options
+declare b_stdout=true	# indicates output is going to /dev/stdout
 
 # list of files in each directory
 #
@@ -140,14 +142,18 @@ while getopts hdpsvVo: OPTION; do
 	    let optcnt++
 	    ;;
 	v ) verbose=true	# print whether or not files are congruent
+	    vverbose=false
+	    verbosity=1
 	    let optcnt++
 	    ;;
 	V ) vverbose=true	# verbose, and print lines being compared
 	    verbose=true
+	    verbosity=2
 	    let optcnt++
 	    ;;
 	o ) ofile="$OPTARG"	# get the output file
 	    > $ofile		# zero the output file
+	    b_stdout=false	# notify that output is going to text file
 	    let optcnt++
 	    let optcnt++
 	    ;;
@@ -156,6 +162,11 @@ while getopts hdpsvVo: OPTION; do
 	    exit 127
     esac
 done
+
+# The verbose boolean is set for both verbose and vverbose conditions
+# If it is not set, then verbosity must be zero.
+#
+$verbose || verbosity=0
 
 # Shift past the options
 #
@@ -209,14 +220,14 @@ fprintf() {
 
 pr_header() {
 	fecho "================================================================"
-	fprintf "a %d: %s\n" $(($index+1)) "${faryA[$index]}"
-	fprintf "b %d: %s\n" $(($index+1)) "${faryB[$index]}"
+	fprintf "%d A: %s\n" $(($index+1)) "${faryA[$index]}"
+	fprintf "%d B: %s\n" $(($index+1)) "${faryB[$index]}"
 	fecho "----------------------------------------------------------------"
 }
 
 pr_start() {
-	fprintf "a %d: comparing from line: %5d\n" $(($index+1)) $((lcA+1))
-	fprintf "b %d: comparing from line: %5d\n" $(($index+1)) $((lcB+1))
+	fprintf "%d A: comparing from line: %5d\n" $(($index+1)) $((lcA+1))
+	fprintf "%d B: comparing from line: %5d\n" $(($index+1)) $((lcB+1))
 	$strict && fecho "Only comparing lines beginning with + or -"
 	fecho
 }
@@ -230,6 +241,13 @@ get_firstline_nodiffstat() {
 	while read line; do [ "${line:0:10}" == "diff --git" ] && break; let lcA++; done <&5
 	while read line; do [ "${line:0:10}" == "diff --git" ] && break; let lcB++; done <&6
 }
+
+# At this point, we know the level of verbosity of the output. We need
+# to notify scripted consumers of the output file what level of verbosity
+# to expect. We'll do this by writing a number into the first line of
+# the output file. If it's stdout, then we'll skip this step.
+#
+$b_stdout || fprintf "verbose level: %d\n" $verbosity
 
 # Loop through the pairs of files and look for differences in each pair.
 # The first file in the pair is the control. When it ends, the comparison
@@ -288,14 +306,14 @@ for ((index = 0; index < $fcountA; ++index)); do
 		fi
 
 		if $vverbose; then
-			fprintf "%5d: %s\n" $lcA "$lineA"
-			fprintf "%5d: %s\n" $lcB "$lineB"
+			fprintf "%5d A: %s\n" $lcA "$lineA"
+			fprintf "%5d B: %s\n" $lcB "$lineB"
 			fecho
 		fi
 
 		if [ "$lineA" != "$lineB" ]; then
 			equiv=false
-			! $verbose && fecho $((index+1))
+			! $verbose && fecho "PATCH: $((index+1))"
 			break
 		fi
 	done <&5
@@ -303,8 +321,8 @@ for ((index = 0; index < $fcountA; ++index)); do
 	# How to do a if-then-if-then-else-fi-fi on one line ;)
 	#
 	$verbose && { $equiv \
-		&& fprintf "%d: == patches are congruent ==\n" $((index+1)) \
-		|| fprintf "%d: != patches are different !=\n" $((index+1)); }
+		&& fprintf "PATCH: %d: == patches are congruent ==\n" $((index+1)) \
+		|| fprintf "PATCH: %d: != patches are different !=\n" $((index+1)); }
 
 	$vverbose && fecho
 
