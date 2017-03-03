@@ -60,6 +60,7 @@ declare rc_run=1	# Run patchdevelop
 
 function exit_patchdevelop {
 	set_booleans
+	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
 	exit $1
 }
 
@@ -125,18 +126,18 @@ function show_settings {
 cat <<EOF
 $BLD
     $UND\0Environment        $OFF$BLD
-    Most recent tag             :$OFF $(git describe --tags --abbrev=0)$BLD
- b  Current git branch		:$OFF $gitbranch$BLD
+    Most recent tag             :$OFF $lasttag$BLD
+ b  Current git branch          :$OFF $gitbranch$BLD
  m  Mail client                 :$OFF $mailclient$BLD
- d  Patch directory		:$OFF $indir$BLD has$OFF $infilecount$BLD files
- w  Work directory		:$OFF $outdir$BLD
+ d  Patch directory             :$OFF $indir$BLD has$OFF $infilecount$BLD files
+ w  Work directory              :$OFF $outdir$BLD
 
     $UND\0Run Parameters     $OFF$BLD
- 1  Rename input files		:$OFF $b_rename_infiles$BLD
- 2  Apply patches (git am)	:$OFF $b_apply_patches$BLD
- 3  git am abort on error  	:$OFF $b_gitam_err_abort$BLD
- 4  Format upstream patches	:$OFF $b_fmt_upstream$BLD
- 5  Compare patchsets		:$OFF $b_patcmp$BLD
+ 1  Rename input files          :$OFF $b_rename_infiles$BLD
+ 2  Apply patches (git am)      :$OFF $b_apply_patches$BLD
+ 3  git am abort on error       :$OFF $b_gitam_err_abort$BLD
+ 4  Format upstream patches     :$OFF $b_fmt_upstream$BLD
+ 5  Compare patchsets           :$OFF $b_patcmp$BLD
  6  Batch compare patchsets     :$OFF $b_patbatcmp$BLD
 
     $UND\0Control            $OFF$BLD
@@ -257,6 +258,18 @@ echo -en "$OFF"
 ###########################################
 # Parameter Initialization
 ###########################################
+
+echo -n "Getting last git tag.."
+git describe --tags --abbrev=0 > /dev/shm/lasttag &
+
+while true; do
+	echo -n "."
+	[ -e /dev/shm/lasttag ] && break
+	sleep 1
+done
+
+echo
+lasttag=$(cat /dev/shm/lasttag)
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.

@@ -31,6 +31,9 @@ declare -i mmindex
 declare -i mismatch_count
 declare -a mismatch_array
 
+declare lasttag=""
+declare rmlasttag=false
+
 usage() {
 	echo
 	echo "usage: patcmp dir-1 dir-2 [special action string]"
@@ -251,6 +254,21 @@ inarray() {
 	return 1
 }
 
+getlasttag() {
+
+	echo -n "Getting last git tag.."
+	git describe --tags --abbrev=0 > /dev/shm/lasttag &
+
+	while true; do
+		echo -n "."
+		[ -e /dev/shm/lasttag ] && break
+		sleep 1
+	done
+
+	echo
+	rmlasttag=true
+}
+
 #############################################
 # Main program loop
 ############################################
@@ -260,6 +278,9 @@ inarray() {
 mmindex=0
 $b_runmismatch && index=${mismatch_array[$mmindex]} || index=0
 # echo "starting index: $index"
+
+[ -e /dev/shm/lasttag ] || getlasttag
+lasttag=$(cat /dev/shm/lasttag)
 
 while true; do
 
@@ -287,7 +308,7 @@ while true; do
 		index=0
 	fi
 	echo -en "$BLD"
-	echo -e  "\t    Last Tag :$OFF $(git describe --tags --abbrev=0)$BLD"
+	echo -e  "\t    Last Tag :$OFF $lasttag$BLD"
 	echo -e  "\t    RHEL dir :$OFF $mldir$BLD"
 	echo -e  "\tUpstream dir :$OFF $usdir$BLD"
 	echo -e "-----------------------------------------------------------------"
@@ -310,6 +331,7 @@ while true; do
 		d )	break
 			;;
 		q )	echo
+			$rmlasttag && rm -f /dev/shm/lasttag
 			exit $code_special_exit
 			;;
 		f )	echo

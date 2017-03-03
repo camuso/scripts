@@ -63,6 +63,7 @@ declare rc_run=1	# Run patchreview
 
 function exit_patchreview {
 	set_booleans
+	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
 	exit $1
 }
 
@@ -106,7 +107,6 @@ function get_booleans {
 		let index++
 	done
 }
-
 
 # set_booleans
 #
@@ -189,7 +189,7 @@ function show_settings {
 cat <<EOF
 $BLD
     $UND\0Environment        $OFF$BLD
-    Most recent tag             :$OFF $(git describe --tags --abbrev=0)$BLD
+    Most recent tag             :$OFF $lasttag$BLD
  b  Current git branch          :$OFF $gitbranch$BLD
  m  Mail client                 :$OFF $mailclient$BLD
  d  RHEL Patch directory        :$OFF $indir$BLD has$OFF $infilecount$BLD files
@@ -339,6 +339,18 @@ echo -en "$OFF"
 ###########################################
 # Parameter Initialization
 ###########################################
+
+echo -n "Getting last git tag.."
+git describe --tags --abbrev=0 > /dev/shm/lasttag &
+
+while true; do
+	echo -n "."
+	[ -e /dev/shm/lasttag ] && break
+	sleep 1
+done
+
+echo
+lasttag=$(cat /dev/shm/lasttag)
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.

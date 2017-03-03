@@ -53,6 +53,9 @@ declare pfile="" 	# passed output file takes precedence over the
 declare rhfcount=0
 declare usfcount=0
 
+declare lasttag=""
+declare rmlasttag=false
+
 declare usagestr=$(
 cat <<EOF
 
@@ -204,7 +207,7 @@ $BLD
      $UND\0Batch Comparison of RHEL Patches with Upstream$OFF$BLD
 
      $UND\0Environment       $OFF$BLD
-     Most Recent Tag            : $OFF$(git describe --tags --abbrev=0)$BLD
+     Most Recent Tag            : $OFF$lasttag$BLD
   R  RHEL directory             : $OFF$rhdir$BLD has $OFF$rhfcount$BLD patch files
   U  Upstream directory         : $OFF$usdir$BLD has$OFF $usfcount$BLD patch files
   o  Optional output file.      : $OFF$ofile$BLD
@@ -278,7 +281,8 @@ menu_parser() {
 		x )	ui_sh_spawn
 			;;
 		q )	set_booleans
-			exit -127
+			$rmlasttag && rm -f /dev/shm/lasttag
+			exit 0
 			;;
 	esac
 	return $rc_continue
@@ -317,9 +321,27 @@ check_dir() {
 	eval $3=$dirname
 }
 
+getlasttag() {
+
+	echo -n "Getting last git tag.."
+	git describe --tags --abbrev=0 > /dev/shm/lasttag &
+
+	while true; do
+		echo -n "."
+		[ -e /dev/shm/lasttag ] && break
+		sleep 1
+	done
+
+	echo
+	rmlasttag=true
+}
+
 #############################
 # Start of Script Execution
 #############################
+
+[ -e /dev/shm/lasttag ] || getlasttag
+lasttag=$(cat /dev/shm/lasttag)
 
 # Parse the options, if any
 #
