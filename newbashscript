@@ -4,43 +4,111 @@
 # a usage function
 #
 
-if [ -f "$1" ]; then
-	echo
-	echo "File $1 already exists!"
-	echo
-	exit 1
-fi
+declare b_opts=false
+declare b_args=false
+declare b_answer
+declare -a args
+declare -i argcount=0
+declare -i optcount=0
+declare -i index
+declare ofile="$1"
 
-usagestr=$(
+declare usagestr=$(
 cat <<EOF
 
-$(basename $0) <bashscript>
+$(basename $0) [ options ] <bashscript>
 
 Create an empty bash script with placeholders for help text and
 a usage function
 
-\\0
+  -o options, a quote enclosed string containing a list of space separated
+     option flags with optional corresponding arguments.
+
+     Example: "n:number f:file d:directory x h"
+
+     Creates options for -n number,  -f file, -d directory, -x and -h
+     with no arguments.
+
+  -a arguments, double quote enclosed string of arguments that follow 
+     the options for the new script being created.
+     If the number of arguments following the options is not exactly
+     this number, then the newly created script will print its usage
+     message and exit.
+\0
 EOF
 )
+
+source lib/getyn
 
 usage() {
 	echo -e "$usagestr"
 	exit
 }
+
+if [ -f "$ofile" ]; then
+	echo
+	echo "File: $ofile already exists!"
+	getyn "Do you want to overwrite?" answer
+	$answer && echo "Overwriting file: $ofile" || exit 1
+fi
+
+while getopts o:a: OPTION; do
+    case "$OPTION" in
+
+	o ) opts=$OPTARG
+	    b_opts=true
+	    optcount=$((optcount+2))
+	    ;;
+    	a ) args=($OPTARG)
+	    b_args=true
+	    optcount=$((optcount+2))
+	    ;;
+	* ) echo "unrecognized option"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
 
 [ $# -eq 1 ] || usage
 
-echo -e '#!/bin/bash
+argcount=$#
+
+> $ofile
+
+echo -en '
+#!/bin/bash
 #
-# '"$1"'
+# '"$ofile"'
 #
 
-usagestr=$(
+declare -i optcount=0
+' >> $ofile
+
+if $b_opts; then
+	$b_args && createoptions $ofile "$opts" "$args" \
+	        || createoptions $ofile "$opts"
+	exit 0
+fi
+
+
+echo -en 'declare usagestr=$(
 cat <<EOF
 
-$(basename $0)
+$(basename $0)' >> $ofile
 
-\\0
+$b_args && echo -en " ""${args[@]}" >> $ofile
+
+index=0
+while arg in ${args[@]}; do
+	echo -e "   ""${arg[$index]}"" - "
+	let index++
+done
+argcount=$index
+
+echo -en '
+\0
 EOF
 )
 
@@ -49,7 +117,8 @@ usage() {
 	exit
 }
 
-[ $# -gt 0 ] || usage
-' >> $1
+[ $# -eq ' "$argcount"' ] || usage
+' >> $ofile
 
-chmod +x "$1"
+chmod +x "$ofile"
+

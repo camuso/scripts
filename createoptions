@@ -17,7 +17,7 @@
 usagestr=$(
 cat <<EOF
 
-$(basename "$0") script "opt opt opt:arg"
+$(basename "$0") script "opt opt opt:arg" arg1 arg2 ... argn
 
 Appends the lines required to implement parsing an options list to a
 bash script.
@@ -28,11 +28,20 @@ options	- string containing a list of space separated option flags and
 	  optional corresponding arguments.
 
 Example:
-	createoptions myscript.sh "n:number f:file d:directory x h"
+	createoptions myscript.sh "n:num f:file d:dir x h" arg1 arg2
 
-	Creates options for -n number,  -f file, -d directory, -x and -h
-	with no arguments, presumably to invoke a function. These options
-	and their corresponding case statement are appended to myscript.sh.
+	Creates options for -n num, -f file, -d dir. These will be
+	declared in myscript.sh
+
+	The -x and -h options have no optargs, presumably to invoke a
+	function or set a boolean.
+
+	A usage string will be created that lists the opts and their
+	optargs. Additionally, arg1 and arg2 are appended to the usage
+	string.
+
+	The opts:optargs and their corresponding case statement are
+	appended to the end of myscript.sh.
 \0
 EOF
 )
@@ -57,6 +66,8 @@ declare -i sz_arg
 declare -i sz_prevarg
 declare -a optflgarray
 declare -a opgargarray
+declare -a lineargs
+
 optflg=""
 optarg=""
 
@@ -76,25 +87,37 @@ optarg=""
 #	optflg = g  optarg = 
 #
 index=0
-sz_prevarg=0
-for opt in $optstr; do
-	optarg=${opt:2}
-	optflg=${opt:0:2}
+sz_prevarg=0				# example opt:arg is d:dir
+for opt in $optstr; do			# d:dir
+	optarg=${opt:2}			#   dir
+	optflg=${opt:0:2}		# d:
 	optflgarray[index]=$optflg
 	optargarray[index]=$optarg
+	let index++
+
+	# get the width of the widest OPTARG
+	#
 	sz_arg=${#optarg}
 	[ $sz_arg -gt $sz_prevarg ] && sz_prevarg=$sz_arg
-	let index++
 done
 optcount=$index
+
+# Shift past the first argument, which was a string of options.
+# If the user passed other arguments when invoking this script
+# then gather them now.
+#
+shift
+lineargs=($@)
 
 # Now that we've created the options flags and args arrays, lets start
 # writing stuff into the file.
 #
-echo "" >> $file
-echo "usagestr=\$(
+echo -en 'declare usagestr=$(
 cat <<EOF
-\$0 [OPTION]" >> $file
+
+$(basename $0) [options]' >> $file
+
+[ "$lineargs" ] && echo -e " ""${lineargs[*]}\n" >> $file
 
 index=0
 while [ $index -lt $optcount ]; do
