@@ -9,7 +9,7 @@ source lib/formatargs
 
 declare b_opts=false
 declare b_args=false
-declare b_answer
+declare b_answer=false
 declare -a args
 declare -i argcount=0
 declare -i optcount=0
@@ -86,7 +86,6 @@ echo -en '#!/bin/bash
 # '"$ofile"'
 #
 
-declare -i optcount=0
 ' >> $ofile
 
 if $b_opts; then
@@ -108,10 +107,11 @@ EOF
 
 usage() {
 	echo -e "$usagestr"
-	exit
+	exit $1
 }
 
-[ $# -eq ' "$argcount"' ] || usage
+shift $optcount
+[ $# -eq  "$argcount" ] || usage 1
 
 ' >> $ofile
 

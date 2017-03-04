@@ -15,7 +15,6 @@
 #####################################################################
 
 source lib/formatargs
-source lib/out2file
 
 usagestr=$(
 cat <<EOF
@@ -59,7 +58,7 @@ EOF
 
 usage() {
 	echo -e "$usagestr"
-	exit
+	exit $1
 }
 
 echo "arg line: $@"
@@ -98,16 +97,12 @@ while getopts ho:a: OPTION; do
 	h ) usage
 	    ;;
 	* ) echo "unrecognized option"
-	    echo -e "$usagestr"
-	    exit 127
+	    usage 127
+	    ;;
     esac
 done
 
-echo "optcount: $optcount"
-echo "args-before: $@"
 shift $optcount
-echo "args-after : $@"
-
 [ $# -eq 1 ] || usage
 file=$1
 
@@ -176,9 +171,16 @@ while [ $index -lt $optnum ]; do
 	let index++
 done
 
-echo "\\0
+echo '\\0
 EOF
-)" >> $file
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+' >> $file
 
 # Create the internal options string before writing it out to the file.
 # We will re-use the "optstr" variable that was set to an input arg
@@ -225,6 +227,7 @@ echo -en "\t    exit 127\n" >> $file
 echo "    esac" >> $file
 echo "done" >> $file
 echo >> $file
-echo "[ ?# -eq $argcount ] || usage" >> $file
+echo 'shift $optcount' >> $file
+echo '[ $# -eq '"$argcount ] || usage 1" >> $file
 echo >> $file
 
