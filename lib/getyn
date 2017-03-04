@@ -19,16 +19,16 @@
 getyn() {
 
 	local promptstring="$1"
-	local answer
+	local __answer__
 	local stat
 
 	while true; do
 		echo -en "$promptstring (y/n) : "
-		read -n1 answer
+		read -n1 __answer__
 		echo
 
-		[ "$answer" == "y" ] && stat=true  && break
-		[ "$answer" == "n" ] && stat=false && break
+		[ "$__answer__" == "y" ] && stat=true  && break
+		[ "$__answer__" == "n" ] && stat=false && break
 
 		echo "Please answer y or n."
 	done
