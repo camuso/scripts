@@ -4,6 +4,9 @@
 # a usage function
 #
 
+source lib/getyn
+source lib/formatargs
+
 declare b_opts=false
 declare b_args=false
 declare b_answer
@@ -11,7 +14,10 @@ declare -a args
 declare -i argcount=0
 declare -i optcount=0
 declare -i index
-declare ofile="$1"
+declare -i width
+declare -i widest
+declare spacer="  "
+declare ofile
 
 declare usagestr=$(
 cat <<EOF
@@ -38,21 +44,12 @@ a usage function
 EOF
 )
 
-source lib/getyn
-
 usage() {
 	echo -e "$usagestr"
 	exit
 }
 
-if [ -f "$ofile" ]; then
-	echo
-	echo "File: $ofile already exists!"
-	getyn "Do you want to overwrite?" answer
-	$answer && echo "Overwriting file: $ofile" || exit 1
-fi
-
-while getopts o:a: OPTION; do
+while getopts ho:a: OPTION; do
     case "$OPTION" in
 
 	o ) opts=$OPTARG
@@ -63,6 +60,8 @@ while getopts o:a: OPTION; do
 	    b_args=true
 	    optcount=$((optcount+2))
 	    ;;
+	h ) usage
+	    ;;
 	* ) echo "unrecognized option"
 	    echo -e "$usagestr"
 	    exit 127
@@ -70,15 +69,19 @@ while getopts o:a: OPTION; do
 done
 
 shift $optcount
-
 [ $# -eq 1 ] || usage
+ofile=$1
 
-argcount=$#
+if [ -f "$ofile" ]; then
+	echo
+	echo "File: $ofile already exists!"
+	getyn "Do you want to overwrite?" answer
+	$answer && echo "Overwriting file: $ofile" || exit 1
+fi
 
 > $ofile
 
-echo -en '
-#!/bin/bash
+echo -en '#!/bin/bash
 #
 # '"$ofile"'
 #
@@ -87,28 +90,20 @@ declare -i optcount=0
 ' >> $ofile
 
 if $b_opts; then
-	$b_args && createoptions $ofile "$opts" "$args" \
-	        || createoptions $ofile "$opts"
+	$b_args && createoptions -o "$opts" -a "$args" $ofile \
+	        || createoptions -o "$opts" $ofile
 	exit 0
 fi
-
 
 echo -en 'declare usagestr=$(
 cat <<EOF
 
 $(basename $0)' >> $ofile
 
-$b_args && echo -en " ""${args[@]}" >> $ofile
+$b_args && formatargs $ofile "${args[*]}" argcount || echo >> $ofile
 
-index=0
-while arg in ${args[@]}; do
-	echo -e "   ""${arg[$index]}"" - "
-	let index++
-done
-argcount=$index
 
-echo -en '
-\0
+echo -en '\\0
 EOF
 )
 
@@ -118,6 +113,7 @@ usage() {
 }
 
 [ $# -eq ' "$argcount"' ] || usage
+
 ' >> $ofile
 
 chmod +x "$ofile"
