@@ -2,7 +2,7 @@
 
 #####################################################################
 #
-# createoptions v1.0
+# createoptions v2.0
 #
 # Appends the lines required to implement parsing an options list in
 # a bash script.
@@ -14,21 +14,30 @@
 # usage creatoptions file "opt opt opt:arg opt"
 #####################################################################
 
+source lib/formatargs
+source lib/out2file
+
 usagestr=$(
 cat <<EOF
 
-$(basename "$0") script "opt opt opt:arg" arg1 arg2 ... argn
+$(basename "$0") -o "opt opt opt:arg" [-a "arg1 arg2 ... argn"] script
 
 Appends the lines required to implement parsing an options list to a
 bash script.
 
-script	- the script file to receive the options
+  -o - options REQUIRED
+       A string containing a list of space separated option flags and
+       optional corresponding arguments.
 
-options	- string containing a list of space separated option flags and
-	  optional corresponding arguments.
+  -a - arguments OPTIONAL
+       A script may have arguments after the hyphenated options and
+       any arguments to which they may be bound.
 
+  script - REQUIRED
+           The filename of the script into which these options will
+	   be written.
 Example:
-	createoptions myscript.sh "n:num f:file d:dir x h" arg1 arg2
+	createoptions -o "n:num f:fil d:dir x h" -a "arg1 arg2" scriptfile
 
 	Creates options for -n num, -f file, -d dir. These will be
 	declared in myscript.sh
@@ -42,6 +51,8 @@ Example:
 
 	The opts:optargs and their corresponding case statement are
 	appended to the end of myscript.sh.
+
+script	- the script file to receive the options
 \0
 EOF
 )
@@ -51,25 +62,58 @@ usage() {
 	exit
 }
 
-
-[ "$1" == "-h" ] && usage
-[ $# -gt 0 ] || usage
+echo "arg line: $@"
 
 # Declarations are unnecessary, but they are helpful
 #
-file="$1"	#
-optstr="$2"	# string containing the options
+declare b_opts		# options belonging to THIS script
+declare b_args		# arguments belonging to THIS script
+declare -i index=0
+declare -i optcount=0	# counts opts for THIS script
+declare -i optnum=0	# the number of optioins passed to the created script
+declare -i argcount=0	# counts any args to pass to the created script
+declare -i width=0	# width of an opt or arg
+declare -i widest=0	# width of widest opt or arg
+declare -a optflgarray	# array containing the actual hyphenated options
+declare -a opgargarray	# the arguments to which the options are bound
+declare -a argstr	# the additional args to pass to the created script
+declare -a optstr	# the string of options to pass to the created script
+declare file
+declare b_lineargs
+declare spacer="  "
 
-declare -i index
-declare -i optcount
-declare -i sz_arg
-declare -i sz_prevarg
-declare -a optflgarray
-declare -a opgargarray
-declare -a lineargs
+while getopts ho:a: OPTION; do
+    case "$OPTION" in
+
+	o ) optstr=$OPTARG
+	    b_opts=true
+	    optcount=$((optcount+2))
+	    echo $optstr
+	    ;;
+	a ) argstr=$OPTARG
+	    b_args=true
+	    optcount=$((optcount+2))
+	    echo "argstr: $argstr"
+	    ;;
+	h ) usage
+	    ;;
+	* ) echo "unrecognized option"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+echo "optcount: $optcount"
+echo "args-before: $@"
+shift $optcount
+echo "args-after : $@"
+
+[ $# -eq 1 ] || usage
+file=$1
 
 optflg=""
 optarg=""
+
 
 # Create an array of options flags and arguments for those options
 # flags. For example, a command line like this:
@@ -87,7 +131,7 @@ optarg=""
 #	optflg = g  optarg = 
 #
 index=0
-sz_prevarg=0				# example opt:arg is d:dir
+widest=0				# example opt:arg is d:dir
 for opt in $optstr; do			# d:dir
 	optarg=${opt:2}			#   dir
 	optflg=${opt:0:2}		# d:
@@ -97,45 +141,44 @@ for opt in $optstr; do			# d:dir
 
 	# get the width of the widest OPTARG
 	#
-	sz_arg=${#optarg}
-	[ $sz_arg -gt $sz_prevarg ] && sz_prevarg=$sz_arg
+	width=${#optarg}
+	[ $width -gt $widest ] && widest=$width
 done
-optcount=$index
-
-# Shift past the first argument, which was a string of options.
-# If the user passed other arguments when invoking this script
-# then gather them now.
-#
-shift
-lineargs=($@)
+optnum=$index
 
 # Now that we've created the options flags and args arrays, lets start
 # writing stuff into the file.
 #
-echo -en 'declare usagestr=$(
+echo -en '
+declare -i optcount=0
+
+declare usagestr=$(
 cat <<EOF
 
 $(basename $0) [options]' >> $file
 
-[ "$lineargs" ] && echo -e " ""${lineargs[*]}\n" >> $file
+$b_args && formatargs $file "${argstr[@]}" argcount
+
+printf "\n%sOptions\n" "$spacer" >> $file
+printf   "%s-------\n" "$spacer" >> $file
 
 index=0
-while [ $index -lt $optcount ]; do
+while [ $index -lt $optnum ]; do
 	optflg=${optflgarray[$index]}
 	optflg=${optflg:0:1}
-	printf "  -%-2s" $optflg >> $file
-	#
+	printf "%s-%-2s" "$spacer" "$optflg" >> $file
+
 	# The following line puts the optional argument in a fixed
-	# width field determined by sz_prevarg in the previous loop.
+	# width field determined by widest in the previous loop.
 	#
-	printf "%-${sz_prevarg}s - \n" ${optargarray[$index]}  >> $file
+	printf "%-${widest}s - \n" ${optargarray[$index]}  >> $file
 	echo "optflg = ${optflgarray[$index]} optarg = ${optargarray[$index]}"
 	let index++
 done
 
-echo "EOF
+echo "\\0
+EOF
 )" >> $file
-echo "" $file
 
 # Create the internal options string before writing it out to the file.
 # We will re-use the "optstr" variable that was set to an input arg
@@ -144,7 +187,7 @@ echo "" $file
 index=0
 optstr=""
 tmpstr=""
-while [ $index -lt $optcount ]; do
+while [ $index -lt $optnum ]; do
 	optstr="$optstr${optflgarray[$index]}"
 	let index++
 done
@@ -157,13 +200,21 @@ while getopts "$optstr" OPTION; do
 
 index=0
 
-while [ $index -lt $optcount ]; do
+while [ $index -lt $optnum ]; do
 	optflg=${optflgarray[$index]}
 	optflg=${optflg:0:1}
 	optarg=${optargarray[$index]}
 	echo -en "\t$optflg ) " >> $file
-	[[ $optarg ]] && echo -en "$optarg=\$OPTARG" >> $file
-	echo -en "\n\t    ;;\n" >> $file
+
+
+	if [[ $optarg ]]; then
+		echo -e "$optarg=\$OPTARG" >> $file
+		echo -e "\t    "'optcount=$((optcount+2))' >> $file
+	else
+		echo -e 'optcount=$((optcount+1))' >> $file
+	fi
+
+	echo -en "\t    ;;\n" >> $file
 	let index++
 done
 
@@ -173,5 +224,7 @@ echo -en "\t    echo -e \"\$usagestr\"\n" >> $file
 echo -en "\t    exit 127\n" >> $file
 echo "    esac" >> $file
 echo "done" >> $file
-echo "" >> $file
+echo >> $file
+echo "[ ?# -eq $argcount ] || usage" >> $file
+echo >> $file
 
