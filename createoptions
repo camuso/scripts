@@ -66,7 +66,7 @@ echo "arg line: $@"
 # Declarations are unnecessary, but they are helpful
 #
 declare b_opts		# options belonging to THIS script
-declare b_args		# arguments belonging to THIS script
+declare b_args=false	# arguments belonging to THIS script
 declare -i index=0
 declare -i optcount=0	# counts opts for THIS script
 declare -i optnum=0	# the number of optioins passed to the created script
@@ -87,12 +87,12 @@ while getopts ho:a: OPTION; do
 	o ) optstr=$OPTARG
 	    b_opts=true
 	    optcount=$((optcount+2))
-	    echo $optstr
+	    echo -e "opts: $optstr"
 	    ;;
 	a ) argstr=$OPTARG
 	    b_args=true
 	    optcount=$((optcount+2))
-	    echo "argstr: $argstr"
+	    echo -e "args:""$argstr"
 	    ;;
 	h ) usage
 	    ;;
@@ -155,7 +155,6 @@ $(basename $0) [options]' >> $file
 $b_args && formatargs $file "${argstr[@]}" argcount
 
 printf "\n%sOptions\n" "$spacer" >> $file
-printf   "%s-------\n" "$spacer" >> $file
 
 index=0
 while [ $index -lt $optnum ]; do
@@ -171,7 +170,7 @@ while [ $index -lt $optnum ]; do
 	let index++
 done
 
-echo '\\0
+echo -n '\0
 EOF
 )
 
@@ -179,7 +178,6 @@ usage() {
 	echo -e "$usagestr"
 	exit $1
 }
-
 ' >> $file
 
 # Create the internal options string before writing it out to the file.
@@ -224,10 +222,8 @@ echo -en "\t* ) " >> $file
 echo -en "echo \"unrecognized option -\$OPTION\"\n" >> $file
 echo -en "\t    echo -e \"\$usagestr\"\n" >> $file
 echo -en "\t    exit 127\n" >> $file
-echo "    esac" >> $file
-echo "done" >> $file
-echo >> $file
-echo 'shift $optcount' >> $file
-echo '[ $# -eq '"$argcount ] || usage 1" >> $file
-echo >> $file
+echo -e  "    esac" >> $file
+echo -e  "done\n" >> $file
+echo -e  'shift $optcount' >> $file
+echo -e  '[ $# -eq '"$argcount ] || usage 1\n" >> $file
 

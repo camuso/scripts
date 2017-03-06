@@ -6,8 +6,6 @@
 #
 # Useful for populating usage strings with the argument list.
 #
-#  Arguments
-#  ---------
 #  ofile  - the output file
 #  argstr - a string containing the arguments to be processed
 #  argcnt - returns the number of arguments processed
@@ -21,10 +19,7 @@ formatargs() {
 	local -i widest
 	local -i index
 
-	echo -e " "${args[@]}"\n" >> $ofile
-
-	echo "${spacer}Arguments" >> $ofile
-	echo "${spacer}---------" >> $ofile
+	echo -e " "${args[@]}"\n\n" >> $ofile
 
 	# find the widest arg to use its space to create a nicely aligned
 	# list of arguments

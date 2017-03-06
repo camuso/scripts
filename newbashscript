@@ -58,6 +58,7 @@ while getopts ho:a: OPTION; do
 	    ;;
 	a ) args=("$OPTARG")
 	    b_args=true
+	    echo "args: "$args""
 	    optcount=$((optcount+2))
 	    ;;
 	h ) usage
@@ -101,7 +102,7 @@ $(basename $0)' >> $ofile
 
 $b_args && formatargs $ofile "${args[*]}" argcount || echo >> $ofile
 
-echo -en '\\0
+echo -en '\0
 EOF
 )
 
