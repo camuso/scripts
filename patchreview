@@ -67,6 +67,14 @@ function exit_patchreview {
 	exit $1
 }
 
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	exit_patchreview $CTLC_EXIT
+}
+
 function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index true
@@ -319,6 +327,10 @@ function menu_loop {
 # Start of Script Execution
 #############################
 
+# Trap for control-c
+#
+trap control_c SIGINT
+
 # Save our current shell level.
 #
 myshlvl=$SHLVL
@@ -448,7 +460,7 @@ while true; do
 	fi
 
 	if $b_patcmp; then
-		patcmp $indir $outdir 'return to main menu'
+		patcmp -z 'return to main menu' $indir $outdir
 		stat=$?
 		[ $stat -eq 1 ] && continue
 		[ $stat -eq 2 ] && exit
@@ -456,7 +468,7 @@ while true; do
 
 	if $b_patbatcmp; then
 		patbatcmpmgr -R $indir -U $outdir -o $outdir/mm.log
-		patcmp $indir $outdir 'return to main menu'
+		patcmp -z 'return to main menu' -m $outdir/mm.log $indir $outdir
 		stat=$?
 		rm -f $outdir/mm.log
 		[ $stat -eq 1 ] && continue
