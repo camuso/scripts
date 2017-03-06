@@ -47,13 +47,13 @@ declare prj_file="$prj_dir/patbatcmpmgr.prj"
 declare rhdir		# directory containing RHEL patch files
 declare usdir		# directory containing upstream patch files
 declare ofile		# output file, default is /dev/stdout
-declare pfile="" 	# passed output file takes precedence over the
+declare pfile=	 	# passed output file takes precedence over the
 			# : output file stored in the project file
 
 declare rhfcount=0
 declare usfcount=0
 
-declare lasttag=""
+declare lasttag=
 declare rmlasttag=false
 
 declare usagestr=$(
@@ -144,6 +144,16 @@ declare rc_run=1	# Run comparison
 #######################################
 # Functions
 #######################################
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
+	exit $CTLC_EXIT
+}
+
 
 usage() {
 	echo -e "$usagestr"
@@ -339,6 +349,10 @@ getlasttag() {
 #############################
 # Start of Script Execution
 #############################
+
+# Trap for control-c
+#
+trap control_c SIGINT
 
 [ -e /dev/shm/lasttag ] || getlasttag
 lasttag=$(cat /dev/shm/lasttag)
