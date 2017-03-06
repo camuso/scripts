@@ -21,6 +21,11 @@ BLD="$attr_bold"
 UND="$attr_under"
 OFF="$attr_OFF"
 
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+#
+declare -i CTLC_EXIT=130
+
 #########################
 # Shell Routines
 #########################
