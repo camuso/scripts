@@ -166,26 +166,26 @@ backup() {
 # init_mismatch()
 #
 # initializes the following globals
-# 	b_runmismatch
-# 	mismatch_file
 # 	mismatch_count
 # 	first_mismatch
 # 	last_mismatch
 # 	mmindex
+#	index
 #
 init_mismatch() {
-	local line
-	local verbosity
-	local swqno
+	local line	# loop var gets each line in the mismatch_file
+	local verbosity	# level of verbosity in the mismatch_file
+	local seqno	# sequence number of patch
 
 	mmindex=0
-	b_runmismatch=true
 	mismatch_count=$(($(cat $mismatch_file | wc -l) -1))
 
 	# Determine the verbose level of the mismatch_file
 	#
 	line=$(readlinen 1 $mismatch_file)
 	verbosity=$(echo $line | cut -d':' -f2)
+
+	echo "Incongruent patches"
 
 	# create the array of mismatched patched file indexes. The index is
 	# 0-based, while the patch sequence number is 1-basd, so subtract 1
@@ -203,7 +203,7 @@ init_mismatch() {
 		seqno=$(echo $line | cut -d':' -f2)
 		mismatch_array[$mmindex]=$((seqno - 1))
 
-		echo ${mismatch_array[$mmindex]}
+		echo $seqno
 		let mmindex++
 	done < $mismatch_file
 
@@ -332,7 +332,7 @@ echo
 # set -x
 
 $b_runmismatch && init_mismatch || index=0
-echo "starting index: $index"
+echo "Starting with patch: $((index + 1))"
 
 # If the lasttag file does not exist, then go create it with a
 # call to getlasttag().
@@ -346,15 +346,22 @@ lasttag=$(cat /dev/shm/lasttag)
 
 while :; do
 
-	if [[ $index -ge $maxindex ]]; then
+	if [ $index -ge $maxindex ]; then
 		echo -e "     ******$BLD"
 		printf "Patch$OFF %04d$BLD is the last patch in the set.\n" \
 			$((maxindex + 1))
 		echo -e "$OFF     ******\n"
 	fi
 
+	if $b_runmismatch && [ $index -eq $last_mismatch ]; then
+		echo -e "     ******$BLD"
+		printf "Patch$OFF %04d$BLD is the last incongruent patch in the set.\n" \
+			$((last_mismatch + 1))
+		echo -e "$OFF     ******\n"
+	fi
+
 	$b_runmismatch && [ $(ui_inarray $index $mismatch_array) -eq 0 ] \
-		&& index=mmindex
+		&& index=${mismatch_array[$mmindex]}
 
 	echo -e "$BLD\0Interactively Compare Patches"
 	echo -e "-----------------------------------------------------------------"
@@ -433,7 +440,7 @@ while :; do
 		[[ $index -lt $last_mismatch ]] && let mmindex++
 		for ((i = 0; i < last_mismatch; ++i)); do echo ${mismatch_array[$i]}; done
 		index=${mismatch_array[$mmindex]}
-		echo "mmindex: $mmindex index: $index"
+		# echo "mmindex: $mmindex index: $index"
 	else
 		[[ $index -lt $maxindex ]] && let index++
 	fi
