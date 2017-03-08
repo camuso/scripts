@@ -243,7 +243,7 @@ getlasttag() {
 
 	while true; do
 		echo -n "."
-		[ -e /dev/shm/lasttag ] && break
+		[ -f /dev/shm/lasttag ] && break
 		sleep 1
 	done
 
@@ -337,7 +337,7 @@ echo "starting index: $index"
 # If the lasttag file does not exist, then go create it with a
 # call to getlasttag().
 #
-[ -e /dev/shm/lasttag ] || getlasttag
+[ -f /dev/shm/lasttag ] && rmlasttag=true || getlasttag
 lasttag=$(cat /dev/shm/lasttag)
 
 #############################################
