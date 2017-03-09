@@ -202,6 +202,7 @@ $BLD
  m  Mail client                 :$OFF $mailclient$BLD
  d  RHEL Patch directory        :$OFF $indir$BLD has$OFF $infilecount$BLD files
  w  Upstream patch directory    :$OFF $outdir$BLD
+ e  Editor                      :$OFF $editor$BLD
 
     $UND\0Run Parameters     $OFF$BLD
  1  Rename input files          : $OFF$b_rename_infiles$BLD
@@ -245,6 +246,8 @@ function menu_parser {
 		d )	prj_set_directory "RHEL" $prj_indir indir quiet
 			;;
 		w )	prj_set_directory "Upstream" $prj_outdir outdir quiet
+			;;
+		e )	set_editor
 			;;
 		1 )	ui_toggle b_rename_infiles
 			;;
@@ -308,6 +311,10 @@ function menu_loop {
 	mailclient=$(prj_get_item $prj_mailclient)
 	set_renameagent
 
+	# get the editor
+	#
+	editor=$(prj_get_item $prj_editor)
+
 	# delete any "scratch" file from the indir
 	#
 	rm -f "$indir"/scratch
@@ -369,6 +376,7 @@ lasttag=$(cat /dev/shm/lasttag)
 # Add new non-boolean parameters to the top of the list.
 #
 for offset in \
+prj_editor \
 prj_indir \
 prj_outdir \
 prj_mailclient \
@@ -460,7 +468,7 @@ while true; do
 	fi
 
 	if $b_patcmp; then
-		patcmp -z 'return to main menu' $indir $outdir
+		patcmp -z 'return to main menu' $indir $outdir $editor
 		stat=$?
 		[ $stat -eq 1 ] && continue
 		[ $stat -eq 2 ] && exit
@@ -468,7 +476,8 @@ while true; do
 
 	if $b_patbatcmp; then
 		patbatcmpmgr -R $indir -U $outdir -o $outdir/mm.log
-		patcmp -z 'return to main menu' -m $outdir/mm.log $indir $outdir
+		patcmp -z 'return to main menu' -m $outdir/mm.log \
+			$indir $outdir $editor
 		stat=$?
 		rm -f $outdir/mm.log
 		[ $stat -eq 1 ] && continue

@@ -12,6 +12,7 @@ declare -i code_filecount_neq=102
 
 declare mldir
 declare usdir
+declare editor
 declare zstr=
 declare b_zstr=false
 
@@ -42,7 +43,7 @@ cat <<EOF
 
 $(basename $0) [options] dir-1 dir-2
 
-  Call vimdiff to compare the patch files in the two directories.
+  Call vimdiff ir ediff to compare the patch files in the two directories.
   The directories must have the same number of ".patch" files.
 
   -z zstr    - A special action string displayed for the 'z' menu
@@ -69,13 +70,17 @@ usage() {
 	exit $1
 }
 
+exit_patcmp() {
+	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
+	exit $1
+}
+
 # run if user hits control-c
 #
 control_c()
 {
 	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
-	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
-	exit $CTLC_EXIT
+	exit_patcmp $CTLC_EXIT
 }
 
 getpatchnumber() {
@@ -259,10 +264,11 @@ done
 # arguments.
 #
 shift $optcount
-[ $# -eq 2 ] || usage 1
+[ $# -eq 3 ] || usage 1
 
 mldir=$1
 usdir=$2
+editor=$3
 uscount=$(ls -1 "$usdir"/*.patch | wc -l)
 mlcount=$(ls -1 "$mldir"/*.patch | wc -l)
 maxindex=$((mlcount - 1))
@@ -376,8 +382,7 @@ while :; do
 		d )	break
 			;;
 		q )	echo
-			$rmlasttag && rm -f /dev/shm/lasttag
-			exit $code_special_exit
+			exit_patcmp $code_special_exit
 			;;
 		f )	echo
 			[[ $index -lt $maxindex ]] && index=$((index + 1)) || index=maxindex
@@ -405,12 +410,25 @@ while :; do
 			continue
 			;;
 		c )	patbatcmpmgr -R $mldir -U $usdir -o $usdir/mm.log
+			mismatch_file=$usdir/mm.log
+			b_runmismatch=true
 			init_mismatch
 			continue
 			;;
 	esac
 
-	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
+	case "$editor" in
+	    "Vim"   )	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
+			;;
+	    "Emacs" )	emacs --eval \
+			"(ediff-files \"${mlfiles[$index]}\" \"${usfiles[$index]}\")" \
+			-geometry 160x40
+			;;
+	    *       )	echo "$editor"" is not a supported editor."
+			exit_patcmp 1
+			;;
+	esac
+
 	preindex=$index
 
 	if $b_runmismatch; then

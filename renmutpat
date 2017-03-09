@@ -1,5 +1,13 @@
 #!/bin/bash
 
+remove_spaces()
+{
+    ls | while read -r FILE
+    do
+	mv -v "$FILE" `echo $FILE | tr ' ' '_' `
+    done
+}
+
 function usage {
 	echo
 	echo "renmutpat <directory>"
@@ -30,6 +38,10 @@ fi
 # Enable extglob for more specific directory actions
 #
 shopt -s extglob
+
+# remove spaces from filenames
+#
+remove_spaces
 
 # Don't try to rename files that have ".patch" endings, because
 # these have already been renamed.
