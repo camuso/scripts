@@ -30,6 +30,7 @@ declare patchcount=0
 declare sesdir="../.session"
 declare sesfile="sessions.log"
 declare commit_msg_file="commit-msg.txt"
+declare last_tag_file="/dev/shm/lasttag"
 
 declare prj_indir
 declare prj_outdir

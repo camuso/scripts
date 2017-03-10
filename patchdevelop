@@ -60,7 +60,7 @@ declare rc_run=1	# Run patchdevelop
 
 function exit_patchdevelop {
 	set_booleans
-	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
+	[ -e "$last_tag_file" ] && rm -f $last_tag_file
 	exit $1
 }
 
@@ -278,16 +278,16 @@ echo -en "$OFF"
 ###########################################
 
 echo -n "Getting last git tag.."
-git describe --tags --abbrev=0 > /dev/shm/lasttag &
+git describe --tags --abbrev=0 > $last_tag_file &
 
 while true; do
 	echo -n "."
-	[ -e /dev/shm/lasttag ] && break
+	[ -f "$last_tag_file" ] && break
 	sleep 1
 done
 
 echo
-lasttag=$(cat /dev/shm/lasttag)
+lasttag=$(cat $last_tag_file)
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
@@ -333,6 +333,7 @@ if [ $? -ne 0 ]; then
 	prj_set_directory "RHEL" $prj_indir indir quiet
 	prj_set_directory "Upstream" $prj_outdir outdir quiet
 	set_mailclient
+	set_editor
 	init_booleans
 fi
 
