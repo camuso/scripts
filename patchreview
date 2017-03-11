@@ -360,7 +360,7 @@ echo -en "$OFF"
 ###########################################
 
 echo -n "Getting last git tag.."
-git describe --tags --abbrev=0 > $tagfile &
+git describe --tags --abbrev=0 > $last_tag_file &
 
 while true; do
 	echo -n "."
