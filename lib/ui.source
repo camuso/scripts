@@ -195,7 +195,7 @@ function promptgetchar {
 # loop_yn()
 #
 # Loop until user gives either a y or n answer.
-# Simpler than the getyn() routine above. 
+# Simpler than the getyn() routine above.
 #
 # $1 - prompt string
 # $2 - the character to be returned
@@ -246,7 +246,7 @@ loop_range() {
 #		   the user types "q" (quit) or "x" (exit to shell)
 # $1 - prompt
 # $2 - returned filespec
-# 
+#
 function ui_getfilespec {
 	local prompt="$1"
 	local filespec
