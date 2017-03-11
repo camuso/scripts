@@ -21,8 +21,6 @@ declare -i mlcount
 
 declare -i index=0
 declare -i maxindex
-declare -i penindex
-declare -i preindex=0
 
 declare b_runmismatch=false
 declare mismatch_file
@@ -33,10 +31,13 @@ declare -i mismatch_count
 declare -a mismatch_array
 
 declare lasttag=
-declare rmlasttag=false
-declare mmfile=
+declare b_rmlasttag=false
+declare b_backup=false
 
 declare -i optcount=0
+
+declare -i notify_disable_mismatch=1
+declare -i notify_no_change=2
 
 declare usagestr=$(
 cat <<EOF
@@ -83,25 +84,164 @@ control_c()
 	exit_patcmp $CTLC_EXIT
 }
 
-getpatchnumber() {
-	index=-1
+# backup
+#
+# Will run the selected editor's diff on the patch pair previous to the
+# one that's about to be examined. Sequential calls to this routine will
+# backup to the patch prvious to the one just examined.
+#
+# $1 - current index
+# $2 - flag indicates the last patch pair was viewed by calling backup
+# $3 - returns the correct back_one index
+#
+backup() {
+	local curidx=$1
+	local back=$2
+	local idx=$curidx
+
+	let idx--
+
+	$back && let idx--
+
+	(($idx <= 0)) && idx=0
+
+	eval $3=$idx
+}
+
+# backup_wrapper - wraps the backup routine with globals
+#
+# Just want to keep the global crap isolated from the backup routine
+#
+# globals
+#	b_backup - set when the previous patch pair was examined after
+#	           a call to backup.
+#	index	-  the current index
+#	mmindex -  the current mismatch index, if we are in mismatch mode
+#
+backup_wrapper() {
+	if $b_runmismatch; then
+		backup $mmindex $b_backup mmindex
+		index=${mismatch_array[$mmindex]}
+	else
+		backup $index $b_backup index
+	fi
+}
+
+# notify_mismatch_mode
+#
+# $1 - patch number
+# $2 - contains the user's selection upon return
+#
+# Returns:
+# 	0 - user chose a valid patch number and it's in $2
+# 	1 - user chose to disable mismatch mode
+# 	2 - user chose to quit trying to select a specific patch
+#
+notify_mismatch_mode() {
+	local i
+	local patnum=$1
+	local idx
+	local choice
+
+	echo -e "
+You selected patch number$BLD $patnum $OFF
+However, we are running in mismatch mode. That means you must select a
+patch number from the numbers in the following list, or you can disable
+mismatch mode and continue with the patch number you originally selected,
+or you can return to the Interactively Compare Patches menu.
+
+"
+	for i in ${mismatch_array[@]} ; do
+		idx=${mismatch_array[i]}
+		printf "%4d " $((idx + 1))
+	done
+	echo -e "$BLD""Select a number from the list or"
+	echo -e "m - to disable mismatch mode and use$OFF $patnum $BLD"
+	echo -e "q - quit and do something else $OFF"
+
+	while :;do
+		getuser "Your choice: " choice
+
+		[ "$choice" == "m" ] && return notify_disable_mismatch
+		[ "$choice" == "q" ] && return notify_no_change
+
+		if [[ $choice =~ ^-?[0-9]+$ ]]; then
+			patnum=$choice
+			idx=$((patnum - 1))
+			[ $(ui_inarray $idx mismatch_array[@] mmindex) -eq 0 ] \
+				|| continue
+		fi
+	done
+
+	eval $2=$idx
+}
+
+# get_patch_number
+#
+# globals:
+# 	index
+#	mmindex
+#	b_runmismatch
+#
+get_patch_number() {
+	local retval
+	local patnum
+	local stat
+	local saved_mmindex=$mmindex
+	local saved_index=$index
+
+	echo -e "$BLD""Type 'q' to quit and pick up where you left off $OFF"
 	while true; do
-		getuser "Patch number: " index
-		if [ $index -lt 0 ] && [ $index -ge $mlcount ]; then
+		getuser "Patch number: " patnum
+		[ "$patnum" == "q" ] && break
+
+		if ! [[ $patnum =~ ^-?[0-9]+$ ]]; then
+			echo -e "$patnum ${BLD}is not a valid number.$OFF"
+			continue
+		fi
+
+		index=$((patnum - 1))
+
+		if [ $index -lt 0 ] || [ $index -ge $mlcount ]; then
 			echo -e "$BLD"
-			printf "Patch number %04d is not in this set" $index
+			echo -e "Patch number$OFF $patnum"$BLD" is not in this set"
 			echo -e "$OFF"
+
 			continue
 		else
-			index=$((index - 1 ))
 			break
+		fi
+
+		if b_runmismatch; then
+			if [ $(ui_inarray $index mismatch_array[@] mmindex) -ne 0 ];
+			then
+				notify_mismatch_mode $patnum retval
+				stat=$?
+			fi
+
+			case $stat in
+			    $notify_disable_mismatch )
+				ui_toggle b_runmismatch
+				index=$saved_index
+				mmindex=$saved_mmindex
+				break
+				;;
+			    $notify_no_change )
+				index=$saved_index
+				mmindex=$saved_mmindex
+				break
+				;;
+			esac
 		fi
 	done
 }
 
 # replace_commit
 #
-# $1 - one-based number of the patch in the patchset
+# globals
+#	b_backup - set when the previous patch pair was examined after
+#	           a call to backup.
+#	index	-  the current index
 #
 replace_commit() {
 	local patnum
@@ -110,24 +250,17 @@ replace_commit() {
 	local commitslog="$usdir/us-commits.log"
 	local pfx
 	local stat
-	local idx=$index
 
-	if (($index <= 0)); then
-		index=0
-	elif ((1 <= $index && $index <= $penindex)); then
-		let index--
-	elif (($index >= $maxindex)); then
-		index=$maxindex
-	fi
-
-	patnum=$((index + 1 ))
+	b_backup=false
+	backup_wrapper
+	patnum=$((index + 1))
 	pfx=$(printf "%04d" $patnum)
 
 	if ! [ -f "$commitslog" ]; then
 		ui_getfilespec "Path/File containing the commits: " commitslog
 	fi
-	patcnt=$(cat $commitslog | wc -l)
 
+	patcnt=$(cat $commitslog | wc -l)
 	rm -vf ${usfiles[$index]}
 	getuser "New commit ID: " commit
 	ui_replaceline $patnum "$commit $patnum/$patcnt" "$commitslog"
@@ -141,31 +274,6 @@ replace_commit() {
 	[ $stat -ne 0 ] && echo -e "\ninvalid commit: $commit\n" > $usdir/$pfx-inv.patch
 
 	usfiles[$index]=$(ls $usdir/$pfx-*.patch)
-
-}
-
-# backup - set index to value for previous diff'd files
-#
-# Globals:
-# 	index
-# 	maxindex
-# 	preindex
-# 	penindex
-#
-backup() {
-	local idx
-
-	$b_runmismatch && idx=$mmindex || idx=$index
-	let idx--
-
-	if (($idx <= 0)); then
-		idx=0
-	elif (( ( (1 <= $index) && ($index <= $penindex) )
-	     || ($preindex == $penindex) )); then
-		let idx--
-	fi
-
-	$b_runmismatch && mmindex=$idx || index=$idx
 }
 
 # init_mismatch()
@@ -183,7 +291,6 @@ init_mismatch() {
 	local seqno	# sequence number of patch
 
 	mmindex=0
-	mismatch_count=$(($(cat $mismatch_file | wc -l) -1))
 
 	# Determine the verbose level of the mismatch_file
 	#
@@ -212,7 +319,9 @@ init_mismatch() {
 		let mmindex++
 	done < $mismatch_file
 
-	last_mismatch=${mismatch_array[$(($mmindex - 1))]}
+	mismatch_count=$mmindex
+	echo "mismatch_count; $mismatch_count max mmindex: $((mmindex-1))"
+	last_mismatch=${mismatch_array[$((mmindex-1))]}
 	first_mismatch=${mismatch_array[0]}
 	index=$first_mismatch
 	mmindex=0
@@ -230,7 +339,15 @@ getlasttag() {
 	done
 
 	echo
-	rmlasttag=true
+	b_rmlasttag=true
+}
+
+vim_cmd() {
+	vimdiff "$1" "$2"
+}
+
+emacs_cmd() {
+	emacs --eval "(ediff-files \"$1\" \"$2\")" -geometry 160x40
 }
 
 #############################################
@@ -264,7 +381,7 @@ done
 # arguments.
 #
 shift $optcount
-[ $# -eq 3 ] || usage 1
+[ $# -eq 3 ] || usage $code_parmcount_err
 
 mldir=$1
 usdir=$2
@@ -272,7 +389,6 @@ editor=$3
 uscount=$(ls -1 "$usdir"/*.patch | wc -l)
 mlcount=$(ls -1 "$mldir"/*.patch | wc -l)
 maxindex=$((mlcount - 1))
-penindex=$((maxindex - 1))
 
 # It is not really required that the two directories have the same number
 # of files, because we will simply stop processing when we run out of files
@@ -290,11 +406,21 @@ if ((mlcount != uscount)); then
 	exit $code_filecount_neq
 fi
 
-echo
-echo "Patches in $mldir will be compared with patches in $usdir"
-echo
+case "$editor" in
+    "Vim"   )	editcmd=vim_cmd
+	    	;;
+    "Emacs" )	editcmd=emacs_cmd
+		;;
+    *       )	echo "$editor"" is not a supported editor."
+		exit_patcmp 1
+		;;
+esac
 
-# for i in $(ls "$mldir"/*.patch); do
+echo
+echo -e "$BLD\0Patches in$OFF $mldir$BLD will be compared with patches in$OFF $usdir"
+echo -e "$BLD\0Editor of choice is$OFF $editor"
+
+index=0
 for i in $(ls "$mldir"/*.patch  | sort -V); do
 	mlfiles[index]="$i"
 	echo "${mlfiles[$index]}"
@@ -303,7 +429,6 @@ done
 echo
 
 index=0
-#for i in $(ls "$usdir"/*.patch); do
 for i in $(ls "$usdir"/*.patch  | sort -V); do
 	usfiles[index]="$i"
 	echo "${usfiles[$index]}"
@@ -320,7 +445,7 @@ echo "Starting with patch: $((index + 1))"
 # If the lasttag file does not exist, then go create it with a
 # call to getlasttag().
 #
-[ -f /dev/shm/lasttag ] && rmlasttag=true || getlasttag
+[ -f /dev/shm/lasttag ] && b_rmlasttag=true || getlasttag
 lasttag=$(cat /dev/shm/lasttag)
 
 #############################################
@@ -328,6 +453,17 @@ lasttag=$(cat /dev/shm/lasttag)
 ############################################
 
 while :; do
+
+	if [ $index -lt 0 ] || [ $index -gt $maxindex ]; then
+		echo -e "$BLD\0There is no patch number:$OFF $((index + 1))."
+		if $b_runmismatch; then
+			mmindex=0
+			index=${mismatch_array[$mmindex]}
+		else
+			index=0
+		fi
+		echo -e "$BLD\0Starting with patch number:$OFF $((index + 1))\n"
+	fi
 
 	if [ $index -ge $maxindex ]; then
 		echo -e "     ******$BLD"
@@ -338,43 +474,40 @@ while :; do
 
 	if $b_runmismatch && [ $index -eq $last_mismatch ]; then
 		echo -e "     ******$BLD"
-		printf "Patch$OFF %04d$BLD is the last incongruent patch in the set.\n" \
+		printf "Patch$OFF %04d$BLD is the last mismatch in the set.\n" \
 			$((last_mismatch + 1))
 		echo -e "$OFF     ******\n"
 	fi
 
-	$b_runmismatch && [ $(ui_inarray $index $mismatch_array) -eq 0 ] \
-		&& index=${mismatch_array[$mmindex]}
+	if $b_runmismatch; then
+		[ $(ui_inarray $index mismatch_array[@]) -eq 0 ] \
+			&& index=${mismatch_array[$mmindex]} \
+			|| index=${mismatch_array[0]}
+	fi
 
 	echo -e "$BLD\0Interactively Compare Patches"
 	echo -e "-----------------------------------------------------------------"
 	echo -en "$OFF"
 	echo -e "$BLD\0Compare :$OFF $(basename ${mlfiles[$index]})"
-	# grep "Subject: " "${mlfiles[$index]}"
 	echo -e "   $BLD\0With :$OFF $(basename ${usfiles[$index]})"
-	# grep -m1 "Subject: " "${usfiles[$index]}"
 	echo
-	if [[ $index -lt 0 ]] || [[ $index -gt $maxindex ]]; then
-		echo -e "$BLD\0There is no patch number:$OFF $((index + 1))."
-		index=0
-	fi
+
 	echo -en "$BLD"
 	echo -e  "\t    Last Tag :$OFF $lasttag$BLD"
 	echo -e  "\t    RHEL dir :$OFF $mldir$BLD"
 	echo -e  "\tUpstream dir :$OFF $usdir$BLD"
 	echo -e "-----------------------------------------------------------------"
 	echo -e  "\tc - run batch file comparison"
-	[ -e "$mismatch_file" ] && \
+	[ -f "$mismatch_file" ] && \
 	echo -e  "\tm - only examine mismatched patch files:$OFF $b_runmismatch$BLD"
-	echo -e  "\tf - forward one patch"
-	echo -e  "\tb - back one patch"
+	echo -e  "\tb - back to the previous patch"
 	echo -e  "\tn - prompt for a number for a specific patch"
 	echo -e	 "\tp - replace current upstream patch with a different commit"
-	echo -e  "\tx - exit to a shell"
 	echo -e  "\td - done comparing patches"
-	echo -e  "\tq - quit execution"
+	echo -e  "\tx - spawns a secondary shell"
+	echo -e  "\tq - quit execution, returns to the primary shell"
 	$b_zstr && echo -e  "\tz - "$zstr""
-	echo -en "\tor any other key to continue ..."$OFF""
+	echo -en "\tor any other key moves forward to the next patch ..."$OFF""
 	read -n1 answer
 	echo
 
@@ -382,15 +515,15 @@ while :; do
 		d )	break
 			;;
 		q )	echo
-			exit_patcmp $code_special_exit
+			getyn "Quit and return to the command line?" bugout
+			$bugout && exit_patcmp $code_special_exit
 			;;
-		f )	echo
-			[[ $index -lt $maxindex ]] && index=$((index + 1)) || index=maxindex
-			;;
+
 		b )	echo
-			backup
+			backup_wrapper
+			b_backup=true
 			;;
-		n )	getpatchnumber
+		n )	get_patch_number
 			;;
 		p )	replace_commit
 			;;
@@ -400,44 +533,36 @@ while :; do
 			;;
 		z )	$b_zstr && exit $code_special_action || continue
 			;;
+
 		m )	# Unless a mismatch file exists, this option is meaningless.
 			#
-			[ -e "$mismatch_file" ] || { echo; continue; }
+			[ -f "$mismatch_file" ] || { echo; continue; }
 			ui_toggle b_runmismatch
 			$b_runmismatch && \
-				{ mmindex=0; index=${mismatch_array[0]}; } \
-				|| index=0
+				{ mmindex=0; index=${mismatch_array[0]}; }
 			continue
 			;;
+
 		c )	patbatcmpmgr -R $mldir -U $usdir -o $usdir/mm.log
 			mismatch_file=$usdir/mm.log
 			b_runmismatch=true
 			init_mismatch
 			continue
 			;;
-	esac
 
-	case "$editor" in
-	    "Vim"   )	vimdiff "${mlfiles[$index]}" "${usfiles[$index]}"
-			;;
-	    "Emacs" )	emacs --eval \
-			"(ediff-files \"${mlfiles[$index]}\" \"${usfiles[$index]}\")" \
-			-geometry 160x40
-			;;
-	    *       )	echo "$editor"" is not a supported editor."
-			exit_patcmp 1
+		* )	b_backup=false
 			;;
 	esac
 
-	preindex=$index
+	$editcmd "${mlfiles[$index]}" "${usfiles[$index]}"
 
 	if $b_runmismatch; then
-		[[ $index -lt $last_mismatch ]] && let mmindex++
-		for ((i = 0; i < last_mismatch; ++i)); do echo ${mismatch_array[$i]}; done
-		index=${mismatch_array[$mmindex]}
-		# echo "mmindex: $mmindex index: $index"
+		[ $index -lt $last_mismatch ] && let mmindex++
+		# index=${mismatch_array[$mmindex]}
+		echo "Forward mmindex: $mmindex index: $index"
 	else
-		[[ $index -lt $maxindex ]] && let index++
+		[ $index -lt $maxindex ] && let index++
+		# echo "Forward index: $index maxindex: $maxindex"
 	fi
 
 	echo
