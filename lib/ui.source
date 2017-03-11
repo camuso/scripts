@@ -107,52 +107,27 @@ b_ui_int_firstpass=true
 function getyn {
 
 	local promptstring="$1"
-	local answer
-	local stat
+	local __answer__
+	local __stat__
 
-	$b_ui_int_firstpass && eval savedp2=$2
-
-	if $b_ui_int_first_getyn; then
-		echo -e "$attr_bold"
-		echo -e "Throughout this script, whenever you see the \"(y/n)\" prompt,"
-		echo -e "you may press \"q\" to quit, or \"x\" to spawn a new shell."
-		echo -e "$attr_OFF"
-		b_ui_int_first_getyn=false
-	fi
 	while true; do
 
 		echo -en "$attr_bold$promptstring (y/n) : $attr_OFF"
-		read -n1 answer
+		read -n1 __answer__
 		echo
 
-		[ "$answer" == "q" ] && buhbye "$exitok"
-
-		if [ "$answer" == "y" ]; then
-			stat=true
+		if [ "$__answer__" == "y" ]; then
+			__stat__=true
 			break
 		fi
 
-		if [ "$answer" == "n" ]; then
-			stat=false
-			break
-		fi
-
-		if [ "$answer" == "x" ]; then
-			echo -e ""$attr_bold"Leaving shell $SHLVL, going to shell $(($SHLVL + 1))."
-			echo -e "Type \"ctrl-D\" or \"exit\" to return to shell $SHLVL."$attr_OFF""
-			bash
-			echo -e ""$attr_bold"Returned to shell $SHLVL."$attr_OFF""
-			getyn "$promptstring" ${!2}
-			b_ui_int_firstpass=false
+		if [ "__$answer__" == "n" ]; then
+			__stat__=false
 			break
 		fi
 	done
-	if $b_ui_int_firstpass; then
-		[ $# -eq 2 ] && eval $2=$stat
-	else
-		[ $# -eq 2 ] && eval $savedp2=$stat
-	fi
-	b_ui_int_firstpass=true
+
+	[ $# -eq 2 ] && eval $2=$__stat__
 }
 
 # doyn() $1 $2 [$3] [$4]
@@ -191,8 +166,8 @@ function getuser {
 
 	echo -ne "$attr_bold$promptstring$attr_OFF"
 	read var
-	[ "$var" == "q" ] && buhbye "Exiting ..."
-	[ "$var" == "x" ] && ui_sh_spawn
+	# [ "$var" == "q" ] && buhbye "Exiting ..."
+	# [ "$var" == "x" ] && ui_sh_spawn
 	eval $2=$var
 }
 
@@ -557,25 +532,46 @@ function ui_strindex {
 	[[ $x = $1 ]] && echo -1 || echo ${#x}
 }
 
-# inarray()
+# ui_inarray()
 #
 # Looks for an integer in an integer array
 # Echoes and returns 0 if found, 1  if not.
+# Optionally returns the index of the item in the array or -1 if not found.
 #
 # $1 value
-# $2 array
+# $2 array, must be passed by reference, without leading '$'
+# $3 optional return value
 #
-# Example:
-# 	[ $(inarray 12 $array) -eq 0 ] && echo "found" || echo "not found"
+# Examples:
+#
+#   declare -a array=(3 8 12 7 16 9 3)
+#
+#   # The following will echo true
+#   #
+#   [ $(inarray 12 array[@]) -eq 0 ] && echo "found" || echo "not found"
+#
+#   # The following will echo '2', because 12 is at index 2
+#   #
+#   ui_inarray 12 array[@] index
+#   echo $index
 #
 # returns 0 if found, nonzero if not found
 #
 ui_inarray() {
 	local i
-	for i in ${@:2}; do
-		[ $i -eq $1 ] && echo 0 && return 0
+	local j=0
+	local ary=(${!2})
+
+	for i in ${ary[@]}; do
+		if [ $i -eq $1 ]; then
+			[ $# -eq 3 ] && eval $3=$j
+			echo 0
+			return 0
+		fi
+		let j++
 	done
 
+	[ $# -eq 3 ] && eval $3=-1
 	echo 1
 	return 1
 }
