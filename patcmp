@@ -23,6 +23,7 @@ declare -i index=0
 declare -i maxindex
 
 declare b_runmismatch=false
+declare b_nomismatch=false
 declare mismatch_file
 declare -i first_mismatch
 declare -i last_mismatch
@@ -276,6 +277,20 @@ replace_commit() {
 	usfiles[$index]=$(ls $usdir/$pfx-*.patch)
 }
 
+say_nomismatch() {
+
+	echo
+	echo -e "********************************************* $BLD"
+	echo -e "      There are no incongruent patches"
+	echo -e "   Only congruent patches can be examined   $OFF"
+	echo -e "*********************************************"
+	echo
+
+	b_nomismatch=true
+	b_runmismatch=false
+}
+
+
 # init_mismatch()
 #
 # initializes the following globals
@@ -297,7 +312,7 @@ init_mismatch() {
 	line=$(readlinen 1 $mismatch_file)
 	verbosity=$(echo $line | cut -d':' -f2)
 
-	echo "Incongruent patches"
+	# echo "Incongruent patches"
 
 	# create the array of mismatched patched file indexes. The index is
 	# 0-based, while the patch sequence number is 1-basd, so subtract 1
@@ -320,10 +335,17 @@ init_mismatch() {
 	done < $mismatch_file
 
 	mismatch_count=$mmindex
-	echo "mismatch_count; $mismatch_count max mmindex: $((mmindex-1))"
-	last_mismatch=${mismatch_array[$((mmindex-1))]}
-	first_mismatch=${mismatch_array[0]}
-	index=$first_mismatch
+
+	if [ $mismatch_count -gt 0 ]; then
+		last_mismatch=${mismatch_array[$((mmindex-1))]}
+		first_mismatch=${mismatch_array[0]}
+		index=$first_mismatch
+		echo "mismatch_count; $mismatch_count max mmindex: $((mmindex-1))"
+		b_nomismatch=false
+	else
+		b_nomismatch=true
+		say_nomismatch
+	fi
 	mmindex=0
 }
 
@@ -439,7 +461,8 @@ echo
 # PS4='+(${BASH_SOURCE}:${LINENO}): '
 # set -x
 
-$b_runmismatch && init_mismatch || index=0
+$b_runmismatch && [ -f "$mismatch_file" ] && init_mismatch
+$b_runmismatch || index=0
 echo "Starting with patch: $((index + 1))"
 
 # If the lasttag file does not exist, then go create it with a
@@ -536,7 +559,7 @@ while :; do
 
 		m )	# Unless a mismatch file exists, this option is meaningless.
 			#
-			[ -f "$mismatch_file" ] || { echo; continue; }
+			$b_nomismatch && say_nomismatch && continue
 			ui_toggle b_runmismatch
 			$b_runmismatch && \
 				{ mmindex=0; index=${mismatch_array[0]}; }
