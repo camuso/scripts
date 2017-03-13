@@ -539,7 +539,7 @@ while :; do
 			;;
 		q )	echo
 			getyn "Quit and return to the command line?" bugout
-			$bugout && exit_patcmp $code_special_exit
+			$bugout && exit_patcmp $code_special_exit || continue
 			;;
 
 		b )	echo
