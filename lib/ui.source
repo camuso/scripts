@@ -121,7 +121,7 @@ function getyn {
 			break
 		fi
 
-		if [ "__$answer__" == "n" ]; then
+		if [ "$__answer__" == "n" ]; then
 			__stat__=false
 			break
 		fi
