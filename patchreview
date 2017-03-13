@@ -359,6 +359,8 @@ echo -en "$OFF"
 # Parameter Initialization
 ###########################################
 
+[ -f $last_tag_file ] && rm -f $last_tag_file
+
 echo -n "Getting last git tag.."
 git describe --tags --abbrev=0 > $last_tag_file &
 
