@@ -2,8 +2,10 @@
 
 remove_spaces()
 {
+    local sp=" "
     ls | while read -r FILE
     do
+	[[ $FILE == *$sp* ]] || continue
 	mv -v "$FILE" `echo $FILE | tr ' ' '_' `
     done
 }
