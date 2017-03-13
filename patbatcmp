@@ -59,6 +59,7 @@ declare verbose=false	# print whether or not files are congruent
 declare vverbose=false	# print each line compared
 declare verbosity=0	# level of verbose-ness
 declare -i optcnt=0	# count the options
+declare -i lincnt=0	# line counter
 declare b_stdout=true	# indicates output is going to /dev/stdout
 
 # list of files in each directory
@@ -255,8 +256,8 @@ $b_stdout || fprintf "verbose level: %d\n" $verbosity
 #
 for ((index = 0; index < $fcountA; ++index)); do
 
-	lcA=1
-	lcB=1
+	lcA=1	# Line counter for line from file A
+	lcB=1   # Line counter for line from file B
 
 	$vverbose && pr_header
 
@@ -284,8 +285,8 @@ for ((index = 0; index < $fcountA; ++index)); do
 
 		# We've read the next line, so increment the line counters
 		#
-		let lcA++
-		let lcB++
+		let ++lcA
+		let ++lcB
 
 		# Exclude line positions and index marker.  These can be
 		# different and yet the actual patched code is congruent.
@@ -300,7 +301,8 @@ for ((index = 0; index < $fcountA; ++index)); do
 
 		# break when we've found the end of the patch
 		#
-		[[ "$lineA" == "--" ]] && break
+		[ "${lineA:0:3}" == "-- " ] && break
+		[ "${lineB:0:3}" == "-- " ] && break
 
 		# If strict is true, then user only wants to compare lines
 		# that have "+" or "-" as the first character in the line.
