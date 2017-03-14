@@ -99,19 +99,19 @@ $(basename $0) [-h -R -U -o <file>]
       It is possible for the patches to still be congruent even when
       the diff stats are different. For example, when the RHEL patch is
       a subset of the upstream patch
-      Default: false
+      Default: true
 
   p - when true, excludes path lines from the comparison
       You will want to do this if the file being patched has been renamed
       or moved to a different directory.
-      Default: false
+      Default: true
 
   s - when true, excludes lines that do not begin with + or -
       You will want to do this if you are only concerned about the lines
       that are actually being changed by the patch. When true, this will
       automatically exclude the diff stat lines, but WILL NOT exclude
       the path lines.
-      Default: false
+      Default: true
 
   v - verbose prints the sequence numbers of all files and indicates which
       are congruent and which are not
@@ -161,9 +161,11 @@ usage() {
 
 init_defaults() {
 
-	for ((index=boolindex; index <= prj_entries; index++)); do
-		prj_set_item $index false
-	done
+	prj_set_item $b_nodiffst true
+	prj_set_item $b_nopaths true
+	prj_set_item $b_strict true
+	prj_set_item $b_verbose false
+	prj_set_item $b_veryverb false
 
 	ofile="/dev/stdout"
 	prj_set_item $prj_ofile $ofile
