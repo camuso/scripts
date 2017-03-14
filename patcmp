@@ -23,13 +23,14 @@ declare -i index=0
 declare -i maxindex
 
 declare b_runmismatch=false
-declare b_nomismatch=false
+declare b_nomismatch=true
 declare mismatch_file
 declare -i first_mismatch
 declare -i last_mismatch
 declare -i mmindex
 declare -i mismatch_count
 declare -a mismatch_array
+declare mismatch_numbers=""
 
 declare lasttag=
 declare b_rmlasttag=false
@@ -286,8 +287,6 @@ say_nomismatch() {
 	echo -e "*********************************************"
 	echo
 
-	b_nomismatch=true
-	b_runmismatch=false
 }
 
 
@@ -331,6 +330,7 @@ init_mismatch() {
 		mismatch_array[$mmindex]=$((seqno - 1))
 
 		echo $seqno
+		mismatch_numbers=$(echo "$mismatch_numbers"; echo $seqno)
 		let mmindex++
 	done < $mismatch_file
 
@@ -342,8 +342,11 @@ init_mismatch() {
 		index=$first_mismatch
 		echo "mismatch_count; $mismatch_count max mmindex: $((mmindex-1))"
 		b_nomismatch=false
+		b_runmismatch=true
 	else
 		b_nomismatch=true
+		b_runmismatch=false
+		mismatch_numbers=""
 		say_nomismatch
 	fi
 	mmindex=0
@@ -379,6 +382,11 @@ emacs_cmd() {
 # Trap for control-c
 #
 trap control_c SIGINT
+
+# Herald
+#
+echo -e "\n$BLD\0patcmp 2.1 - Interactively compare pairs of patches"
+echo -e "\tType '$OFF\0h$BLD' for help\n"
 
 while getopts z:m:h OPTION; do
     case "$OPTION" in
@@ -461,9 +469,9 @@ echo
 # PS4='+(${BASH_SOURCE}:${LINENO}): '
 # set -x
 
-$b_runmismatch && [ -f "$mismatch_file" ] && init_mismatch
+[ -f "$mismatch_file" ] && init_mismatch
 $b_runmismatch || index=0
-echo "Starting with patch: $((index + 1))"
+# echo "Starting with patch: $((index + 1))"
 
 # If the lasttag file does not exist, then go create it with a
 # call to getlasttag().
@@ -508,7 +516,7 @@ while :; do
 			|| index=${mismatch_array[0]}
 	fi
 
-	echo -e "$BLD\0Interactively Compare Patches"
+	echo -e "\n$BLD\0Interactively Compare Patch Pairs"
 	echo -e "-----------------------------------------------------------------"
 	echo -en "$OFF"
 	echo -e "$BLD\0Compare :$OFF $(basename ${mlfiles[$index]})"
@@ -520,28 +528,27 @@ while :; do
 	echo -e  "\t    RHEL dir :$OFF $mldir$BLD"
 	echo -e  "\tUpstream dir :$OFF $usdir$BLD"
 	echo -e "-----------------------------------------------------------------"
-	echo -e  "\tc - run batch file comparison"
-	[ -f "$mismatch_file" ] && \
-	echo -e  "\tm - only examine mismatched patch files:$OFF $b_runmismatch$BLD"
+	echo -e  "\tc - run batch file comparison to find mismatched patch pairs"
+
+	if ! $b_nomismatch; then
+	echo -e  "\tm - only examine mismatched patch pairs:$OFF $b_runmismatch$BLD"
+	echo -e  "\ts - show mismatched patch pair numbers"
+	fi
+
 	echo -e  "\tb - back to the previous patch"
 	echo -e  "\tn - prompt for a number for a specific patch"
 	echo -e	 "\tp - replace current upstream patch with a different commit"
-	echo -e  "\td - done comparing patches"
 	echo -e  "\tx - spawns a secondary shell"
-	echo -e  "\tq - quit execution, returns to the primary shell"
+	echo -e  "\tq - quit and return to previous execution environment"
 	$b_zstr && echo -e  "\tz - "$zstr""
-	echo -en "\tor any other key moves forward to the next patch ..."$OFF""
+	echo -en "\tor any other key moves forward to the next patch ... "$OFF""
 	read -n1 answer
 	echo
 
 	case $answer in
-		d )	break
+		q )	rm -f $mismatch_file
+			break
 			;;
-		q )	echo
-			getyn "Quit and return to the command line?" bugout
-			$bugout && exit_patcmp $code_special_exit || continue
-			;;
-
 		b )	echo
 			backup_wrapper
 			b_backup=true
@@ -554,22 +561,38 @@ while :; do
 			echo
 			continue
 			;;
-		z )	$b_zstr && exit $code_special_action || continue
+		z )	$b_zstr && exit $code_special_action
 			;;
 
 		m )	# Unless a mismatch file exists, this option is meaningless.
 			#
-			$b_nomismatch && say_nomismatch && continue
-			ui_toggle b_runmismatch
-			$b_runmismatch && \
-				{ mmindex=0; index=${mismatch_array[0]}; }
-			continue
+			if ! $b_nomismatch; then
+				ui_toggle b_runmismatch
+				if $b_runmismatch; then
+					mmindex=0
+					index=${mismatch_array[0]}
+				fi
+				echo
+				continue
+			fi
+			;;
+
+		s )	# Only works when there is a mismatch file
+			#
+			if ! $b_nomismatch; then
+				echo "$mismatch_numbers"
+				echo
+				read -n1 -p "Press any key to continue... "
+				echo
+				continue;
+			fi
 			;;
 
 		c )	patbatcmpmgr -R $mldir -U $usdir -o $usdir/mm.log
 			mismatch_file=$usdir/mm.log
 			b_runmismatch=true
 			init_mismatch
+			echo
 			continue
 			;;
 
