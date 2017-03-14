@@ -40,7 +40,7 @@ for str in $gitstat; do
 		echo $str
 		modfound=false
 		git diff $str
-		read
+		read -n1 -p "Press any key to continue or ctrl-c to quit ... "
 		clear
 	fi
 done
