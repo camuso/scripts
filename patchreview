@@ -2,7 +2,7 @@
 #
 # patchreview
 
-version="4.0"
+version="4.3"
 
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -350,11 +350,6 @@ echo -e "$OFF"
 
 ! $(git_checkrepo) && git_invrepomsg && exit 1
 
-echo -en "$BLD"
-echo -en "Press \"q\" to quit or \"x\" to spawn a new shell "
-echo -e  "at any \"(y/n)\" prompt."
-echo -en "$OFF"
-
 ###########################################
 # Parameter Initialization
 ###########################################
@@ -471,20 +466,25 @@ while true; do
 	fi
 
 	if $b_patcmp; then
-		patcmp -z 'return to main menu' $indir $outdir $editor
-		stat=$?
-		[ $stat -eq 1 ] && continue
-		[ $stat -eq 2 ] && exit
+
+		mmfile="$outdir/$mismatch_file"
+
+		# Mismatch file might be stale, so delete it first,
+		# if it exists. Better to create a new one.
+		#
+		[ -f $mmfile ] && rm -f $mmfile
+		patcmp $indir $outdir $editor
+		continue
 	fi
 
 	if $b_patbatcmp; then
-		patbatcmpmgr -R $indir -U $outdir -o $outdir/mm.log
-		patcmp -z 'return to main menu' -m $outdir/mm.log \
-			$indir $outdir $editor
-		stat=$?
-		rm -f $outdir/mm.log
-		[ $stat -eq 1 ] && continue
-		[ $stat -eq 2 ] && exit
+
+		mmfile="$outdir/$mismatch_file"
+
+		patbatcmpmgr -R $indir -U $outdir -o $mmfile
+		patcmp -m $mmfile $indir $outdir $editor
+		[ -f $mmfile ] && rm -f $mmfile
+		continue
 	fi
 
 	if [ $menu_stat -eq $rc_run ]; then
