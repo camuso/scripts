@@ -241,9 +241,8 @@ loop_range() {
 # Directory Routines
 #############################
 
-# ui_getfilespec - get a pathname to a file, optionally including directory
-#		   and loop until we get a legitimate file name or until
-#		   the user types "q" (quit) or "x" (exit to shell)
+# ui_getfilespec - get a pathname to a file and loop until we get
+#                  a legitimate file name
 # $1 - prompt
 # $2 - returned filespec
 #
