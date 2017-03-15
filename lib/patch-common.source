@@ -234,7 +234,7 @@ function git_restore_head {
 	line=$(readlinen $choice $sesdir/$sesfile)
 	commit=$(echo $line | cut -d' ' -f1)
 	git reset --hard $commit
-
+	git_get_lasttag lasttag
 	return 0
 }
 

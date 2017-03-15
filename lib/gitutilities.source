@@ -320,6 +320,44 @@ function git_checkrepo {
 	[ -d .git ] && return 0 || return 1
 }
 
+# git_get_lasttag <tagstr> [path]
+#
+# Obtains the most recent tag in the current branch and stores it in
+# /dev/shm/lasttag, or the optional path submitted in $2 by the caller.
+#
+# Returns the tag in $1.
+#
+# Deletes the previously recorded last tagin /dev/shm/lasttag or the
+# optional path submitted by caller.
+#
+# This operation can take some time, so the git command is spawned
+# and we perform a wait for the tag file to appear.
+#
+# $1 - receives the last tag string
+# $2 - optional path to store lasttag file
+#
+git_get_lasttag() {
+
+	local _ltfile_
+	local _lasttag_
+
+	[ $# -eq 2 ] && _ltfile_="$2" || _ltfile_="/dev/shm/lasttag"
+
+	[ -f "$_ltfile_" ] && rm -f $_ltfile_
+
+	echo -n "Getting last git tag.."
+	git describe --tags --abbrev=0 > $_ltfile_ &
+
+	while true; do
+		echo -n "."
+		[ -f "$_ltfile_" ] && break
+		sleep 1
+	done
+
+	_lasttag_=$(cat $_ltfile_)
+	eval $1="$_lasttag_"
+}
+
 # git_getcurrentbranch
 #
 # echoes the current branch in the git tree after checking that it's a
@@ -375,3 +413,4 @@ function git_setbranch {
 	[ $? -eq 0 ] || exit 1
 	~/bin/gitlog1
 }
+

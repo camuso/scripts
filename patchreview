@@ -25,6 +25,7 @@ version="4.3"
 # ~/bin/patcmp
 # ~/bin/patbatcmp
 # ~/bin/patbatcmpmgr
+# ~/bin/readlinen
 #
 # Requires to run ...
 #
@@ -178,7 +179,11 @@ function git_reset_head {
 	local logstr=$OFF$(git log -n1 --oneline $githead)$BLD
 
 	getyn "$resetquery\n$logstr\n\n" response
-	$response && gitreset $sesdir
+
+	if $response; then
+		gitreset $sesdir
+		git_get_lasttag lasttag $last_tag_file
+	fi
 }
 
 function clean_sessions {
@@ -240,6 +245,7 @@ function menu_parser {
 	case $setting in
 
 		b )	git_setbranch
+			git_get_lasttag lasttag $last_tag_file
 			;;
 		m )	set_mailclient
 			;;
@@ -354,19 +360,7 @@ echo -e "$OFF"
 # Parameter Initialization
 ###########################################
 
-[ -f $last_tag_file ] && rm -f $last_tag_file
-
-echo -n "Getting last git tag.."
-git describe --tags --abbrev=0 > $last_tag_file &
-
-while true; do
-	echo -n "."
-	[ -f "$last_tag_file" ] && break
-	sleep 1
-done
-
-echo
-lasttag=$(cat $last_tag_file)
+git_get_lasttag lasttag $last_tag_file
 
 # This loop enumerates and counts the items in the project file.
 # Add new booleans to the end of the list.
