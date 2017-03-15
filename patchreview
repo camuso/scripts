@@ -2,7 +2,7 @@
 #
 # patchreview
 
-version="4.3"
+version="4.4"
 
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -80,11 +80,6 @@ function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
 		prj_set_item $index true
 	done
-
-	# Set b_patcmp to false, leave b_patbatcmp true
-	# These must always have opposite boolean polarity.
-	#
-	prj_set_item $prj_b_patcmp false
 }
 
 # get_booleans
@@ -93,12 +88,19 @@ function init_booleans {
 # project file.
 #
 # removed in v3.0
-#	b_restore_githead \
-#	b_clean_indir \
-#	b_clean_outdir \
+#	b_restore_githead
+#	b_clean_indir
+#	b_clean_outdir
 #
 # added in v 4.0
 #	b_patbatcmp
+#
+# removed in v4.4
+# 	b_patcmp
+# 	b_patbatcmp
+#
+# added in v4.4
+# 	b_40digit
 #
 function get_booleans {
 	index=$boolindex
@@ -107,9 +109,8 @@ function get_booleans {
 	b_save_githead \
 	b_apply_patches \
 	b_fmt_upstream \
-	b_patcmp \
 	b_gitam_err_abort \
-	b_patbatcmp
+	b_40digit
 	do
 		eval $bool=$(prj_get_item $index)
 		ui_digit2bool $bool
@@ -130,6 +131,13 @@ function get_booleans {
 # added in v 4.0
 #	b_patbatcmp
 #
+# removed in v4.4
+# 	b_patcmp
+# 	b_patbatcmp
+#
+# added in v4.4
+# 	b_40digit
+#
 function set_booleans {
 	index=$boolindex
 	for bool in \
@@ -137,9 +145,8 @@ function set_booleans {
 	b_save_githead \
 	b_apply_patches \
 	b_fmt_upstream \
-	b_patcmp \
 	b_gitam_err_abort \
-	b_patbatcmp
+	b_40digit
 	do
 		prj_set_item $index ${!bool}
 		let index++
@@ -215,8 +222,8 @@ $BLD
  3  Apply patches (git am)      : $OFF$b_apply_patches$BLD
  4  git am abort on error       : $OFF$b_gitam_err_abort$BLD
  5  Format upstream patches     : $OFF$b_fmt_upstream$BLD
- 6  Compare patchsets           : $OFF$b_patcmp$BLD
- 7  Batch compare patchsets     : $OFF$b_patbatcmp$BLD
+ 6  Size of commit hash         : $OFF$(show_hash_size $b_40digit)$BLD digits
+ 7  Compare mode                : $OFF$(show_cmpmode $cmpmode)$BLD
 
     $UND\0Control            $OFF$BLD
  r  Run patch review
@@ -265,15 +272,10 @@ function menu_parser {
 			;;
 		5 )	ui_toggle b_fmt_upstream
 			;;
-		#
-		# patcmp and patbatcmp cannot be simultaneous true
-		# but they can be simultaneously false.
-		#
-		6 )	ui_toggle b_patcmp
-			$b_patcmp && $b_patbatcmp && ui_toggle b_patbatcmp
+		6 )	ui_toggle b_40digit
 			;;
-		7 )	ui_toggle b_patbatcmp
-			$b_patcmp && $b_patbatcmp && ui_toggle b_patcmp
+		7 )	ui_cycle_state cmpmode 3
+			prj_set_item $prj_cmpmode $cmpmode
 			;;
 		P )	clean_dir "$indir"
 			;;
@@ -321,13 +323,17 @@ function menu_loop {
 	#
 	editor=$(prj_get_item $prj_editor)
 
+	# get the comparison mode
+	#
+	cmpmode=$(prj_get_item $prj_cmpmode)
+
 	# delete any "scratch" file from the indir
 	#
 	rm -f "$indir"/scratch
 
 	local stat=0
 
-	while $true; do
+	while true; do
 		menu_parser
 		stat=$?
 		# echo "menu_parser_stat: $stat"
@@ -367,6 +373,7 @@ git_get_lasttag lasttag $last_tag_file
 # Add new non-boolean parameters to the top of the list.
 #
 for offset in \
+prj_cmpmode \
 prj_editor \
 prj_indir \
 prj_outdir \
@@ -375,9 +382,8 @@ prj_b_rename_infiles \
 prj_b_save_githead \
 prj_b_apply_patches \
 prj_b_fmt_upstream \
-prj_b_patcmp \
 prj_b_gitam_err_abort \
-prj_b_patbatcmp
+prj_b_40digit
 do
 	let index++
 	let $offset=$index
@@ -408,6 +414,8 @@ if [ $? -ne 0 ]; then
 	set_mailclient
 	set_editor
 	init_booleans
+	cmpmode=$cmpmode_batch
+	prj_set_item $prj_cmpmode $cmpmode
 fi
 
 # Create the sessions directory and sessions file to log session
@@ -451,7 +459,7 @@ while true; do
 		rm -vf "$outdir"/*.patch
 		echo "" > "$outdir/$us_commits"
 		echo
-		git_comment2commitsfile $indir "$outdir/$us_commits"
+		git_comment2commitsfile $indir "$outdir/$us_commits" $b_40digit
 		echo
 		cat "$outdir/$us_commits"
 		echo
@@ -459,7 +467,7 @@ while true; do
 			"git_file2patchset ${outdir}/"$us_commits" ${outdir}"
 	fi
 
-	if $b_patcmp; then
+	if [ $cmpmode -ne $cmpmode_off ]; then
 
 		mmfile="$outdir/$mismatch_file"
 
@@ -467,18 +475,16 @@ while true; do
 		# if it exists. Better to create a new one.
 		#
 		[ -f $mmfile ] && rm -f $mmfile
-		patcmp $indir $outdir $editor
-		continue
-	fi
 
-	if $b_patbatcmp; then
-
-		mmfile="$outdir/$mismatch_file"
-
-		patbatcmpmgr -R $indir -U $outdir -o $mmfile
-		patcmp -m $mmfile $indir $outdir $editor
-		[ -f $mmfile ] && rm -f $mmfile
-		continue
+		if [ $cmpmode -eq $cmpmode_batch ]; then
+			patbatcmpmgr -R $indir -U $outdir -o $mmfile
+			patcmp -m $mmfile $indir $outdir $editor
+			[ -f $mmfile ] && rm -f $mmfile
+		elif [ $cmpmode -eq $cmpmode_inter ]; then
+			patcmp $indir $outdir $editor
+		else
+			cmpmode=$cmpmode_off
+		fi
 	fi
 
 	if [ $menu_stat -eq $rc_run ]; then

@@ -512,6 +512,19 @@ function ui_toggle {
 	$boolean && eval $1=false || eval $1=true
 }
 
+# ui_cycle_state - cycle through the states of a variable
+#
+# $1 - variable
+# $2 - number of states
+#
+ui_cycle_state() {
+	local _var_=$1
+	local _states_=$2
+
+	let ++_var_
+	[ $_var_ -lt $_states_ ] && eval $1=$_var_ || eval $1=0
+}
+
 # ui_digit2bool - convert 0 and 1 to true and false
 #
 # $1 digit to convert to boolean, must be 0 or 1

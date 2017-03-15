@@ -17,6 +17,7 @@ declare outdir
 declare mailclient
 declare editor
 declare renameagent
+declare cmpmode
 declare prj_entries=0
 declare index=0
 declare boolcount=0
@@ -37,15 +38,19 @@ declare prj_indir
 declare prj_outdir
 declare prj_mailclient
 declare prj_editor
+declare prj_cmpmode
 declare prj_b_rename_infiles
 declare prj_b_save_githead
 declare prj_b_apply_patches
 declare prj_b_fmt_upstream
-declare prj_b_patcmp
 declare prj_b_gitam_err_abort
-declare prj_b_patbatcmp
+declare prj_b_40digit
 
 declare lasttag=""
+
+declare cmpmode_off=0
+declare cmpmode_batch=1
+declare cmpmode_inter=2
 
 function set_editor {
 	echo -e "$attr_bold"
@@ -364,5 +369,20 @@ function apply_patches {
 	done
 	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
 	return $stat
+}
+
+show_hash_size() {
+	$b_40digit && echo "40" || echo "7"
+}
+
+show_cmpmode() {
+	local _mode_=$1
+
+	case $_mode_ in
+	    $cmpmode_off   )	echo "OFF" ;;
+	    $cmpmode_batch )	echo "Batch" ;;
+	    $cmpmode_inter )	echo "Interactive Only" ;;
+		         * )	echo "Not a valid comparison mode" ;;
+	esac
 }
 

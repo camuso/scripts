@@ -175,6 +175,8 @@ function git_excisecommit {
 #
 # $1 - directory containing the backported patches
 # $2 - filename, including path, of the commits file.
+# $3 - optional boolean argument, if false, use 7-digit hashes
+#      default is 40-digit hashes.
 #
 function git_comment2commitsfile {
 	local srcdir="$1"
@@ -190,8 +192,15 @@ function git_comment2commitsfile {
 	local commitparity=0	# 1 if commits are the same
 	local commitarray
 	local scrstr
+	local hashsize="40"
+	local _40digit=true
 
-	cat /dev/null > $commitsfile
+	[ $# -eq 3 ] && _40digit=$3
+
+	$_40digit || hashsize="7,40"
+
+	echo "commitsfile: $commitsfile"
+	> $commitsfile
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
 
 	for srcfile in $(ls -1 "$srcdir"/*.patch  | sort -V); do
@@ -209,7 +218,7 @@ function git_comment2commitsfile {
 		# delete later.
 		#
 		egrep -i 'commit|cherry|upstream|pick|kernel' $srcfile \
-			| egrep '\b[0-9a-f]{7,40}\b' > $srcdir/scratch
+			| egrep "\b[0-9a-f]{$hashsize}\b" > $srcdir/scratch
 
 		# If there is more than one line with what appears to be a
 		# commit in it, then ask the user from which line he wants
