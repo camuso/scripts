@@ -83,6 +83,7 @@ function prj_get_prjfile_size {
 # $1 - one-based offset in prjfile to item
 #
 function prj_get_item {
+	[ $# -eq 1 ] || { echo "prj_get_item missing item number"; exit 1; }
 	echo $(ui_readline $1 $prjfile)
 }
 
