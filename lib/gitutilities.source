@@ -411,7 +411,7 @@ function git_setbranch {
 	echo -en "Enter the number corresponding to the branch you want: "
 	echo -en "$attr_OFF"
 	read  linenumber
-	[ "$linenumber" == "q" ] && exit_patchdevelop 1
+	[ "$linenumber" == "q" ] && exit 1
 	[ "$linenumber" == "x" ] && ui_sh_spawn
 	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
