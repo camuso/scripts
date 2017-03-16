@@ -48,8 +48,9 @@ remove_spaces
 # Don't try to rename files that have ".patch" endings, because
 # these have already been renamed.
 #
-# for filename in $(ls !(*.patch) | sort -t'_' -k2 -h); do
-for filename in $(ls -1 !(*.patch)); do
+for filename in $(ls !(*.patch) | sort -t'_' -k2 -h); do
+# for filename in $(ls); do
+	# newname=$(printf "%s-%04d.%03d.patch" $prefix $ddcount $total)
 	#
 	# Extract the subject line.
 	#

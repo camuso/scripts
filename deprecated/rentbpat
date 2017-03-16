@@ -1,0 +1,74 @@
+#!/bin/bash
+function usage {
+	echo
+	echo "rentbpat <directory>"
+	echo
+	echo -e "\tRenames files in the <directorry>, creating a filename from"
+	echo -e "\tthe \"Subject: \" line and adding \".patch\" to the end of"
+	echo -e "\tthe filename"
+	echo
+	exit
+}
+[ $# -ge 1 ] || usage
+
+cd $1
+echo "Changing directory to "$PWD""
+total=$(ls | wc -l)
+
+echo "$PWD has $total files."
+
+if [ $total -eq 0 ]; then
+	echo "No files to rename. Exiting ..."
+	echo
+	exit 1
+fi
+
+# We need to change the IFS (Internal Field Separator) to handle filenames
+# with spaces in them. The new IFS will just be the newline.
+#
+savedifs="$IFS"
+IFS="
+"
+shopt -s extglob
+
+# Enable extglob for more specific directory actions
+#
+shopt -s extglob
+
+# Use "ls -1" to assure that each filename is on a separate line.
+#
+for filename in $(ls -1 !(*.patch) ); do
+
+	# Remove leading date stamp.
+	#
+	newname="$(echo "$filename" | cut -d'-' -f2-)"
+
+	# remove trailing thunderbird sequence stamp and ".txt"
+	#
+	newname="$(echo "$newname" | cut --complement -d'-' -f3-)"
+
+	# Remove any brackets, parentheses, and quotes
+	#
+	newname="$(echo "$newname" | sed 's/[][<>(),"]//g')"
+	newname="$(echo "$newname" | sed "s/'//g")"
+
+	# Replace spaces, tabs, slashes, colons and semicolons with hyphens
+	#
+	newname="$(echo "$newname" | sed "s\[\t/:; ]\-\g")"
+
+	# Add ".patch" to the end of the name
+	#
+	newname="$newname"".patch"
+
+	# Rename the file.
+	#
+	mv -v "$filename" "$newname"
+done
+
+# Restore IFS
+#
+IFS="$savedifs"
+
+# Return to previous directory and exit
+cd -
+exit 0
