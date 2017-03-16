@@ -14,9 +14,7 @@ b_ui_int_first_getyn=false	# For lib/ui.source
 #
 declare indir
 declare outdir
-declare mailclient
 declare editor
-declare renameagent
 declare cmpmode
 declare prj_entries=0
 declare index=0
@@ -36,7 +34,6 @@ declare mismatch_file="mm.log"
 
 declare prj_indir
 declare prj_outdir
-declare prj_mailclient
 declare prj_editor
 declare prj_cmpmode
 declare prj_b_rename_infiles
@@ -73,42 +70,6 @@ function set_editor {
 				;;
 		esac
 	done
-}
-
-function set_renameagent {
-
-	case $mailclient in
-
-		"ThunderBird" )	renameagent=rentbpat
-				;;
-		"Mutt" )	renameagent=renmutpat
-				;;
-	esac
-}
-
-function set_mailclient {
-	echo -e "$attr_bold"
-	echo -e "Select one of these currently supported mail clients."
-	echo -e " 1 - ThunderBird"
-	echo -e " 2 - Mutt"
-	promptgetchar "Your choice: " choice
-
-	while true; do
-		case $choice in
-
-			1 )	mailclient="ThunderBird"
-				prj_set_item $prj_mailclient "$mailclient"
-				break
-				;;
-
-			2)	mailclient="Mutt"
-				prj_set_item $prj_mailclient "$mailclient"
-				break
-				;;
-		esac
-	done
-
-	set_renameagent
 }
 
 # check_dir

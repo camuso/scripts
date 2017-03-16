@@ -19,7 +19,7 @@ version="4.4"
 
 # Calls on the following external scripts.
 #
-# ~/bin/ren*pat
+# ~/bin/renpat
 # ~/bin/patcmp
 # ~/bin/patbatcmp
 # ~/bin/patbatcmpmgr
@@ -141,7 +141,6 @@ $BLD
     $UND\0Environment        $OFF$BLD
     Most recent tag             :$OFF $lasttag$BLD
  b  Current git branch          :$OFF $gitbranch$BLD
- m  Mail client                 :$OFF $mailclient$BLD
  d  Patch directory             :$OFF $indir$BLD has$OFF $infilecount$BLD files
  w  Work directory              :$OFF $outdir$BLD
  e  Editor                      :$OFF $editor$BLD
@@ -226,11 +225,6 @@ function menu_loop {
 	check_dir $prj_indir "RHEL" indir
 	check_dir $prj_outdir "Upstream" outdir
 
-	# get the mail client
-	#
-	mailclient=$(prj_get_item $prj_mailclient)
-	set_renameagent
-
 	# get the editor
 	#
 	editor=$(prj_get_item $prj_editor)
@@ -290,7 +284,6 @@ prj_editor \
 prj_mode \
 prj_indir \
 prj_outdir \
-prj_mailclient \
 prj_b_rename_infiles \
 prj_b_apply_patches \
 prj_b_fmt_upstream \
@@ -323,7 +316,6 @@ if [ $? -ne 0 ]; then
 	echo "want us to put the output of this script."
 	prj_set_directory "RHEL" $prj_indir indir quiet
 	prj_set_directory "Upstream" $prj_outdir outdir quiet
-	set_mailclient
 	set_editor
 	init_booleans
 	cmpmode=$cmpmode_batch
@@ -340,7 +332,7 @@ while true; do
 	# echo "menu_loop_stat: $menu_stat"
 
 	if $b_rename_infiles; then
-		exec_boolean b_rename_infiles false "$renameagent $indir"
+		exec_boolean b_rename_infiles false "renpat $indir"
 		[ $? -ne 0 ] && continue
 	fi
 
