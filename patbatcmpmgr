@@ -3,6 +3,19 @@
 # patbatcmpmgr
 #
 
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
+	exit 130
+}
+
+# Trap for control-c
+#
+trap control_c SIGINT
+
 # Enable extglob for more specific directory actions
 #
 shopt -s extglob
@@ -47,11 +60,10 @@ declare prj_file="$prj_dir/patbatcmpmgr.prj"
 declare rhdir		# directory containing RHEL patch files
 declare usdir		# directory containing upstream patch files
 declare ofile		# output file, default is /dev/stdout
-declare pfile=	 	# passed output file takes precedence over the
+declare pfile=		# passed output file takes precedence over the
 			# : output file stored in the project file
-
-declare rhfcount=0
-declare usfcount=0
+declare -i rhfcount=0
+declare -i usfcount=0
 
 declare lasttag=
 declare rmlasttag=false
@@ -145,31 +157,18 @@ declare rc_run=1	# Run comparison
 # Functions
 #######################################
 
-# run if user hits control-c
-#
-control_c()
-{
-	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
-	[ -e /dev/shm/lasttag ] && rm -f /dev/shm/lasttag
-	exit $CTLC_EXIT
-}
-
 
 usage() {
 	echo -e "$usagestr"
+	exit $1
 }
 
-init_defaults() {
-
-	prj_set_item $b_nodiffst true
-	prj_set_item $b_nopaths true
-	prj_set_item $b_strict true
-	prj_set_item $b_verbose false
-	prj_set_item $b_veryverb false
-
-	ofile="/dev/stdout"
-	prj_set_item $prj_ofile $ofile
-
+init_booleans() {
+	prj_set_item $prj_b_nodiffst true
+	prj_set_item $prj_b_nopaths true
+	prj_set_item $prj_b_strict true
+	prj_set_item $prj_b_verbose false
+	prj_set_item $prj_b_veryverb false
 }
 
 # get_booleans
@@ -348,13 +347,14 @@ getlasttag() {
 	rmlasttag=true
 }
 
+exit_invdir() {
+
+	exit 1
+}
+
 #############################
 # Start of Script Execution
 #############################
-
-# Trap for control-c
-#
-trap control_c SIGINT
 
 [ -e /dev/shm/lasttag ] || getlasttag
 lasttag=$(cat /dev/shm/lasttag)
@@ -373,8 +373,7 @@ while getopts hR:U:o: OPTION; do
 	o ) pfile=$OPTARG
 	    ;;
 	* ) echo "unrecognized option"
-	    echo -e "$usagestr"
-	    exit 127
+	    usage 127
     esac
 done
 
@@ -422,8 +421,16 @@ if [ $stat -ne 0 ]; then
 
 	[ -d "$usdir" ] && prj_set_item $prj_usdir $usdir \
 			|| prj_set_directory "Upstream" $prj_usdir usdir quiet
-	init_defaults
+	init_booleans
 fi
+
+# If the caller passed a desired output file name (pfile), then use that
+# Else, if the ofile saved in the project file is an empty string,
+# use the default /dev/stdout
+#
+[ "$pfile" ] && ofile="$pfile" || ofile="$(prj_get_item $prj_ofile)"
+[ "$ofile" ] || ofile="/dev/stdout"
+prj_set_item $prj_ofile $ofile
 
 ##############################################
 # Main Program Loop
@@ -434,18 +441,9 @@ while true; do
 
 	get_booleans
 
-	# get the RHEL and upstrea, directories.
-	#
 	check_dir $prj_rhdir "RHEL" rhdir
 	check_dir $prj_usdir "Upstream" usdir
-
-	# If the caller passed a desired output file name (pfile), then use
-	# that
-	# Else, if the ofile saved in the project file is an empty string,
-	# use the default /dev/stdout
-	#
-	[ "$pfile" ] && ofile="$pfile" || ofile="$(prj_get_item $prj_ofile)"
-	[ "$ofile" ] || ofile="/dev/stdout"
+	ofile="$(prj_get_item $prj_ofile)"
 
 	while true; do
 		menu_parser
