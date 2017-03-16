@@ -8,7 +8,9 @@ cmdline=timer
 usagestr=$(
 cat <<EOF
 
-timer
+timer - simple timing wrapper for the command line
+
+Returns the elapsed time that it took for the command to execute.
 \0
 EOF
 )
