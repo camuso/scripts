@@ -227,7 +227,6 @@ $BLD
     $UND\0Control            $OFF$BLD
  r  Run patch review
  i  Init to defaults
- p  Replace an upstream commit in the series
  G  Restore git head
  P  Clean RHEL Patch Directory
  W  Clean Upstream Patch Directory
@@ -286,8 +285,6 @@ function menu_parser {
 			;;
 		i )	init_booleans
 			get_booleans
-			;;
-		p )	replace_patch
 			;;
 		q )	exit_patchreview 0
 			;;
