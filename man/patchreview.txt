@@ -34,7 +34,7 @@ RHEL patch directory: the directory containing the RHEL patches
 
 Upstream directory: the directory into which the script will put upstream
                     patches that were formatted using the upstream commit
-		    hashes in the commit logs of the user's patches.
+                    hashes in the commit logs of the user's patches.
 
 The very first item listed under "Environment", is the most recent tag
 in the current branch. This information is useful for knowing to which
@@ -74,13 +74,12 @@ _________________________________________________________________________
  4  git am abort on error       : true
  5  Format upstream patches     : true
  6  Size of commit hash         : 40 digits
- 7  Compare mode                : Interactive Only
+ 7  Compare mode                : Batch
 
     Control
     -------------------
  r  Run patch review
  i  Init to defaults
- p  Replace an upstream commit in the series
  G  Restore git head
  P  Clean RHEL Patch Directory
  W  Clean Upstream Patch Directory
@@ -117,7 +116,7 @@ b * Set's the git branch from which you will be operating. It is assumed
  the desired branch at the prompt.
 
 m * Selects from which mail client the patches will be extracted.
-     Currently, there are only two choices: Thunderbird and Mutt.
+    Currently, there are only two choices: Thunderbird and Mutt.
 
 d * RHEL directory, as described above in "Running the script".
 
@@ -126,13 +125,14 @@ w * Upstream directory, as described above in "Running the script".
 e * This is the editor that will be used to perform an interactive diff
     of the files.
 
-The "Run Parameters" section controls what happens when the 'r' (Run)
-menu selection is pressed. These options can be toggled from true to
-false by pressing the corresponding option number.
+The "Run Parameters" section controls what happens when the 'r' (Run) menu
+selection is pressed. These options can be toggled from true to false by
+pressing the corresponding option number.
 
 1 * When true, the files extracted from the mail client and residing in
     the "RHEL directory" are renamed using their subject line for the
     name.
+
     Resets to false after a run.
 
 2 * If this is true, the current git head is saved and can be restored
@@ -141,61 +141,62 @@ false by pressing the corresponding option number.
 
 3 * When true, the patches in the "RHEL Directory" are applied to the
     selected branch using "git am -3".
+
     Resets to false after a run.
 
 4 * When true, an abort from the attempt to 'git am' a patch will cause
     the script to exit. From that point, the user can decide how s/he
     wants to proceed.
 
-    When false, an abort from the attempt to 'git am' a patch causes
-    the script to fall back to a "patch --fuzz=3 -p1 < ' approach.
-    If the patch command succeeds, the fuzz is shown and saved in a file
-    in the Work directory. The file is named for the patch from which
-    the fuzz was detected, with the extension ".retry"
+    When false, an abort from the attempt to 'git am' a patch causes the
+    script to fall back to a "patch --fuzz=3 -p1" approach. If the patch
+    command succeeds, the fuzz is shown and saved in a file in the Work
+    directory. The file is named for the patch from which the fuzz was
+    detected, with the extension ".retry"
 
-    Even if the patch command fails, the hunks of the patch that can
-    apply are applied. The rejects files are saved in their
-    corresponding directory trees under the Work directory, NOT in the
-    git tree directories. The ".retry" files in the Work directory
-    contain the fuzz report, if any, and the names and relative
-    locations of of the reject files.
+    Even if the patch command fails, the hunks of the patch that can apply
+    are applied. The rejects files are saved in their corresponding
+    directory trees under the Work directory, NOT in the git tree
+    directories. The ".retry" files in the Work directory contain the fuzz
+    report, if any, and the names and relative locations of of the reject
+    files.
 
-    This switch is not only sticky between invocations of the script,
-    but also retains its value after a run.
+    This switch is not only sticky between invocations of the script, but
+    also retains its value after a run.
 
-5 * When true, the commit logs of the patches in the "RHEL directory"
-    are scanned for upstream commit hasAhes. If the script encounters
-    more than one string that could be a commit hash, the user is
-    presented with a list of candidate hashes from which to choose.
+5 * When true, the commit logs of the patches in the "RHEL directory" are
+    scanned for upstream commit hasAhes. If the script encounters more
+    than one string that could be a commit hash, the user is presented
+    with a list of candidate hashes from which to choose.
 
     These commit hashes are written into a file that is then used to
     format patches from the list of upstream commit hashes it contains.
 
     The formatted upstream patches are named with sequence numbers
-    corresponding to the patches in the "Patch directory" followed by
-    the summary line of the patch and are written into the Work
-    directory.
+    corresponding to the patches in the "Patch directory" followed by the
+    summary line of the patch and are written into the Work directory.
 
     Resets to false after a run.
 
 6 * Size of commit hash default is 40. Pressing this key toggles it
     to accept hexadecimal numbers ranging in size from 7 to 40 digits.
 
-7 * The Comparison Mode is a tri-state switch with three modes.
-    The user cycles through the modes by repeatedly pressing the
-    associated key.
+7 * The Comparison Mode is selected by a tri-state switch. The user
+    cycles through the modes by repeatedly pressing this key.
 
-    OFF - In the OFF mode, the editor is not invoked to diff the
-          pairs of patches.
+    OFF - In the OFF mode, the pairs of patches are not diff'd after any
+          preceding operations.
 
-    Batch - This mode will invoke a batch comparison utility with
-            a menu of its own. The utility will compare the files
-	    and create a list of those patch pairs that are not
-	    congruent to pass to the interactive comparison script
-	    for human insspection.
+    Batch - This mode will invoke a batch comparison utility with a menu
+            of its own. The utility will compare the files and create a
+            list of those patch pairs that are not congruent according to
+            the settings in the utility.  The list of incongruent patch
+            pairs is then sent to the interactive comparison script for
+            human insspection.
 
-    Interactive Only - In this mode, all the patch pairs are presented
-            for human inspection.
+    Interactive Only - In this mode, the batch comparison utility is
+            bypassed, and all the patch pairs are presented for human
+            inspection.
 
 The "Control" section of the menu executes operations as follows.
 
@@ -203,14 +204,10 @@ r - Run the script on the patches according to the parameter settings as
     described above.
 
     Options 1 through 5 are examined and the corresponding action takes
-    place. Then, either option 6 or 7 is executed. They cannot be true
-    simultaneously, so only one or the other will execute.
+    place. When these operations are completed, the patch pair
+    comparison operation takes place according to the selected setting.
 
-i - Initialize the script's Parameters to their default settings, which
-    is all in the "true" state.
-
-p - Replace an upstream commit. The user is prompted for the patch
-    number and the commit hash of the new upstream commit.
+i - Initialize the script's Parameters to their default settings.
 
 G - Present a list of git heads for the user to choose. These are git
     heads that were generated by applying patch sets. There is a session
@@ -248,10 +245,8 @@ _________________________________________________________________________
 Sub Menus
 ---------
 
-These menus are presented when "r" (run) is pressed and option 6 or 7
-is selected. Options 6 and 7 are mutually exclusive, so that enabling
-one disables the other. However, the may simultaneously be in the
-false state.
+These menus are presented when "r" (run) is pressed and option 7 is not
+in the OFF state.
 
 These menus compare the patches in the RHEL directory with those in
 the Upstream directory.
@@ -310,8 +305,9 @@ _________________________________________________________________________
   All menu items are sticky, persisting across invocations of this script.
   You can use the verbose options to test the results.
 
-  When you get the results you want, set the verbose options to false and
-  press q to return to the previous execution environment.
+  When you get the results you want, press q to advance to the Interactive
+  comparison menu, where you can examine the patch pairs that were not
+  congruent, if any.
 
   R - change the directory containing the RHEL patch files
   U - change the directory containing the Upstream patch files
@@ -371,26 +367,26 @@ Interactively Compare Patch Pairs
 Compare : RHEL7.4-net-PATCH-01-20-net--sctp--keep-owned-chunk-in.patch
    With : 0001-net-sctp-keep-owned-chunk-in-destructor_arg-instead-.patch
 
-	    Last Tag : kernel-3.10.0-604.el7
-	    RHEL dir : /home/tcamuso/Maildir/work/cur
-	Upstream dir : ../temp
+            Last Tag : kernel-3.10.0-604.el7
+            RHEL dir : /home/tcamuso/Maildir/work/cur
+        Upstream dir : ../temp
 -----------------------------------------------------------------
-	c - run batch file comparison to find mismatched patch pairs
-	m - only examine mismatched patch pairs: true
-	s - show mismatched patch pair numbers
-	b - back to the previous patch
-	n - prompt for a number for a specific patch
-	p - replace current upstream patch with a different commit
-	x - spawns a secondary shell
-	q - quit and return to previous execution environment
-	or any other key moves forward to the next patch ...
+        c - run batch file comparison to find mismatched patch pairs
+        m - only examine mismatched patch pairs: true
+        s - show mismatched patch pair numbers
+        b - back to the previous patch
+        n - prompt for a number for a specific patch
+        p - replace current upstream patch with a different commit
+        x - spawns a secondary shell
+        q - quit and return to previous execution environment
+        or any other key moves forward to the next patch ...
 
 All the menu items are pretty much self-explanatory, except for the first
 three.
 
 c - invokes the batch comparison script to generate a list of files that
-    are sufficiently different to warrant human inspection. When the
-    associated key is pressed, the Batch Comparison menu is presented.
+    are sufficiently different to warrant human inspection. When this
+    key is pressed, the Batch Comparison menu is presented.
 
 m - Option only appears if a list of incongruent patch pairs was
     generated by the batch comparison script.
@@ -401,6 +397,22 @@ m - Option only appears if a list of incongruent patch pairs was
 s - Option only appears if a list of incongruent patch pairs was
     generated by the batch comparison script.
     When the associated key is pressed, a list of numbers of the patch
-    pairs that were incongruent is printed to the screen.
+    pairs that were incongruent is printed to the screen.
+
+b - Steps back to the previously examined patch.
+
+n - Prompts for a patch number to examine. This can be any patch pair
+    in the set.
+
+p - Prompts for a different commit hash for the most recently examined
+    patch.
+
+x - Spawns a secondary cell. Press control-d or type "exit" to return.
+
+q - Quits and returns to the caller.
+
+Any other key advances the patch counter to present the next RHEL/upstream
+pair of patches to examine.
+
 _________________________________________________________________________
 
