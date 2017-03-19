@@ -358,7 +358,7 @@ git_get_lasttag() {
 	echo -n "Getting most recent git tag.."
 	git describe --tags --abbrev=0 > $_ltfile_ &
 	_mypid_=$!
-	ui_waitonproc $_mypid_
+	ui_waitonproc $_mypid_ .1
 	_lasttag_=$(cat $_ltfile_)
 	echo
 	eval $1="$_lasttag_"
