@@ -36,12 +36,16 @@ declare -i CTLC_EXIT=130
 # completes.
 #
 # $1 - PID of process we are waiting for.
+# $2 - optional time argument
 #
 ui_waitonproc () {
     __pid__=$1;
+    __time__=1
+
+    [ $# -eq 2 ] && __time__=$2
     while kill -0 $__pid__ > /dev/null 2>&1; do
         echo -n '.';
-        sleep .5;
+        sleep $__time__;
     done
 }
 
