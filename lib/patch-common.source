@@ -135,18 +135,19 @@ function exec_boolean {
 }
 
 function git_log_head {
-	local commit=$(git log --oneline -n1 | cut -d' ' -f1)
+	local commit="$(git log --oneline -n1 | cut -d' ' -f1)"
 	local line=""
 	local line_hash=""
 
 	while read line; do
-		line_hash=$(echo $line | cut -d' ' -f1)
-		if [ $line_hash == $commit ]; then
+		line_hash="$(echo $line | cut -d' ' -f2)"
+		if [ "$line_hash" == "$commit" ]; then
 			return 1
 		fi
 	done < $sesdir/$sesfile
 
-	git log --oneline -n1 $commit >> $sesdir/$sesfile
+	line="$(git_getcurrentbranch)"" ""$(git log --oneline -n1 $commit)"
+	echo $line >> $sesdir/$sesfile
 	return 0
 }
 
@@ -169,7 +170,7 @@ function git_restore_head {
 	currenthead="$(git log --oneline -n1 | cut -d' ' -f1)"
 
 	while read line; do
-		commit="$(echo $line | cut -d' ' -f1)"
+		commit="$(echo $line | cut -d' ' -f2)"
 
 		if [[ "$commit" == "$currenthead" ]]; then
 			echo -en "$attr_bold"
@@ -198,7 +199,8 @@ function git_restore_head {
 	(( $choice == $index )) && { > $sesdir/$sesfile; return 0; }
 
 	line=$(readlinen $choice $sesdir/$sesfile)
-	commit=$(echo $line | cut -d' ' -f1)
+	commit=$(echo $line | cut -d' ' -f2)
+	git checkout -f $(echo $line | cut -d' ' -f1)
 	git reset --hard $commit
 	git_get_lasttag lasttag
 	return 0
