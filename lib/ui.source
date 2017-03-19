@@ -30,6 +30,21 @@ declare -i CTLC_EXIT=130
 # Shell Routines
 #########################
 
+# ui_waitonproc
+#
+# Prints a dot to the screen every half second until the passed PID
+# completes.
+#
+# $1 - PID of process we are waiting for.
+#
+ui_waitonproc () {
+    __pid__=$1;
+    while kill -0 $__pid__ > /dev/null 2>&1; do
+        echo -n '.';
+        sleep .5;
+    done
+}
+
 # ui_sh_backout
 # Back out of all shells until you are down to the one you want.
 # Takes one parameter, the shell you want to back out to.

@@ -349,21 +349,18 @@ git_get_lasttag() {
 
 	local _ltfile_
 	local _lasttag_
+	local _mypid_
 
 	[ $# -eq 2 ] && _ltfile_="$2" || _ltfile_="/dev/shm/lasttag"
 
 	[ -f "$_ltfile_" ] && rm -f $_ltfile_
 
-	echo -n "Getting last git tag.."
+	echo -n "Getting most recent git tag.."
 	git describe --tags --abbrev=0 > $_ltfile_ &
-
-	while true; do
-		echo -n "."
-		[ -f "$_ltfile_" ] && break
-		sleep 1
-	done
-
+	_mypid_=$!
+	ui_waitonproc $_mypid_
 	_lasttag_=$(cat $_ltfile_)
+	echo
 	eval $1="$_lasttag_"
 }
 
