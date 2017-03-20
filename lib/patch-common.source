@@ -142,7 +142,7 @@ function git_log_head {
 	while read line; do
 		line_hash="$(echo $line | cut -d' ' -f2)"
 		if [ "$line_hash" == "$commit" ]; then
-			return 1
+			return 0
 		fi
 	done < $sesdir/$sesfile
 
@@ -198,7 +198,7 @@ function git_restore_head {
 	(( $choice == ($index - 1) )) && return 0
 	(( $choice == $index )) && { > $sesdir/$sesfile; return 0; }
 
-	line=$(readlinen $choice $sesdir/$sesfile)
+	line=$(ui_readline $choice $sesdir/$sesfile)
 	commit=$(echo $line | cut -d' ' -f2)
 	git checkout -f $(echo $line | cut -d' ' -f1)
 	git reset --hard $commit

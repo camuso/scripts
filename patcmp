@@ -308,7 +308,7 @@ init_mismatch() {
 
 	# Determine the verbose level of the mismatch_file
 	#
-	line=$(readlinen 1 $mismatch_file)
+	line=$(ui_readline 1 $mismatch_file)
 	verbosity=$(echo $line | cut -d':' -f2)
 
 	# echo "Incongruent patches"
@@ -340,7 +340,7 @@ init_mismatch() {
 		last_mismatch=${mismatch_array[$((mmindex-1))]}
 		first_mismatch=${mismatch_array[0]}
 		index=$first_mismatch
-		echo "mismatch_count; $mismatch_count max mmindex: $((mmindex-1))"
+		# echo "mismatch_count; $mismatch_count max mmindex: $((mmindex-1))"
 		b_nomismatch=false
 		b_runmismatch=true
 	else

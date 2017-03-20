@@ -417,6 +417,6 @@ function git_setbranch {
 	# git clean -df
 	git checkout "$gitbranch" 2>&1
 	[ $? -eq 0 ] || exit 1
-	~/bin/gitlog1
+	git log --oneline -n1
 }
 

@@ -424,9 +424,6 @@ function ui_catoneline {
 #
 function ui_replaceline {
 
-	# local lc=$(cat $3 | wc -l)
-	# [ $1 -gt $lc ] && return 1
-
 	awk -v line=$1 -v new_content="$2" '{
 		if (NR == line) {
 			print new_content;
@@ -446,16 +443,12 @@ function ui_replaceline {
 #
 # call: line=$(ui_readline line file)
 #
-# "line" will contain the line of text
-# "$?" will contain the status
+# The line of text will be echoed to stdout
 #
 function ui_readline {
-
-	# local lc=$(cat $2 | wc -l)
-	# [ $1 -gt $lc ] && return 1
-
-	awk -v line=$1 '{
-		if (NR == line) {
+	local __line__
+	awk -v __line__="$1" '{
+		if (NR == __line__) {
 			print $0;
 		}
 	}' $2

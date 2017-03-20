@@ -20,12 +20,10 @@ version="4.4"
 # Calls on the following external scripts.
 #
 # ~/bin/githead
-# ~/bin/gitreset
 # ~/bin/renpat
 # ~/bin/patcmp
 # ~/bin/patbatcmp
 # ~/bin/patbatcmpmgr
-# ~/bin/readlinen
 #
 # Requires to run ...
 #
@@ -174,22 +172,6 @@ function clean_directories {
 		rm -vf "$outdir"/!(*.log)
 		# remove everything in the indir
 		rm -vf "$indir"/*
-	fi
-}
-
-function git_reset_head {
-	local resetquery=\
-"\nAre you sure you want to reset the git head to the following commit?\n"
-	local response=false
-	local gitbranch=$(git_getcurrentbranch)
-	local githead=$(cat $sesdir/$gitbranch)
-	local logstr=$OFF$(git log -n1 --oneline $githead)$BLD
-
-	getyn "$resetquery\n$logstr\n\n" response
-
-	if $response; then
-		gitreset $sesdir
-		git_get_lasttag lasttag $last_tag_file
 	fi
 }
 
@@ -428,10 +410,7 @@ while true; do
 	fi
 
 	if $b_save_githead; then
-		exec_boolean b_save_githead false "githead $sesdir"
-		st=$?
-		git_log_head
-		[ $st -ne 0 ] && continue
+		exec_boolean b_save_githead false "git_log_head"
 	fi
 
 	if $b_apply_patches; then
