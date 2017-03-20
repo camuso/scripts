@@ -280,8 +280,10 @@ function menu_parser {
 		C )	clean_directories
 			;;
 		G )	git_restore_head
+			gitbranch=$(git_getcurrentbranch)
 			;;
 		S )	clean_sessions
+			gitbranch=$(git_getcurrentbranch)
 			;;
 		i )	init_booleans
 			get_booleans
