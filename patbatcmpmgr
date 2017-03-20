@@ -284,7 +284,7 @@ menu_parser() {
 			;;
 		l )	[ "$ofile" != "/dev/stdout" ] && less $ofile
 			;;
-		i )	init_defaults
+		i )	init_booleans
 			get_booleans
 			;;
 		h )	usage | less
