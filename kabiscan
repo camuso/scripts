@@ -11,10 +11,6 @@ LIB=$HOME/bin/lib
 source $LIB/ui.source
 source $LIB/project.source
 
-BLD="\033[1m"
-UND="\033[4m"
-OFF="\033[0m"
-
 ########################################
 # Function Return Codes
 ########################################
@@ -41,7 +37,6 @@ declare b_symbol
 declare b_datastruct
 declare b_count
 
-
 declare prj_dir="$HOME/bin/.data"
 declare prj_file="$prj_dir/kabiscan.prj"
 declare kabidatafile="redhat/kabi/kabi-datafiles.list"
@@ -57,7 +52,6 @@ declare prj_b_whitelist
 declare prj_b_wholeword
 declare prj_b_verbose
 declare prj_b_type
-
 
 declare -i boolindex
 
@@ -76,7 +70,8 @@ http://giteengineering.redhat.com/git/users/tcamuso/kabitools/kabitools.git/
 RPMs:
 http://people.redhat.com/tcamuso/kabitools/
 
-
+Here is the help from the kabi-lookup tool.
+$(kabi-lookup -h | less)
 \0
 EOF
 )
@@ -139,20 +134,16 @@ git_get_lasttag() {
 
 	local _ltfile_
 	local _lasttag_
+	local _mypid_
 
 	[ $# -eq 2 ] && _ltfile_="$2" || _ltfile_="/dev/shm/lasttag"
 
 	[ -f "$_ltfile_" ] && rm -f $_ltfile_
 
-	echo -n "Getting last git tag.."
+	echo -n "Getting last git tag."
 	git describe --tags --abbrev=0 > $_ltfile_ &
-
-	while true; do
-		echo -n "."
-		[ -f "$_ltfile_" ] && break
-		sleep 1
-	done
-
+	_mypid_=$!
+	ui_waitonproc $_mypid_ .1
 	_lasttag_=$(cat $_ltfile_)
 	eval $1="$_lasttag_"
 	echo
@@ -204,7 +195,21 @@ get_type() {
 	$_type_ && echo "struct" || echo "union"
 }
 
+show_type() {
+
+	structstr=$(
+cat <<EOF
+
+ t  struct or union             :$OFF $(get_type $b_type)$BLD
+    : no effect on func names
+    : or inexact searches
+EOF
+)
+	$b_wholeword && echo -e "$structstr"
+}
+
 show_settings() {
+
 	settingstr=$(
 cat <<EOF
 $BLD
@@ -215,16 +220,13 @@ $BLD
  b  Current git branch          :$OFF $gitbranch$BLD
  f  File to receive output      :$OFF $outfile$BLD
  n  Search name                 :$OFF $searchstr$BLD
- m  Search mask                 :$OFF $searchmask$BLD
+ m  Search mask                 :$OFF $searchmask$BLD$(show_type)
 
     $UND\0Run Parameters     $OFF$BLD
  1  Stop after finding one      :$OFF $b_justone$BLD
  l  Only seek whitelist symbols :$OFF $b_whitelist$BLD
  w  Whole words only            :$OFF $b_wholeword$BLD
  v  Verbose output              :$OFF $b_verbose$BLD
- t  struct or union             :$OFF $(get_type $b_type)$BLD
-    : no effect on func names
-    : or inexact searches
 
     $UND\0Control            $OFF$BLD
  e  Find exported function
@@ -270,8 +272,9 @@ menu_parser() {
 		v )	ui_toggle b_verbose
 			prj_set_item $prj_b_verbose $b_verbose
 			;;
-		t )	ui_toggle b_type
-			prj_set_itme $prj_b_type $b_type
+		t )	$b_wholeword || continue
+			ui_toggle b_type
+			prj_set_item $prj_b_type $b_type
 			;;
 		m )	getuser "Search mask: " searchmask
 			prj_set_item $prj_searchmask $searchmask
