@@ -446,7 +446,7 @@ main() {
 	done
 
 	[ "$searchmask" ] && optstr="$optstr""-m $searchmask "
-	$b_justone	  && optstr="$optstr"" "
+	$b_justone	  && optstr="$optstr""-1 "
 	$b_whitelist	  && optstr="$optstr""-l "
 	$b_wholeword	  && optstr="$optstr""-w "
 	$b_verbose	  && optstr="$optstr""-v "
