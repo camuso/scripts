@@ -1,0 +1,12 @@
+bin/lib/gitutilities.source
+bin/lib/patch-common.source
+bin/lib/project.source
+bin/lib/ui.source
+bin/man/patchreview.txt
+bin/man/patchdevelop.txt
+bin/patchreview
+bin/patchdevelop
+bin/renpat
+bin/patcmp
+bin/patbatcmp
+bin/patbatcmpmgr
