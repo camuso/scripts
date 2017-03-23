@@ -349,3 +349,12 @@ show_cmpmode() {
 	esac
 }
 
+# init_session_file()
+#
+# Init the session file with the current branch/head
+#
+init_session_file() {
+	echo "$(git symbolic-ref --short HEAD) $(git log --oneline -n1)" \
+		> $sesdir/$sesfile
+
+}

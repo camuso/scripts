@@ -175,15 +175,45 @@ function clean_directories {
 	fi
 }
 
-function clean_sessions {
+clean_sessions() {
 	local session_query=\
 "\nClearing the sessions file.\n\
-After choosing the head you want from the sessions file, it will be cleared.\n\
+After choosing the head you want from the sessions file, it will be initialized
+with your selection as the first entry.\n
 Do you want to proceed?"
 	local response=false
 
 	getyn "$session_query" response
-	$response && { git_restore_head; > $sesdir/$sesfile; }
+	$response && {
+		git_restore_head
+		init_session_file
+	}
+}
+
+reset_to_lasttag() {
+	echo "$BLD\0Resetting git head to$OFF $lasttag."
+	git reset --hard $lasttag
+}
+
+nuke() {
+	# remove the sub-directories in the outdir first
+	find "$outdir" -mindepth 1 -depth -type d -exec rm -rf '{}' \;
+
+	# remove all but the log files in the outdir
+	rm -vf "$outdir"/!(*.log)
+
+	# remove everything in the indir
+	rm -vf "$indir"/*
+
+	# Reset the git head to the last tag
+	reset_to_lasttag
+
+	# Init the session file with the current branch/head
+	init_session_file
+
+	# Init the booleans to their defaults
+	init_booleans
+	get_booleans
 }
 
 function show_settings {
@@ -209,11 +239,11 @@ $BLD
     $UND\0Control            $OFF$BLD
  r  Run patch review
  i  Init to defaults
- G  Restore git head
- P  Clean RHEL Patch Directory
- W  Clean Upstream Patch Directory
+ G  Git reset to most recent tag of current branch
+ H  Choose a session git head
  C  Clean RHEL and Upstream Directories
- S  Clean Session
+ S  Clean Session File
+ N  Nuke directories & session, reset head to most recent tag
  h  help text
  x  Exit to a shell
  q  Quit this script
@@ -255,13 +285,13 @@ function menu_parser {
 		7 )	ui_cycle_state cmpmode 3
 			prj_set_item $prj_cmpmode $cmpmode
 			;;
-		P )	clean_dir "$indir"
-			;;
-		W )	clean_dir "$outdir"
-			;;
 		C )	clean_directories
 			;;
-		G )	git_restore_head
+		N )	nuke
+			;;
+		G )	reset_to_lasttag
+			;;
+		H )	git_restore_head
 			gitbranch=$(git_getcurrentbranch)
 			;;
 		S )	clean_sessions
