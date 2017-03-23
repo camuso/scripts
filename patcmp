@@ -532,7 +532,7 @@ while :; do
 
 	if ! $b_nomismatch; then
 	echo -e  "\tm - only examine mismatched patch pairs:$OFF $b_runmismatch$BLD"
-	echo -e  "\ts - show mismatched patch pair numbers"
+	echo -e  "\ts - show contents of mismatch log"
 	fi
 
 	echo -e  "\tb - back to the previous patch"
@@ -580,7 +580,7 @@ while :; do
 		s )	# Only works when there is a mismatch file
 			#
 			if ! $b_nomismatch; then
-				echo "$mismatch_numbers"
+				less $mismatch_file
 				echo
 				read -n1 -p "Press any key to continue... "
 				echo
