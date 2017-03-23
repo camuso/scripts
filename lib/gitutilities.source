@@ -209,9 +209,11 @@ function git_comment2commitsfile {
 		linenumber=0
 		commitparity=0
 
-		# We're going to assume that the commit number consists of 40
-		# hexadecimal digits, using egrep for extended regex
-		# capabilities.
+		# The default number of digits for a commit hash is 40.
+		# However, the user can pass "false" in $3 to set the range
+		# of digits from 7 to 40. This often generates noise, by
+		# considering things like stack traces as valid candidates
+		# for commit hashes. That's why the default is 40 digits.
 		#
 		# Capture any the lines that look like they have commits in
 		# them and stow them in a scratch file, which we will
@@ -245,10 +247,10 @@ function git_comment2commitsfile {
 		fi
 
 		if [ $cmtcnt -gt 1 ] && [ $commitparity -eq 0 ]; then
-			echo -e "$attr_bold"
-			echo "There is more than one commit mentioned in patch $index."
-			echo "Please choose one of the following."
-			echo -e "$attr_OFF"
+			echo -e "$BLD"
+			echo -e "There is more than one commit mentioned in patch $index."
+			echo -e "Please choose one of the following, or type$OFF q$BLD"
+			echo -e "to default to the first hash.$OFF"
 			for ((cmtindex=1; cmtindex <= cmtcnt; cmtindex++))
 			do
 				line=$(ui_readline $cmtindex $srcdir/scratch)
@@ -257,11 +259,11 @@ function git_comment2commitsfile {
 
 			let cmtindex--
 			while [ $linenumber -eq 0 ]; do
-				echo -en "$attr_bold"
-				echo -en "Enter number between 1 and $cmtindex : "$attr_OFF""
+				echo -en "$BLD"
+				echo -en "Enter number between 1 and $cmtindex: "$OFF""
 				read -n1 linenumber
 				echo
-				[[ $linenumber == "q" ]] && exit 1
+				[[ $linenumber == "q" ]] && break
 				[[ $linenumber == "x" ]] && ui_sh_spawn
 				if [[ $linenumber != [1-$cmtindex] ]]; then
 					linenumber=0
