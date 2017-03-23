@@ -191,7 +191,7 @@ Do you want to proceed?"
 }
 
 reset_to_lasttag() {
-	echo "$BLD\0Resetting git head to$OFF $lasttag."
+	echo -e "$BLD\0Resetting git head to$OFF $lasttag."
 	git reset --hard $lasttag
 }
 
