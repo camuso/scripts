@@ -333,16 +333,11 @@ check_dir() {
 }
 
 getlasttag() {
-
+	local _mypid_
 	echo -n "Getting last git tag.."
 	git describe --tags --abbrev=0 > /dev/shm/lasttag &
-
-	while true; do
-		echo -n "."
-		[ -e /dev/shm/lasttag ] && break
-		sleep 1
-	done
-
+	_mypid_=$!
+	ui_waitonproc $_mypid_ .1
 	echo
 	rmlasttag=true
 }
