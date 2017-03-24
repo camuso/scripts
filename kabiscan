@@ -32,11 +32,20 @@ declare b_whitelist
 declare b_wholeword
 declare b_verbose
 declare b_type
-declare b_exported
-declare b_symbol
-declare b_datastruct
-declare b_count
+declare b_exported=false
 
+#*********************
+# Search Modes          # Search for ...
+#                       # -----------------------------
+declare -i smode_fun=0	# exported functions
+declare -i smode_sym=1  # kABI-sensitive symbols
+declare -i smode_def=2  # struct and union definitions
+declare -i smode_cnt=3  # count instances of one of the above
+declare -i smode
+
+#*********************
+# Default files and dirs
+#
 declare prj_dir="$HOME/bin/.data"
 declare prj_file="$prj_dir/kabiscan.prj"
 declare kabidatafile="redhat/kabi/kabi-datafiles.list"
@@ -44,6 +53,7 @@ declare kabidatafile="redhat/kabi/kabi-datafiles.list"
 #**********************
 # Saved Project Objects
 #
+declare prj_smode
 declare prj_outfile
 declare prj_searchstr
 declare prj_searchmask
@@ -205,7 +215,19 @@ cat <<EOF
     : or inexact searches
 EOF
 )
-	$b_wholeword && echo -e "$structstr"
+	$b_wholeword && ! $b_exported && echo -e "$structstr"
+}
+
+show_search_mode() {
+	local _mode_=$1
+	b_exported=false
+
+	case $_mode_ in
+		$smode_fun ) echo "Exported Functions"; b_exported=true ;;
+		$smode_sym ) echo "kABI Sensitive Symbols";;
+		$smode_def ) echo "Symbol definition" ;;
+		$smode_cnt ) echo "Count symbol instances" ;;
+	esac
 }
 
 show_settings() {
@@ -213,7 +235,7 @@ show_settings() {
 	settingstr=$(
 cat <<EOF
 $BLD
-    $UND\0Scan The Kernel for kABI Sensitive Objects$OFF$BLD
+    $UND\0Scan The Kernel for kABI Sensitive Symbols$OFF$BLD
 
     $UND\0Environment        $OFF$BLD
     Most Recent Tag             :$OFF $lasttag$BLD
@@ -227,12 +249,10 @@ $BLD
  l  Only seek whitelist symbols :$OFF $b_whitelist$BLD
  w  Whole words only            :$OFF $b_wholeword$BLD
  v  Verbose output              :$OFF $b_verbose$BLD
+ s  Search mode                 :$OFF $(show_search_mode $smode)$BLD
 
     $UND\0Control            $OFF$BLD
- e  Find exported function
- s  Find kabi-sensitive symbol
- d  Dump the members of a struct
- c  Count the instances of a symbol
+ r  Run the search
  h  help text
  q  Quit
 $OFF
@@ -244,6 +264,7 @@ EOF
 menu_parser() {
 	local setting
 
+	[ $smode -eq $smode_fun ] && b_exported=true || b_exported=false
 	show_settings
 	promptgetchar "$BLD\0Enter one of the above: $OFF" setting
 	case $setting in
@@ -279,17 +300,10 @@ menu_parser() {
 		m )	getuser "Search mask: " searchmask
 			prj_set_item $prj_searchmask $searchmask
 			;;
-		e )	b_exported=true
-			return $rc_run
+		r )	return $rc_run
 			;;
-		s )	b_symbol=true
-			return $rc_run
-			;;
-		d )	b_datastruct=true
-			return $rc_run
-			;;
-		c )	b_count=true
-			return $rc_run
+		s )	ui_cycle_state smode 4
+			prj_set_item $prj_smode $smode
 			;;
 		h )	echo -e "$usagestr"
 			;;
@@ -381,6 +395,7 @@ index=0
 boolcount=0
 b_found_first_bool=false
 for offset in \
+prj_smode \
 prj_outfile \
 prj_searchstr \
 prj_searchmask \
@@ -414,6 +429,8 @@ if [ $stat -ne 0 ]; then
 	echo
 	echo "A new project file has been created."
 	init_booleans
+	smode=$smode_sym
+	prj_set_item $prj_smode $smode
 fi
 
 outfile=$(prj_get_item $prj_outfile)
@@ -425,8 +442,10 @@ if ! [ -f "$outfile" ]; then
 fi
 
 main() {
+    local optstr
+
     while true; do
-	declare optstr=""
+	optstr=""
 
 	get_booleans
 
@@ -434,11 +453,7 @@ main() {
 	outfile="$(prj_get_item $prj_outfile)"
 	searchmask="$(prj_get_item $prj_searchmask)"
 	searchstr="$(prj_get_item $prj_searchstr)"
-
-	b_exported=false
-	b_symbol=false
-	b_datastruct=false
-	b_count=false
+	smode=$(prj_get_item $prj_smode)
 
 	while true; do
 		menu_parser
@@ -450,10 +465,13 @@ main() {
 	$b_whitelist	  && optstr="$optstr""-l "
 	$b_wholeword	  && optstr="$optstr""-w "
 	$b_verbose	  && optstr="$optstr""-v "
-	$b_exported	  && optstr="$optstr""-e "
-	$b_symbol	  && optstr="$optstr""-s "
-	$b_datastruct	  && optstr="$optstr""-d "
-	$b_count   	  && optstr="$optstr""-c "
+
+	case $smode in
+		$smode_fun ) optstr="$optstr""-e " ;;
+		$smode_sym ) optstr="$optstr""-s " ;;
+		$smode_def ) optstr="$optstr""-d " ;;
+		$smode_cnt ) optstr="$optstr""-c " ;;
+	esac
 
 	if $b_wholeword && ! $b_exported; then
 		searchstr="$(get_type $b_type) $searchstr"
