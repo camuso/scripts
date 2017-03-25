@@ -18,6 +18,11 @@ function prj_get_emptyline {
 	echo "$prj_emptyline"
 }
 
+prj_check_for_blanks() {
+	while read line; do [ "$line" ] || return 1; done < $1
+	return 0
+}
+
 # prj_addlines - add blank lines to a file
 #
 # $1 - file to have lines added
@@ -67,7 +72,8 @@ function prj_init_prjfile {
 			return 2
 		fi
 	fi
-	return 0
+
+	return $(prj_check_for_blanks $prjfile)
 }
 
 function prj_get_prjfile {
