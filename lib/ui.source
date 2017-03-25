@@ -291,7 +291,7 @@ function ui_getfilespec {
 #
 function ui_chkdir {
 	[ -d "$1" ] && return 2
-	[ -e "$1" ] && return 1
+	[ -f "$1" ] && return 1
 	return 0
 }
 
@@ -318,15 +318,8 @@ function ui_getnewdir {
 			echo "\""$newdir"\" already exists as a file."
 
 		if [ $stat -eq 2 ]; then
-			# echo "\""$newdir"\" already exists as a directory."
-			# echo "If you use it, the contents will be altered."
-			# ans="yes"
-			# getyn "Use it anyway?" ans
-			if $ans; then
-				# rm -f "$newdir"/*
-				eval $2="$newdir"
-				return $stat
-			fi
+			eval $2="$newdir"
+			return $stat
 		fi
 
 		if [ $stat -eq 0 ]; then
