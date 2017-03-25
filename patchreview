@@ -408,9 +408,12 @@ prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
 #
 if [ $? -ne 0 ]; then
 	echo
-	echo "A new project file has been created."
-	echo "We will need to know where your patches will be and where you"
-	echo "want us to put the output of this script."
+	echo "A new project file has been created, or the existing one"
+	echo "must be recreated."
+	echo "We will need to know where your patches will be, where you"
+	echo "want us to put the output of this script, and your choice"
+	echo "of editor."
+	echo
 	prj_set_directory "RHEL" $prj_indir indir quiet
 	prj_set_directory "Upstream" $prj_outdir outdir quiet
 	set_editor
