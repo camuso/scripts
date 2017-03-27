@@ -95,14 +95,16 @@ if $b_opts; then
 	exit 0
 fi
 
-echo -en 'declare usagestr=$(
+echo -n '
+declare usagestr=$(
 cat <<EOF
 
 $(basename $0)' >> $ofile
 
 $b_args && formatargs $ofile "${args[*]}" argcount || echo >> $ofile
 
-echo -en '\0
+echo -n '
+\0
 EOF
 )
 
@@ -111,7 +113,6 @@ usage() {
 	exit $1
 }
 
-shift $optcount
 [ $# -eq  "$argcount" ] || usage 1
 
 ' >> $ofile
