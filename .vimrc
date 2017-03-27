@@ -218,7 +218,7 @@ endif
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "
 " Set the highlight for tabs
-highlight WhitespaceTabs ctermbg=blue guibg=blue
+highlight WhitespaceTabs ctermbg=4 guibg=4
 "
 " Build a vim command to match tabs
 let s:tab_matcher = 'match WhitespaceTabs /\t/'
@@ -228,7 +228,7 @@ let s:tab_matcher = 'match WhitespaceTabs /\t/'
 function! TabsCheck ()
 	let g:check_tabs = exists('g:check_tabs') ? !g:check_tabs : 1
 	if g:check_tabs
-		highlight WhitespaceTabs ctermbg=blue guibg=blue
+		highlight WhitespaceTabs ctermbg=4 guibg=4
 		exec s:tab_matcher
 	"	highlight WhitespaceEOL ctermbg=red guibg=red
 	"	match WhitespaceEOL /\s\+$/
@@ -335,3 +335,4 @@ call pathogen#helptags() " generate helptags for everything in ‘runtimepath’
 syntax on
 filetype plugin indent on
 
+" autocmd vimenter * NERDTree
