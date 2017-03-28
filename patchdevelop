@@ -19,33 +19,47 @@ version="4.4"
 
 # Calls on the following external scripts.
 #
-# ~/bin/renpat
-# ~/bin/patcmp
-# ~/bin/patbatcmp
-# ~/bin/patbatcmpmgr
-# ~/bin/readlinen
-
+# ./githead
+# ./renpat
+# ./patcmp
+# ./patbatcmp
+# ./patbatcmpmgr
+#
 # Requires to run ...
 #
-# lib/*.source
-# .data/patchdevelop.prj
-# man/patchdevelop.man
+# ./lib/*.source
+# ./.data/patchreview.prj
+# ./man/patchreview.man
 
 # Enable extglob for more specific directory actions
 #
 shopt -s extglob
 
-BIN="$HOME/bin"		# must be in execution path
-LIB="$BIN/lib"
-manual="$HOME/bin/man/patchdevelop.txt"
+#######################################
+# Default file locations
+#######################################
+#
+# Whatever directory this script and its companions are located in
+# must be in the executable path.
+#
+# export PATH=$PATH:MYDIR
+#
+# Where MYDIR is the directory in which this script and its companions
+# are located.
+
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+declare MYDATA=$MYDIR/.data
+
+manual="$MYDIR/man/patchdevelop.txt"
 
 #######################################
 # External Source Files
 #######################################
-source $LIB/ui.source
-source $LIB/project.source
-source $LIB/gitutilities.source
-source $LIB/patch-common.source
+source $MYLIB/ui.source
+source $MYLIB/project.source
+source $MYLIB/gitutilities.source
+source $MYLIB/patch-common.source
 
 ########################################
 # Function Return Codes

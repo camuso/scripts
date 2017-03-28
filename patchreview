@@ -2,7 +2,7 @@
 #
 # patchreview
 
-version="4.4"
+version="4.5"
 
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -19,17 +19,17 @@ version="4.4"
 #
 # Calls on the following external scripts.
 #
-# ~/bin/githead
-# ~/bin/renpat
-# ~/bin/patcmp
-# ~/bin/patbatcmp
-# ~/bin/patbatcmpmgr
+# ./githead
+# ./renpat
+# ./patcmp
+# ./patbatcmp
+# ./patbatcmpmgr
 #
 # Requires to run ...
 #
-# lib/*.source
-# .data/patchreview.prj
-# man/patchreview.man
+# ./lib/*.source
+# ./.data/patchreview.prj
+# ./man/patchreview.man
 
 # Enable extglob for more specific directory actions
 #
@@ -38,17 +38,28 @@ shopt -s extglob
 #######################################
 # Default file locations
 #######################################
-BIN="$HOME/bin"		# must be in execution path
-LIB="$BIN/lib"
-manual="$BIN/man/patchreview.txt"
+#
+# Whatever directory this script and its companions are located in
+# must be in the executable path.
+#
+# export PATH=$PATH:MYDIR
+#
+# Where MYDIR is the directory in which this script and its companions
+# are located.
+
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+declare MYDATA=$MYDIR/.data
+
+manual="$MYDIR/man/patchreview.txt"
 
 #######################################
 # External Source Files
 #######################################
-source $LIB/ui.source
-source $LIB/project.source
-source $LIB/gitutilities.source
-source $LIB/patch-common.source
+source $MYLIB/ui.source
+source $MYLIB/project.source
+source $MYLIB/gitutilities.source
+source $MYLIB/patch-common.source
 
 ########################################
 # Function Return Codes
