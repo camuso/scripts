@@ -7,10 +7,6 @@
 #
 shopt -s extglob
 
-LIB=$HOME/bin/lib
-source $LIB/ui.source
-source $LIB/project.source
-
 ########################################
 # Function Return Codes
 ########################################
@@ -42,13 +38,6 @@ declare -i smode_sym=1  # kABI-sensitive symbols
 declare -i smode_def=2  # struct and union definitions
 declare -i smode_cnt=3  # count instances of one of the above
 declare -i smode
-
-#*********************
-# Default files and dirs
-#
-declare prj_dir="$HOME/bin/.data"
-declare prj_file="$prj_dir/kabiscan.prj"
-declare kabidatafile="redhat/kabi/kabi-datafiles.list"
 
 #**********************
 # Saved Project Objects
@@ -117,11 +106,10 @@ shift $optcount
 # 	$(git_checkrepo) || echo "$PWD is not a valid git repo" || exit 1
 #
 function git_checkrepo {
-	local _stat_=0
-	[ -d .git ] || _stat=1
-	[ -d redhat ] || _stat=2
-	[ -f "$kabidatafile" ] || _stat=3
-	return $_stat
+	[ -d .git ] || return 1
+	[ -d redhat ] || return 2
+	[ -f "$kabidatafile" ] || return 3
+	return 0
 }
 
 # git_get_lasttag <tagstr> [path]
@@ -211,8 +199,6 @@ show_type() {
 cat <<EOF
 
  t  struct or union             :$OFF $(get_type $b_type)$BLD
-    : no effect on func names
-    : or inexact searches
 EOF
 )
 	$b_wholeword && ! $b_exported && echo -e "$structstr"
@@ -308,6 +294,7 @@ menu_parser() {
 		h )	echo -e "$usagestr"
 			;;
 		q )	set_booleans
+			rm -f $last_tag_file
 			echo
 			exit 0
 			;;
@@ -356,6 +343,21 @@ set_booleans() {
 #############################
 # Start of Script Execution
 #############################
+
+# 
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+declare MYDATA=$MYDIR/.data
+
+source $MYLIB/ui.source
+source $MYLIB/project.source
+
+#*********************
+# Default files and dirs
+#
+declare prj_dir="$MYDATA/.data"
+declare prj_file="$prj_dir/kabiscan.prj"
+declare kabidatafile="redhat/kabi/kabi-datafiles.list"
 
 git_checkrepo
 stat=$?
@@ -489,7 +491,9 @@ main() {
 #
 control_c()
 {
-	main
+	set_booleans
+	rm -f $last_tag_file
+	exit $CTLC_EXIT		# defined in lib/ui.source
 }
 
 # trap keyboard interrupt (control-c)
