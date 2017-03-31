@@ -175,12 +175,12 @@ git_setbranch() {
 	echo -en "Enter the number corresponding to the branch you want: "
 	echo -en "$OFF"
 	read  linenumber
-	gitbranch="$(ui_readline $linenumber $outdir/branchlist | tr -d [\*" "])"
+	gitbranch="$(ui_readline $linenumber $_outdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git checkout "$gitbranch" 2>&1
 
-	if [ $? -eq 0 ]; then
-		echo "$BLDPlease commit or stash your changes first.$OFF"
+	if [ $? -ne 0 ]; then
+		echo -e "$BLD\0Please commit or stash your changes first.$OFF"
 		return 1
 	fi
 
@@ -356,7 +356,8 @@ stat=$?
 
 declare kabi_graph_msg="
 $BLD\0You must build the kABI graph first.$OFF
-\"kabi-graph -c\" does a clean kernel build and creates the kABI graph.
+\"$BLD\0kabi-graph$OFF\" does a clean kernel build and creates the kABI graph
+or type \"$BLD\0kabi-graph -h$OFF\" to see more options.
 "
 case $stat in
 	0 )	# all is well
