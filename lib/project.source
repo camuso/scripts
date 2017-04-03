@@ -39,6 +39,7 @@ function prj_addblanklines {
 #
 # $1 - path and name of prjfile
 # $2 - number of lines (size of) prjfile
+# $3 - optional switch to disable blank line checking
 #
 # If the prjfile file does not exist, then create it and initialize it by
 # pumping as many empty lines in it as there will be entries in the
@@ -47,6 +48,10 @@ function prj_addblanklines {
 function prj_init_prjfile {
 	prjfile=$1
 	prj_prjfile_size=$2
+
+	local disable_blank_check=false
+
+	[ $# -eq 3 ] && disable_blank_check=true
 
 	local prjstr_prjfile_created=\
 "\tProject file "$attr_bold""$prjfile""$attr_OFF" is being created.\n\
@@ -73,7 +78,7 @@ function prj_init_prjfile {
 		fi
 	fi
 
-	return $(prj_check_for_blanks $prjfile)
+	$disable_blank_check && return 0 || return $(prj_check_for_blanks $prjfile)
 }
 
 function prj_get_prjfile {
