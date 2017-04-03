@@ -33,8 +33,8 @@ declare b_exported=false
 #*********************
 # Search Modes          # Search for ...
 #                       # -----------------------------
-declare -i smode_fun=0	# exported functions
-declare -i smode_sym=1  # kABI-sensitive symbols
+declare -i smode_sym=0  # kABI-sensitive symbols
+declare -i smode_fun=1  # exported functions
 declare -i smode_def=2  # struct and union definitions
 declare -i smode_cnt=3  # count instances of one of the above
 declare -i smode
@@ -209,8 +209,8 @@ show_search_mode() {
 	b_exported=false
 
 	case $_mode_ in
-		$smode_fun ) echo "Exported Functions"; b_exported=true ;;
 		$smode_sym ) echo "kABI Sensitive Symbols";;
+		$smode_fun ) echo "Exported Functions"; b_exported=true ;;
 		$smode_def ) echo "Symbol definition" ;;
 		$smode_cnt ) echo "Count symbol instances" ;;
 	esac
@@ -291,7 +291,9 @@ menu_parser() {
 		s )	ui_cycle_state smode 4
 			prj_set_item $prj_smode $smode
 			;;
-		h )	echo -e "$usagestr"
+		h )	[ $(which kabiscan.help) ] \
+				&& kabiscan.help \
+				|| echo -e "$usagestr"
 			;;
 		q )	set_booleans
 			rm -f $last_tag_file
@@ -414,7 +416,7 @@ done
 prj_entries=$index
 [ -d "$prj_dir" ] || mkdir $prj_dir
 [ -f "$prj_file" ] || touch $prj_file
-prj_init_prjfile $prj_file $prj_entries
+prj_init_prjfile $prj_file $prj_entries true
 stat=$?
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
