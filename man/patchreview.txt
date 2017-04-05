@@ -10,12 +10,16 @@ are retained in a project file.
 Installation
 ------------
 
-The patchreview script and its dependencies will be installed in
-$HOME/bin and subdirectories under $HOME/bin.
+The patchreview script and its dependencies can be untarred into any
+directory, however that directory must be in your executable path.
 
-From the top of your home directory:
+For example:
 
-$ tar -xvf patchrevdev.tar
+	$ cd $HOME
+	$ mkdir mybin
+	$ export PATH=$PATH:$HOME/mybin
+	$ cd mybin
+	$ tar -xvf patchrevdev.tar
 
 -----------------
 Runing the script
@@ -46,9 +50,6 @@ with the b option.
 The first time the script is run, the user is queried for the following
 items.
 
-* The user's mail client. Currently only Thunderbird and Mutt are
-  supported.
-
 * The user's preferred editor. Currently only Vim and Emacs are
   supported.
 
@@ -61,7 +62,6 @@ _________________________________________________________________________
     -------------------
     Most recent tag             : kernel-3.10.0-604.el7
  b  Current git branch          : rh7.work
- m  Mail client                 : Mutt
  d  RHEL Patch directory        : /home/tcamuso/Maildir/work/cur has 20 files
  w  Upstream patch directory    : ../temp
  e  Editor                      : Vim
@@ -114,9 +114,6 @@ b * Set's the git branch from which you will be operating. It is assumed
  The current branch is indicated with a *
  To select a different branch from the choices, simply type the number of
  the desired branch at the prompt.
-
-m * Selects from which mail client the patches will be extracted.
-    Currently, there are only two choices: Thunderbird and Mutt.
 
 d * RHEL directory, as described above in "Running the script".
 
