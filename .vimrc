@@ -228,7 +228,7 @@ let s:tab_matcher = 'match WhitespaceTabs /\t/'
 function! TabsCheck ()
 	let g:check_tabs = exists('g:check_tabs') ? !g:check_tabs : 1
 	if g:check_tabs
-		highlight WhitespaceTabs ctermbg=4 guibg=4
+		highlight WhitespaceTabs ctermbg=blue guibg=blue
 		exec s:tab_matcher
 	"	highlight WhitespaceEOL ctermbg=red guibg=red
 	"	match WhitespaceEOL /\s\+$/
