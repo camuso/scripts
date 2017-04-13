@@ -1,9 +1,7 @@
 #!/bin/bash
 #
 # patchreview
-
-version="4.5"
-
+#
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
 # be considered.
@@ -73,6 +71,7 @@ declare rc_run=1	# Run patchreview
 
 function exit_patchreview {
 	set_booleans
+	prj_set_item $prj_applymode $applymode
 	[ -f "$last_tag_file" ] && rm -f $last_tag_file
 	exit $1
 }
@@ -116,7 +115,6 @@ function get_booleans {
 	for bool in \
 	b_rename_infiles \
 	b_save_githead \
-	b_apply_patches \
 	b_fmt_upstream \
 	b_gitam_err_abort \
 	b_40digit
@@ -147,12 +145,14 @@ function get_booleans {
 # added in v4.4
 # 	b_40digit
 #
+# removed in v5.0
+#	b_apply_patches
+#
 function set_booleans {
 	index=$boolindex
 	for bool in \
 	b_rename_infiles \
 	b_save_githead \
-	b_apply_patches \
 	b_fmt_upstream \
 	b_gitam_err_abort \
 	b_40digit
@@ -239,13 +239,12 @@ $BLD
  e  Editor                      :$OFF $editor$BLD
 
     $UND\0Run Parameters     $OFF$BLD
- 1  Rename input files          : $OFF$b_rename_infiles$BLD
- 2  Save git head               : $OFF$b_save_githead$BLD
- 3  Apply patches (git am)      : $OFF$b_apply_patches$BLD
- 4  git am abort on error       : $OFF$b_gitam_err_abort$BLD
- 5  Format upstream patches     : $OFF$b_fmt_upstream$BLD
- 6  Size of commit hash         : $OFF$(show_hash_size $b_40digit)$BLD digits
- 7  Compare mode                : $OFF$(show_cmpmode $cmpmode)$BLD
+ 1  Rename input files          :$OFF $b_rename_infiles$BLD
+ 2  Save git head               :$OFF $b_save_githead$BLD
+ 3  Format upstream patches     :$OFF $b_fmt_upstream$BLD
+ 4  Size of commit hash         :$OFF $(show_hash_size)$BLD digits
+ 5  Compare mode                :$OFF $(show_cmpmode)$BLD
+ 6  Patch apply mode            :$OFF $(show_applymode)$BLD$(show_failover 7 )
 
     $UND\0Control            $OFF$BLD
  r  Run patch review
@@ -285,16 +284,18 @@ function menu_parser {
 			;;
 		2 )	ui_toggle b_save_githead
 			;;
-		3 )	ui_toggle b_apply_patches
+		3 )	ui_toggle b_fmt_upstream
 			;;
-		4 )	ui_toggle b_gitam_err_abort
+		4 )	ui_toggle b_40digit
 			;;
-		5 )	ui_toggle b_fmt_upstream
-			;;
-		6 )	ui_toggle b_40digit
-			;;
-		7 )	ui_cycle_state cmpmode 3
+		5 )	ui_cycle_state cmpmode 3
 			prj_set_item $prj_cmpmode $cmpmode
+			;;
+		6 )	ui_cycle_state applymode 3
+			prj_set_item $prj_applymode $applymode
+			;;
+		7 )	[ $applymode -ne $applymode_off ] \
+				&& ui_toggle b_gitam_err_abort
 			;;
 		C )	clean_directories
 			;;
@@ -310,6 +311,8 @@ function menu_parser {
 			;;
 		i )	init_booleans
 			get_booleans
+			applymode=$applymode_norm
+			prj_set_item $prj_applymode $applymode
 			;;
 		q )	exit_patchreview 0
 			;;
@@ -337,9 +340,10 @@ function menu_loop {
 	#
 	editor=$(prj_get_item $prj_editor)
 
-	# get the comparison mode
+	# get the apply and comparison modes
 	#
 	cmpmode=$(prj_get_item $prj_cmpmode)
+	applymode=$(prj_get_item $prj_applymode)
 
 	# delete any "scratch" file from the indir
 	#
@@ -387,13 +391,13 @@ git_get_lasttag lasttag $last_tag_file
 # Add new non-boolean parameters to the top of the list.
 #
 for offset in \
+prj_applymode \
 prj_cmpmode \
 prj_editor \
 prj_indir \
 prj_outdir \
 prj_b_rename_infiles \
 prj_b_save_githead \
-prj_b_apply_patches \
 prj_b_fmt_upstream \
 prj_b_gitam_err_abort \
 prj_b_40digit
@@ -430,7 +434,9 @@ if [ $? -ne 0 ]; then
 	set_editor
 	init_booleans
 	cmpmode=$cmpmode_batch
+	applymode=$applymode_norm
 	prj_set_item $prj_cmpmode $cmpmode
+	prj_set_item $prj_applymode $applymode
 fi
 
 # Create the sessions directory and sessions file to log session
@@ -457,12 +463,12 @@ while true; do
 		exec_boolean b_save_githead false "git_log_head"
 	fi
 
-	if $b_apply_patches; then
-		git am --abort
+	if [ $applymode -ne $applymode_off ]; then
+		git am --abort 2>&1>/dev/null
 		patchcount=0
-		exec_boolean b_apply_patches false "apply_patches"
-		st=$?
+		apply_patches
 		git_log_head
+		applymode=$applymode_off
 	fi
 
 	# Generate a patch set from the original upstream patches.

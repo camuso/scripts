@@ -8,6 +8,8 @@
 # source $LIB/project.source
 # source $LIB/gitutilities.source
 
+version="5.0"
+
 b_ui_int_first_getyn=false	# For lib/ui.source
 
 # Declare the global variables
@@ -16,6 +18,7 @@ declare indir
 declare outdir
 declare editor
 declare cmpmode
+declare applymode
 declare prj_entries=0
 declare index=0
 declare boolcount=0
@@ -36,18 +39,22 @@ declare prj_indir
 declare prj_outdir
 declare prj_editor
 declare prj_cmpmode
+declare prj_applymode
 declare prj_b_rename_infiles
 declare prj_b_save_githead
-declare prj_b_apply_patches
 declare prj_b_fmt_upstream
 declare prj_b_gitam_err_abort
 declare prj_b_40digit
 
 declare lasttag=""
 
-declare cmpmode_off=0
-declare cmpmode_batch=1
-declare cmpmode_inter=2
+declare -i cmpmode_off=0
+declare -i cmpmode_batch=1
+declare -i cmpmode_inter=2
+
+declare -i applymode_off=0
+declare -i applymode_norm=1
+declare -i applymode_3way=2
 
 function set_editor {
 	echo -e "$attr_bold"
@@ -258,16 +265,17 @@ function create_commit_msg {
 # retry_patch
 #
 # $1 - pathname of patch
-# $2 - outdir
 #
 # GLOBALS
 #	commit_msg_file
+#	outdir
 #
 function retry_patch {
 	local retrystat
 	local retryname=$(basename -s .patch "$1")
 	local commit_msg_path="$outdir"/"$commit_msg_file"
 
+	echo -e "\ngit am aborted. Trying patch with fuzz..\n"
 	create_commit_msg "$1" "$2"
 	git clean -df --exclude=*.rej
 	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$retryname".retry
@@ -300,36 +308,44 @@ function retry_patch {
 	# read -n1
 }
 
+apply_abort() {
+	echo -e "\ngit am aborted. Exiting script ...\n"
+	exit 1
+}
+
 # apply_patches
 #
 # GLOBALS
 #	indir
 #	outdir
+#	patchcount
 #	bp_commits
+#	applymode
+#	b_gitam_err_abort
 #
 function apply_patches {
 	# patchcount is global
 	local stat=0
+
+	[ $applymode -eq $applymode_off ] && return 0
 	echo "" > "$outdir/$bp_commits"
 
-	# for patch in $(ls $indir/*.patch); do
 	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
 		let patchcount++
 		echo "$patch"
-		git am -3 $patch
-		stat=$?
-		# echo "git am stat: $stat"
+		case $applymode in
+		    $applymode_norm  ) git am $patch; stat=$? ;;
+		    $applymode_3way  ) git am -3 $patch; stat=$? ;;
+		esac
 
 		if [ $stat -ne 0 ]; then
-			git am --abort
-			echo -e "\ngit am aborted. Exiting script ...\n"
-			$b_gitam_err_abort && exit 1
-			retry_patch "$patch"
+			$b_gitam_err_abort && apply_abort || retry_patch "$patch"
 		fi
 
 		printf "%3d " $patchcount >> "$outdir/$bp_commits"
 		git log --oneline -n1 >> "$outdir/$bp_commits"
 	done
+
 	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
 	return $stat
 }
@@ -339,14 +355,38 @@ show_hash_size() {
 }
 
 show_cmpmode() {
-	local _mode_=$1
 
-	case $_mode_ in
+	case $cmpmode in
 	    $cmpmode_off   )	echo "OFF" ;;
 	    $cmpmode_batch )	echo "Batch" ;;
 	    $cmpmode_inter )	echo "Interactive Only" ;;
 		         * )	echo "Not a valid comparison mode" ;;
 	esac
+}
+
+show_applymode() {
+
+	case $applymode in
+	    $applymode_off   )	echo "OFF" ;;
+	    $applymode_norm  )	echo "git am" ;;
+	    $applymode_3way  )	echo "git am 3-way merge" ;;
+	                   * )	echo "Not a valid apply mode" ;;
+	esac
+}
+
+get_failovermode() {
+	$b_gitam_err_abort && echo "Abort" || echo "try \"patch --fuzz=3\""
+}
+
+show_failover() {
+	local num=$1
+	failoverstr=$(
+cat <<EOF
+
+ $num  Action on git am error      :$OFF $(get_failovermode)$BLD
+EOF
+)
+	[ $applymode -ne $applymode_off ] && echo -e "$failoverstr"
 }
 
 # init_session_file()

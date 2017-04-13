@@ -73,6 +73,7 @@ declare rc_run=1	# Run patchdevelop
 
 function exit_patchdevelop {
 	set_booleans
+	prj_set_item $prj_applymode $applymode
 	[ -e "$last_tag_file" ] && rm -f $last_tag_file
 	exit $1
 }
@@ -108,7 +109,6 @@ function get_booleans {
 	for bool in \
 	b_rename_infiles \
 	b_save_githead \
-	b_apply_patches \
 	b_fmt_upstream \
 	b_gitam_err_abort \
 	b_40digit
@@ -137,7 +137,6 @@ function set_booleans {
 	for bool in \
 	b_rename_infiles \
 	b_save_githead \
-	b_apply_patches \
 	b_fmt_upstream \
 	b_gitam_err_abort \
 	b_40digit
@@ -161,11 +160,10 @@ $BLD
 
     $UND\0Run Parameters     $OFF$BLD
  1  Rename input files          :$OFF $b_rename_infiles$BLD
- 2  Apply patches (git am)      :$OFF $b_apply_patches$BLD
- 3  git am abort on error       :$OFF $b_gitam_err_abort$BLD
- 4  Format upstream patches     :$OFF $b_fmt_upstream$BLD
- 5  Size of commit hash         :$OFF $(show_hash_size $b_40digit)$BLD digits
- 6  Compare mode                :$OFF $(show_cmpmode $cmpmode)$BLD
+ 2  Format upstream patches     :$OFF $b_fmt_upstream$BLD
+ 3  Size of commit hash         :$OFF $(show_hash_size $b_40digit)$BLD digits
+ 4  Compare mode                :$OFF $(show_cmpmode $cmpmode)$BLD
+ 5  Patch apply mode            :$OFF $(show_applymode)$BLD$(show_failover 6 )
 
     $UND\0Control            $OFF$BLD
  r  Run patch review
@@ -200,19 +198,23 @@ function menu_parser {
 			;;
 		1 )	ui_toggle b_rename_infiles
 			;;
-		2 )	ui_toggle b_apply_patches
+		2 )	ui_toggle b_fmt_upstream
 			;;
-		3 )	ui_toggle b_gitam_err_abort
+		3 )	ui_toggle b_40digit
 			;;
-		4 )	ui_toggle b_fmt_upstream
-			;;
-		5 )	ui_toggle b_40digit
-			;;
-		6 )	ui_cycle_state cmpmode 3
+		4 )	ui_cycle_state cmpmode 3
 			prj_set_item $prj_cmpmode $cmpmode
+			;;
+		5 )	ui_cycle_state applymode 3
+			prj_set_item $prj_applymode $applymode
+			;;
+		6 )	[ $applymode -ne $applymode_off ] \
+				&& ui_toggle b_gitam_err_abort
 			;;
 		i )	init_booleans
 			get_booleans
+			applymode=$applymode_norm
+			prj_set_item $prj_applymode $applymode
 			;;
 		q )	exit_patchdevelop 0
 			;;
@@ -243,6 +245,7 @@ function menu_loop {
 	# get the comparison mode
 	#
 	cmpmode=$(prj_get_item $prj_cmpmode)
+	applymode=$(prj_get_item $prj_applymode)
 
 	# delete any "scratch" file from the indir
 	#
@@ -290,13 +293,13 @@ git_get_lasttag lasttag $last_tag_file
 # Add new non-boolean parameters to the top of the list.
 #
 for offset in \
+prj_applymode \
 prj_cmpmode \
 prj_editor \
 prj_mode \
 prj_indir \
 prj_outdir \
 prj_b_rename_infiles \
-prj_b_apply_patches \
 prj_b_fmt_upstream \
 prj_b_gitam_err_abort \
 prj_b_40digit
@@ -330,7 +333,9 @@ if [ $? -ne 0 ]; then
 	set_editor
 	init_booleans
 	cmpmode=$cmpmode_batch
+	applymode=$applymode_norm
 	prj_set_item $prj_cmpmode $cmpmode
+	prj_set_item $prj_applymode $applymode
 fi
 
 ##############################################
@@ -347,11 +352,11 @@ while true; do
 		[ $? -ne 0 ] && continue
 	fi
 
-	if $b_apply_patches; then
-		git am --abort
+	if [ $applymode -ne $applymode_off ]; then
+		git am --abort 2>&1>/dev/null
 		patchcount=0
-		exec_boolean b_apply_patches false "apply_patches"
-		st=$?
+		apply_patches
+		applymode=$applymode_off
 	fi
 
 	# Generate a patch set from the original upstream patches.
