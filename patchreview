@@ -288,7 +288,7 @@ function menu_parser {
 			;;
 		4 )	ui_toggle b_40digit
 			;;
-		5 )	ui_cycle_state cmpmode 3
+		5 )	ui_cycle_state cmpmode 4
 			prj_set_item $prj_cmpmode $cmpmode
 			;;
 		6 )	ui_cycle_state applymode 3
@@ -358,6 +358,13 @@ function menu_loop {
 		[ $stat -eq $rc_run ] && break
 	done
 	return $stat
+}
+
+exec_patcmp() {
+	local xval="$1"
+	patbatcmpmgr -R $indir -U $outdir -o $mmfile "$xval"
+	patcmp -m $mmfile $indir $outdir $editor
+	[ -f $mmfile ] && rm -f $mmfile
 }
 
 #############################
@@ -494,15 +501,12 @@ while true; do
 		#
 		[ -f $mmfile ] && rm -f $mmfile
 
-		if [ $cmpmode -eq $cmpmode_batch ]; then
-			patbatcmpmgr -R $indir -U $outdir -o $mmfile
-			patcmp -m $mmfile $indir $outdir $editor
-			[ -f $mmfile ] && rm -f $mmfile
-		elif [ $cmpmode -eq $cmpmode_inter ]; then
-			patcmp $indir $outdir $editor
-		else
-			cmpmode=$cmpmode_off
-		fi
+		case $cmpmode in
+			$cmpmode_batch ) exec_patcmp "-X" ;;
+			$cmpmode_setup ) exec_patcmp ;;
+			$cmpmode_inter ) patcmp $indir $outdir $editor ;;
+			             * ) cmpmode=$cmpmode_off
+		esac
 	fi
 
 	if [ $menu_stat -eq $rc_run ]; then

@@ -51,6 +51,7 @@ declare lasttag=""
 declare -i cmpmode_off=0
 declare -i cmpmode_batch=1
 declare -i cmpmode_inter=2
+declare -i cmpmode_setup=3
 
 declare -i applymode_off=0
 declare -i applymode_norm=1
@@ -360,6 +361,7 @@ show_cmpmode() {
 	    $cmpmode_off   )	echo "OFF" ;;
 	    $cmpmode_batch )	echo "Batch" ;;
 	    $cmpmode_inter )	echo "Interactive Only" ;;
+	    $cmpmode_setup )	echo "Batch compare setup" ;;
 		         * )	echo "Not a valid comparison mode" ;;
 	esac
 }

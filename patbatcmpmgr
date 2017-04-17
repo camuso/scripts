@@ -40,6 +40,7 @@ declare b_found_first_bool=false
 declare b_nodiffst
 declare b_nopaths
 declare b_strict
+declare b_exec_exit=false
 
 declare -i verbosemode
 declare -i vmode_off=0
@@ -79,6 +80,7 @@ $(basename $0) [-h -R -U -o <file>]
   -R rhdir  - optional directory containing the RHEL patches
   -U usdir  - optional directory containing the Upstream patches
   -o ofile  - optional output file. Default is /dev/stdout
+  -X        - execute saved options and exit without presenting the menu
 
   The rhdir and usdir must have the same number of patch files.
 
@@ -181,7 +183,7 @@ get_booleans() {
 	for bool in \
 	b_nodiffst \
 	b_nopaths \
-	b_strict 
+	b_strict
 	do
 		eval $bool=$(prj_get_item $index)
 		ui_digit2bool $bool
@@ -199,7 +201,7 @@ set_booleans() {
 	for bool in \
 	b_nodiffst \
 	b_nopaths \
-	b_strict 
+	b_strict
 	do
 		prj_set_item $index ${!bool}
 		let index++
@@ -210,7 +212,7 @@ set_booleans() {
 show_verbosemode() {
 	local _mode_=$1
 
-	case $_mode_ in 
+	case $_mode_ in
 		$vmode_off  ) echo "OFF"; b_verbose=false; b_veryverb=false ;;
 		$vmode_on   ) echo "Verbose"; b_verbose=true; b_veryberb=false ;;
 		$vmode_very ) echo "Very Verbose"; b_verbose=true; b_veryverb=true ;;
@@ -363,7 +365,7 @@ lasttag=$(cat /dev/shm/lasttag)
 
 # Parse the options, if any
 #
-while getopts hR:U:o: OPTION; do
+while getopts hXR:U:o: OPTION; do
     case "$OPTION" in
 
 	h ) usage | less
@@ -373,6 +375,8 @@ while getopts hR:U:o: OPTION; do
 	U ) usdir=$OPTARG
 	    ;;
 	o ) pfile=$OPTARG
+	    ;;
+	X ) b_exec_exit=true
 	    ;;
 	* ) echo "unrecognized option"
 	    usage 127
@@ -394,7 +398,7 @@ prj_usdir \
 prj_ofile \
 prj_b_nodiffst \
 prj_b_nopaths \
-prj_b_strict 
+prj_b_strict
 do
 	let index++
 	let $offset=$index
@@ -450,6 +454,12 @@ while true; do
 	verbosemode=$(prj_get_item $prj_verbosemode)
 
 	while true; do
+
+		# Don't bother with the menu if we just want to execute
+		# and exit. See -X option.
+		#
+		$b_exec_exit && break
+
 		menu_parser
 		[ $? -eq $rc_run ] && break
 	done
@@ -462,4 +472,12 @@ while true; do
 
 	echo "patbatcmp $optstr -o $ofile $rhdir $usdir"
 	patbatcmp $optstr -o $ofile $rhdir $usdir
+
+	# Only one pass if all we want is to execute and exit.
+	# See -X option.
+	#
+	if $b_exec_exit; then
+		$rmlasttag && rm -f /dev/shm/lasttag
+		exit 0
+	fi
 done
