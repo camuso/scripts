@@ -2,15 +2,14 @@
 Patchdevelop
 ============
 
-This menu-driven script allows the user to compare his set of patches with
-patches from upstream. The script's settings are sticky, as they are
-retained in a project file.
+This menu-driven script allows the user to compare his set of patches
+with patches from upstream.
 
 ------------
 Installation
 ------------
 
-The patchreview script and its dependencies can be untarred into any
+The patchdevelp script and its dependencies can be untarred into any
 directory, however that directory must be in your executable path.
 
 For example:
@@ -50,12 +49,13 @@ with the b option.
 The first time the script is run, the user is queried for the following
 items.
 
-* The user's preferred editor. Currently only Vim and Emacs are
-  supported.
-
 * The RHEL patch directory
 
 * The Upstream patch directory
+
+* The user's preferred editor. Currently only Vim and Emacs are
+  supported.
+
 _________________________________________________________________________
 
     Environment
@@ -68,11 +68,12 @@ _________________________________________________________________________
 
     Run Parameters
     -------------------
- 1  Rename input files          : false
- 2  Format upstream patches     : false
+ 1  Rename input files          : true
+ 2  Format upstream patches     : true
  3  Size of commit hash         : 40 digits
- 4  Compare mode                : Batch compare setup
- 5  Patch apply mode            : OFF
+ 4  Compare mode                : Batch
+ 5  Patch apply mode            : git am
+ 6  Action on git am error      : Abort
 
     Control
     -------------------
@@ -131,7 +132,7 @@ false by pressing the corresponding option number.
 
     Resets to false after a run.
 
-3 * Size of the upstream commit hash default is 40.
+3 * Size of the upstream commit hash, default is 40.
 
     Pressing this key toggles it to accept hexadecimal numbers ranging
     in size from 7 to 40 digits.
@@ -147,10 +148,12 @@ false by pressing the corresponding option number.
     corresponding to the patches in the "Patch directory" followed by the
     summary line of the patch and are written into the Work directory.
 
-4 * The Comparison Mode is selected by a state switch. The user
-    cycles through the modes by repeatedly pressing this key.
+4 * The Comparison Mode is selected by a state switch. The user cycles
+    through the modes by repeatedly pressing this key.
 
     Batch - (default) This will invoke an automatic batch comparison
+            of the patches.
+
 	    The utility will compare the files and create a list of
 	    those patch pairs that are not congruent according to the
 	    settings in the utility.  The list of incongruent patch
@@ -168,7 +171,7 @@ false by pressing the corresponding option number.
     OFF - In the OFF mode, the pairs of patches are not diff'd after any
           preceding operations.
 
-5 * The Patch apply mode is seleted by a state switch. The user cycles
+5 * The Patch apply mode is secleted by a state switch. The user cycles
     through the modes by repeatedly pressing this key.
 
     git am - (default) Applies the patches in the RHEL directory to the
@@ -178,7 +181,7 @@ false by pressing the corresponding option number.
 
     OFF - does not attempt to apply the RHEL patches.
 
-6 * Action on git am error is what the script will do if the selected
+6 * "Action on git am error" is what the script will do if the selected
     patch apply mode encounters an error.
 
     This option is only visible when option 5 above is not OFF, since it
@@ -198,11 +201,7 @@ The "Control" section of the menu executes operations as follows.
 r - Run the script on the patches according to the parameter settings as
     described above.
 
-i - Initialize the script's Parameters to their default settings, which is
-    all in the "true" state.
-
-p - Replace an upstream commit. The user is prompted for the patch number and
-    the commit hash of the new upstream commit.
+i - Initialize the script's Parameters to their default settings.
 
 h - Display this help file.
 
@@ -217,10 +216,8 @@ _________________________________________________________________________
 Sub Menus
 ---------
 
-These menus are presented when "r" (run) is pressed and option 6 or 7
-is selected. Options 6 and 7 are mutually exclusive, so that enabling
-one disables the other. However, the may simultaneously be in the
-false state.
+These menus are presented when "r" (run) is pressed and option 4 is not
+in the OFF state.
 
 These menus compare the patches in the RHEL directory with those in
 the Upstream directory.
@@ -385,9 +382,4 @@ q - Quits and returns to the caller.
 Any other key advances the patch counter to present the next RHEL/upstream
 pair of patches to examine.
 _________________________________________________________________________
-
-These menus are presented when "r" (run) is pressed and option 6 or 7
-is selected. Options 6 and 7 are mutually exclusive, so that enabling
-one disables the other. However, the may simultaneously be in the
-false state.
 

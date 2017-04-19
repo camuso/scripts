@@ -3,8 +3,7 @@ Patchreview
 ===========
 
 This menu-driven script allows the user to compare his set of patches
-with patches from upstream. The script's settings are sticky, as they
-are retained in a project file.
+with patches from upstream.
 
 ------------
 Installation
@@ -50,12 +49,13 @@ with the b option.
 The first time the script is run, the user is queried for the following
 items.
 
-* The user's preferred editor. Currently only Vim and Emacs are
-  supported.
-
 * The RHEL patch directory
 
 * The Upstream patch directory
+
+* The user's preferred editor. Currently only Vim and Emacs are
+  supported.
+
 _________________________________________________________________________
 
     Environment
@@ -68,13 +68,13 @@ _________________________________________________________________________
 
     Run Parameters
     --------------------
- 1  Rename input files          : false
- 2  Save git head               : false
- 3  Format upstream patches     : false
+ 1  Rename input files          : true
+ 2  Save git head               : true
+ 3  Format upstream patches     : true
  4  Size of commit hash         : 40 digits
- 5  Compare mode                : Interactive Only
+ 5  Compare mode                : Batch
  6  Patch apply mode            : git am
- 7  Action on git am error      : try "patch --fuzz=3"
+ 7  Action on git am error      : Abort
 
     Control
     --------------------
@@ -134,6 +134,7 @@ pressing the corresponding option number.
 
 2 * If this is true, the current git head is saved and can be restored
     later using the 'G' control menu option.
+
     Resets to false after a run.
 
 3 * If true, recreates the upstream patches in the "Upstream" directory
@@ -142,7 +143,7 @@ pressing the corresponding option number.
 
     Resets to false after a run.
 
-4 * Size of the upstream commit hash default is 40.
+4 * Size of the upstream commit hash, default is 40.
 
     Pressing this key toggles it to accept hexadecimal numbers ranging
     in size from 7 to 40 digits.
@@ -159,10 +160,12 @@ pressing the corresponding option number.
     summary line of the patch and are written into the Work directory.
 
 
-5 * The Comparison Mode is selected by a state switch. The user
-    cycles through the modes by repeatedly pressing this key.
+5 * The Comparison Mode is selected by a state switch. The user cycles
+    through the modes by repeatedly pressing this key.
 
     Batch - (default) This will invoke an automatic batch comparison
+            of the patches.
+
 	    The utility will compare the files and create a list of
 	    those patch pairs that are not congruent according to the
 	    settings in the utility.  The list of incongruent patch
@@ -180,7 +183,7 @@ pressing the corresponding option number.
     OFF - In the OFF mode, the pairs of patches are not diff'd after any
           preceding operations.
 
-6 * The Patch apply mode is seleted by a state switch. The user cycles
+6 * The Patch apply mode is selected by a state switch. The user cycles
     through the modes by repeatedly pressing this key.
 
     git am - (default) Applies the patches in the RHEL directory to the
@@ -190,7 +193,7 @@ pressing the corresponding option number.
 
     OFF - does not attempt to apply the RHEL patches.
 
-7 * Action on git am error is what the script will do if the selected
+7 * "Action on git am error" is what the script will do if the selected
     patch apply mode encounters an error.
 
     This option is only visible when option 6 above is not OFF, since it
@@ -210,10 +213,6 @@ operations as follows.
 r - Run the script on the patches according to the parameter settings as
     described above.
 
-    Options 1 through 5 are examined and the corresponding action takes
-    place. When these operations are completed, the patch pair
-    comparison operation takes place according to the selected setting.
-
 i - Initialize the script's Parameters to their default settings.
 
 G - Present a list of git heads for the user to choose. These are git
@@ -231,13 +230,17 @@ W - Delete the contents of the "Work directory". The user will be
     prompted to be sure s/he wants to take this action before it is
     executed.
 
-C - Delete the contents of both the "Patch directory" and the "Work
+C - Delete the contents of both the "RHEL directory" and the "Upstream
     directory". The user will be prompted to be sure s/he wants to take
     this action before it is executed.
 
 S - Clear the sessions log file. This will delete all the heads that
     were saved by applying patch sets. Not something you want to do
     frequently but may be useful from time to time.
+
+N - Performs the actions of C and S above without further prompting
+    and restores the git head to the most recent tag of the current
+    branch.
 
 h - Display this help text.
 
@@ -252,7 +255,7 @@ _________________________________________________________________________
 Sub Menus
 ---------
 
-These menus are presented when "r" (run) is pressed and option 7 is not
+These menus are presented when "r" (run) is pressed and option 5 is not
 in the OFF state.
 
 These menus compare the patches in the RHEL directory with those in
