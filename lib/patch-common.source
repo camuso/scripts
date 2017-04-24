@@ -276,6 +276,7 @@ function retry_patch {
 	local retryname=$(basename -s .patch "$1")
 	local commit_msg_path="$outdir"/"$commit_msg_file"
 
+	git am --abort
 	echo -e "\ngit am aborted. Trying patch with fuzz..\n"
 	create_commit_msg "$1" "$2"
 	git clean -df --exclude=*.rej
@@ -309,7 +310,7 @@ function retry_patch {
 	# read -n1
 }
 
-apply_abort() {
+exit_on_gitam_err() {
 	echo -e "\ngit am aborted. Exiting script ...\n"
 	exit 1
 }
@@ -340,7 +341,8 @@ function apply_patches {
 		esac
 
 		if [ $stat -ne 0 ]; then
-			$b_gitam_err_abort && apply_abort || retry_patch "$patch"
+			$b_gitam_err_abort && exit_on_gitam_err \
+				           || retry_patch "$patch"
 		fi
 
 		printf "%3d " $patchcount >> "$outdir/$bp_commits"
