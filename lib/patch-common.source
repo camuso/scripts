@@ -8,9 +8,13 @@
 # source $LIB/project.source
 # source $LIB/gitutilities.source
 
-version="5.0"
+version="5.2"
 
 b_ui_int_first_getyn=false	# For lib/ui.source
+
+# Enable extglob for more specific directory actions
+#
+shopt -s extglob
 
 # Declare the global variables
 #
@@ -56,6 +60,11 @@ declare -i cmpmode_setup=3
 declare -i applymode_off=0
 declare -i applymode_norm=1
 declare -i applymode_3way=2
+
+declare rhel6kernstr="kernel-2.6.32"
+declare rhel7kernstr="kernel-3.10.0"
+declare pegaskernstr="kernel-pegas-"
+declare -i krnstrlen=${#rhel6kernstr}
 
 function set_editor {
 	echo -e "$attr_bold"
@@ -401,4 +410,52 @@ init_session_file() {
 	echo "$(git symbolic-ref --short HEAD) $(git log --oneline -n1)" \
 		> $sesdir/$sesfile
 
+}
+
+show_branch_mismatch() {
+	local lasttag="$1"
+	local distro="$2"
+
+	echo -e "$BLD\0Patches are$OFF $distro$BLD but kernel is$OFF $lasttag"
+	doyn "Switch branches now?" "git_setbranch"
+}
+
+# check_patchvbranch - see if the patch names match the branch
+#
+# Globals
+# 	rhel*str, pegas*str - strings that represent the correspoinding kernels
+# 	indir - directory containing the RHEL patches
+#
+check_patchvbranch() {
+	local pat
+	local dist
+	local lasttag=$(cat $last_tag_file)
+	local tag=${lasttag:0:$krnstrlen}
+
+	[ $indir ] || return 1
+	stat $indir/*.patch > /dev/null 2>&1
+	[ $? -eq 0 ] || return 1
+	echo "indir: $indir"
+	pat=$(ls -1 $indir/*.patch | head -1)
+	pat=$(basename $pat)
+
+	dist=${pat:0:5}
+
+	case $dist in
+	    "RHEL6" ) ;&
+	    "Rhel6" ) ;&
+	    "rhel6" ) [ "$tag" == "rhel6kernstr" ] || show_branch_mismatch "$lasttag" "RHEL6";;
+
+	    "RHEL7" ) ;&
+	    "Rhel7" ) ;&
+	    "rhel7" ) [ "$tag" == "rhel7kernstr" ] || show_branch_mismatch "$lasttag" "RHEL7";;
+
+	    "PEGAS" ) ;&
+	    "Pegas" ) ;&
+	    "pegas" ) [ "$tag" == "pegaskernstr" ] || show_branch_mismatch "$lasttag" "Pegas";;
+
+	          * ) show_branch_mismatch "$lasttag" "$dist";;
+	esac
+
+	return 0
 }
