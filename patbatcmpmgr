@@ -20,7 +20,10 @@ trap control_c SIGINT
 #
 shopt -s extglob
 
-LIB="$HOME/bin/lib"
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+declare MYDATA=$MYDIR/.data
+LIB="$MYLIB"
 
 #######################################
 # External Source Files
@@ -57,7 +60,7 @@ declare -i prj_b_nodiffst
 declare -i prj_b_nopaths
 declare -i prj_b_strict
 
-declare prj_dir="$HOME/bin/.data"
+declare prj_dir="$MYDATA"
 declare prj_file="$prj_dir/patbatcmpmgr.prj"
 
 declare rhdir		# directory containing RHEL patch files

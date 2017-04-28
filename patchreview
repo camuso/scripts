@@ -421,9 +421,9 @@ do
 done
 
 prj_entries=$index
-[ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
-[ -e "$HOME/bin/.data/patchreview.prj" ] || touch $HOME/bin/.data/patchreview.prj
-prj_init_prjfile ~/bin/.data/patchreview.prj $prj_entries
+[ -d "$MYDATA" ] || mkdir $MYDATA
+[ -e "$MYDATA/patchreview.prj" ] || touch $MYDATA/patchreview.prj
+prj_init_prjfile $MYDATA/patchreview.prj $prj_entries
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
 # new project file has been created and its values must be initialized.

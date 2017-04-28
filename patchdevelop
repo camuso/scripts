@@ -1,8 +1,6 @@
 #!/bin/bash
 #
-# patchdevelop - based on patchreview v3.1
-
-version="4.4"
+# patchdevelop - based on patchreview
 
 # This script assumes that you have already extracted your patches into
 # the directory named as "indir" below. Only files named "*.patch" will
@@ -303,7 +301,6 @@ for offset in \
 prj_applymode \
 prj_cmpmode \
 prj_editor \
-prj_mode \
 prj_indir \
 prj_outdir \
 prj_b_rename_infiles \
@@ -323,9 +320,9 @@ do
 done
 
 prj_entries=$index
-[ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
-[ -e "$HOME/bin/.data/patchdevelop.prj" ] || touch $HOME/bin/.data/patchdevelop.prj
-prj_init_prjfile ~/bin/.data/patchdevelop.prj $prj_entries
+[ -d "$MYDATA" ] || mkdir $MYDATA
+[ -e "$MYDATA/patchdevelop.prj" ] || touch $MYDATA/patchdevelop.prj
+prj_init_prjfile $MYDATA/patchdevelop.prj $prj_entries
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
 # new project file has been created and its values must be initialized.

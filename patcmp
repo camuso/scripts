@@ -2,7 +2,9 @@
 #
 # patcmp v1.0	- compare patches
 
-source ~/bin/lib/ui.source
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+source $MYLIB/ui.source
 
 declare -i code_ok=0
 declare -i code_special_action=1
