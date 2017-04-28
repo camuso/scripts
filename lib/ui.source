@@ -235,24 +235,26 @@ loop_yn() {
 #
 # Loop until user gives a number in the range defined by the args
 #
-# $1 - prompt string
-# $2 - the value to be returned
-# $3 - minimum
-# $4 - maximum
+# $1 - minimum
+# $2 - maximum
+# $3 - the value to be returned
 #
 loop_range() {
+	local min=$1
+	local max=$2
 	local number
-	local min=$3
-	local max=$4
+	local pstr="Please enter a number between$OFF $min$BLD and$OFF $max: "
+
+	echo
 	while true; do
-		getuser "$1" number
+		getuser "Please enter a number between$OFF $min$BLD and$OFF $max: " number
 		if [[ $number =~ ^-?[0-9]+$ ]]  && \
 		   [[ $number -ge $min ]]       && \
 		   [[ $number -le $max ]]; then
-			eval $2=$number
+			eval $3=$number
+			echo
 			return 0
 		fi
-		echo -e "Please enter a number between $min and $max."
 	done
 }
 

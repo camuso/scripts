@@ -393,7 +393,7 @@ get_failovermode() {
 
 show_failover() {
 	local num=$1
-	failoverstr=$(
+	local failoverstr=$(
 cat <<EOF
 
  $num  Action on git am error      :$OFF $(get_failovermode)$BLD

@@ -159,9 +159,19 @@ function git_repo2commitsfile {
 	return $?
 }
 
+# git_excisecommit - excise the commit hash from the line
+#
+# If there appears to be more than one hash on the line, just take the
+# first one.
+#
+# $1 - the line to be grep'd
+# $2 - the size of the hash (40 or 7,40)
+#
 function git_excisecommit {
 	local line="$1"
-	echo "$line" | egrep -o '\b[0-9a-f]{40}\b'
+	local hashsize="$2"
+
+	echo "$line" | egrep -o "\b[0-9a-f]{"$hashsize"}\b" | head -1
 }
 
 # git_comment2commitsfile
@@ -195,8 +205,20 @@ function git_comment2commitsfile {
 	local hashsize="40"
 	local _40digit=true
 
+	local multihashstr=$(
+cat <<EOF
+$BLD
+There is more than one commit mentioned in patch$OFF $index.$BLD
+Please choose one of the following.
+$OFF
+EOF
+)
+	# If we got a third argument, then get it.
+	# If it's true, then the hashsize will be fixed at 40 digits
+	# If it's false, then the hashsize will be variable from 7 to 40
+	# digits.
+	#
 	[ $# -eq 3 ] && _40digit=$3
-
 	$_40digit || hashsize="7,40"
 
 	echo "commitsfile: $commitsfile"
@@ -235,22 +257,21 @@ function git_comment2commitsfile {
 		if [ $cmtcnt -eq 2 ]; then
 			cmtindex=0
 			while read line; do
-				commitarray[cmtindex]=$(git_excisecommit "$line")
+				commitarray[$cmtindex]=$(git_excisecommit "$line" "$hashsize")
 				let cmtindex++
 			done < $srcdir/scratch
 
 			for ((cmtindex=1; cmtindex < cmtcnt; cmtindex++))
 			do
-				[ "${commitarray[cmtindex]}" == "${commitarray[0]}" ] \
+				[ "${commitarray[$cmtindex]}" == "${commitarray[0]}" ] \
 				&& commitparity=1 || commitparity=0
 			done
 		fi
 
 		if [ $cmtcnt -gt 1 ] && [ $commitparity -eq 0 ]; then
-			echo -e "$BLD"
-			echo -e "There is more than one commit mentioned in patch $index."
-			echo -e "Please choose one of the following, or type$OFF q$BLD"
-			echo -e "to default to the first hash.$OFF"
+
+			echo -e "$multihashstr"
+
 			for ((cmtindex=1; cmtindex <= cmtcnt; cmtindex++))
 			do
 				line=$(ui_readline $cmtindex $srcdir/scratch)
@@ -258,30 +279,14 @@ function git_comment2commitsfile {
 			done
 
 			let cmtindex--
-			while [ $linenumber -eq 0 ]; do
-				echo -en "$BLD"
-				echo -en "Enter number between 1 and $cmtindex: "$OFF""
-				read -n1 linenumber
-				echo
-				[[ $linenumber == "q" ]] && break
-				[[ $linenumber == "x" ]] && ui_sh_spawn
-				if [[ $linenumber != [1-$cmtindex] ]]; then
-					linenumber=0
-					continue
-				fi
-			done
+			loop_range 1 $cmtindex linenumber
 		else
 			linenumber=1
 		fi
 
 		line=$(ui_readline $linenumber $srcdir/scratch)
 		rm -f "$srcdir"/scratch
-
-		# Only take the first matching instance of what looks like
-		# a commit number. The following magic regex looks for hex
-		# numbers that have between 7 and 40 digits.
-		#
-		commit=$(echo $line | egrep -o '\b[0-9a-f]{7,40}\b')
+		commit=$(git_excisecommit "$line" "$hashsize")
 
 		if [ "$commit" ]; then
 			echo "$commit $index/$filecount" >> $commitsfile
