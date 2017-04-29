@@ -4,11 +4,13 @@
 #
 # The following source files must be included before this one.
 #
-# source $LIB/ui.source
-# source $LIB/project.source
-# source $LIB/gitutilities.source
+# source $MYLIB/ui.source
+# source $MYLIB/project.source
+# source $MYLIB/gitutilities.source
+#
+# MYLIB must be defined in the file that includes this one.
 
-version="5.2"
+version="5.4"
 
 b_ui_int_first_getyn=false	# For lib/ui.source
 
@@ -16,10 +18,24 @@ b_ui_int_first_getyn=false	# For lib/ui.source
 #
 shopt -s extglob
 
+manual="$MYDIR/man/$(basename $0).txt"
+
+#######################################
+# External Scripts
+#######################################
+alias githead='$MYDIR/githead'
+alias renpat='$MYDIR/renpat'
+alias patcmp='$MYDIR/patcmp'
+alias patbatcmp='$MYDIR/patbatcmp'
+alias patbatcmpmgr='$MYDIR/patbatcmpmgr'
+
 # Declare the global variables
 #
 declare indir
 declare outdir
+declare indirstr="Patch"
+declare outdirstr="Work"
+
 declare editor
 declare cmpmode
 declare applymode
@@ -65,6 +81,27 @@ declare rhel6kernstr="kernel-2.6.32"
 declare rhel7kernstr="kernel-3.10.0"
 declare pegaskernstr="kernel-pegas-"
 declare -i krnstrlen=${#rhel6kernstr}
+
+########################################
+# Function Return Codes
+########################################
+declare rc_continue=0	# Continue for another pass
+declare rc_run=1	# Run
+
+function exit_me {
+	set_booleans
+	prj_set_item $prj_applymode $applymode
+	[ -e "$last_tag_file" ] && rm -f $last_tag_file
+	exit $1
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	exit_me $CTLC_EXIT
+}
 
 function set_editor {
 	echo -e "$attr_bold"

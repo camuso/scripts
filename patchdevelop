@@ -29,10 +29,6 @@
 # ./.data/patchreview.prj
 # ./man/patchreview.man
 
-# Enable extglob for more specific directory actions
-#
-shopt -s extglob
-
 #######################################
 # Default file locations
 #######################################
@@ -44,12 +40,10 @@ shopt -s extglob
 #
 # Where MYDIR is the directory in which this script and its companions
 # are located.
-
+#
 declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
 declare MYDATA=$MYDIR/.data
-
-manual="$MYDIR/man/patchdevelop.txt"
 
 #######################################
 # External Source Files
@@ -59,30 +53,9 @@ source $MYLIB/project.source
 source $MYLIB/gitutilities.source
 source $MYLIB/patch-common.source
 
-########################################
-# Function Return Codes
-########################################
-declare rc_continue=0	# Continue for another pass
-declare rc_run=1	# Run patchdevelop
-
 #########################################
 # Functions
 #########################################
-
-function exit_patchdevelop {
-	set_booleans
-	prj_set_item $prj_applymode $applymode
-	[ -e "$last_tag_file" ] && rm -f $last_tag_file
-	exit $1
-}
-
-# run if user hits control-c
-#
-control_c()
-{
-	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
-	exit_patchdevelop $CTLC_EXIT
-}
 
 function init_booleans {
 	for ((index=boolindex; index <= prj_entries; index++)); do
@@ -214,7 +187,7 @@ function menu_parser {
 			applymode=$applymode_norm
 			prj_set_item $prj_applymode $applymode
 			;;
-		q )	exit_patchdevelop 0
+		q )	exit_me 0
 			;;
 		x )	set_booleans
 			ui_sh_spawn
@@ -405,5 +378,5 @@ done
 
 # Done with the patch review
 #
-exit_patchdevelop 0
+exit_me 0
 
