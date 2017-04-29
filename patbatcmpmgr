@@ -74,10 +74,21 @@ declare -i usfcount=0
 declare lasttag=
 declare rmlasttag=false
 
+declare rhdirstr="RHEL patches"
+declare usdirstr="Upstream patches"
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [-h -R -U -o <file>]
+$(basename $0) [-h -R -U -X -o <file>]
+
+  Performs a batch comparison of the patches in two different directories.
+  Comparison for any given pair of files stops at the first mismatched
+  line.
+
+  All files are compared up to the first detected mismatched line.
+
+  A report is generated to the screen and optionally to a user-defined
+  output file.
 
   -h        - Uses the less command to print this help text
   -R rhdir  - optional directory containing the RHEL patches
@@ -99,11 +110,8 @@ $(basename $0) [-h -R -U -o <file>]
   All menu items are sticky, persisting across invocations of this script.
   You can use the verbose options to test the results.
 
-  When you get the results you want, set the verbose options to false and
-  press q to return to the previous execution environment.
-
-  R - change the directory containing the RHEL patch files
-  U - change the directory containing the Upstream patch files
+  R - Change the directory containing the RHEL patch files
+  U - Change the directory containing the Upstream patch files
 
       IF these directories were not passed as option arguments (-R and -U),
       AND this the first invocation of this script,
@@ -111,41 +119,41 @@ $(basename $0) [-h -R -U -o <file>]
       THEN you will be prompted for the missing directory or directories
       before being presented with the menu.
 
-  o - change the output file.
+  o - Change the output file.
       Default: /dev/stdout
 
-  d - when true, excludes diff stat lines from the comparison.
+  d - When true, excludes diff stat lines from the comparison.
       It is possible for the patches to still be congruent even when
       the diff stats are different. For example, when the RHEL patch is
       a subset of the upstream patch
       Default: true
 
-  p - when true, excludes path lines from the comparison
+  p - When true, excludes path lines from the comparison
       You will want to do this if the file being patched has been renamed
       or moved to a different directory.
       Default: true
 
-  s - when true, excludes lines that do not begin with + or -
+  s - When true, excludes lines that do not begin with + or -
       You will want to do this if you are only concerned about the lines
       that are actually being changed by the patch. When true, this will
       automatically exclude the diff stat lines, but WILL NOT exclude
       the path lines.
       Default: true
 
-  v - verbose prints the sequence numbers of all files and indicates which
-      are congruent and which are not
-      Default: false
+  v - Cycles through the verbose modes, which is the amount of information
+      printed to the output file.
 
-  V - Very verbose prints the sequence numbers of all the files, all the
-      lines being compared in each file, and indicates whether the files
-      are congruent or not.
-      Default: false
+      OFF: Only the incongruent patch numbers are printed
 
-      If Very verbose is true, then verbose will automatically be set true.
-      If verbose is false, then Very verbose will automatically be set false.
+      Verbose:  All patch numbers are printed with a line that tells whether
+                they were congruent.
+
+      Very Verbose: All patch numbers are printed as well as the lines that
+                    are congruent. Printing of a given patch pair stops at
+                    the first mismatched line in the files.
 
   r - run the comparison
-  l - if the output file is not /dev/stdout, run less on the output file
+  e - less the output file. Only visible if the output is not /dev/stdout
   i - init controls and output file to defaults
   h - less this help text
   x - spawn a shell
@@ -240,8 +248,8 @@ $BLD
 
      $UND\0Environment       $OFF$BLD
      Most Recent Tag            : $OFF$lasttag$BLD
-  R  RHEL directory             : $OFF$rhdir$BLD has $OFF$rhfcount$BLD patch files
-  U  Upstream directory         : $OFF$usdir$BLD has$OFF $usfcount$BLD patch files
+  R  $rhdirstr directory     : $OFF$rhdir$BLD has $OFF$rhfcount$BLD patch files
+  U  $usdirstr directory : $OFF$usdir$BLD has$OFF $usfcount$BLD patch files
   o  Output file.               : $OFF$ofile$BLD
 
      $UND\0Lines to exclude  $OFF$BLD
@@ -255,7 +263,7 @@ $BLD
      $UND\0Control           $OFF$BLD
   r  run the comparison $(show_read_ofile)
   i  init to defaults
-  h  print the help using less command
+  h  print the help (uses less command)
   x  spawn a shell
   q  quit and return to previous execution environment
 $OFF
@@ -273,9 +281,9 @@ menu_parser() {
 	promptgetchar ""$BLD"Enter one of the above: "$OFF"" setting
 
 	case $setting in
-		R )	prj_set_directory "RHEL" $prj_rhdir rhdir quiet
+		R )	prj_set_directory "$rhdirstr" $prj_rhdir rhdir quiet
 			;;
-		U )	prj_set_directory "Upstream" $prj_usdir usdir quiet
+		U )	prj_set_directory "$usdirstr" $prj_usdir usdir quiet
 			;;
 		o )	getuser "Output file: " ofile
 			prj_set_item $prj_ofile $ofile
@@ -425,10 +433,10 @@ stat=$?
 #
 if [ $stat -ne 0 ]; then
 	[ -d "$rhdir" ] && prj_set_item $prj_rhdir $rhdir \
-			|| prj_set_directory "RHEL" $prj_rhdir rhdir quiet
+			|| prj_set_directory "$rhdirstr" $prj_rhdir rhdir quiet
 
 	[ -d "$usdir" ] && prj_set_item $prj_usdir $usdir \
-			|| prj_set_directory "Upstream" $prj_usdir usdir quiet
+			|| prj_set_directory "$usdirstr" $prj_usdir usdir quiet
 	init_booleans
 	verbosemode=$vmode_off
 	prj_set_item $prj_verbosemode $verbosemode
@@ -451,8 +459,8 @@ while true; do
 
 	get_booleans
 
-	check_dir $prj_rhdir "RHEL" rhdir
-	check_dir $prj_usdir "Upstream" usdir
+	check_dir $prj_rhdir "$rhdirstr" rhdir
+	check_dir $prj_usdir "$usdirstr" usdir
 	ofile="$(prj_get_item $prj_ofile)"
 	verbosemode=$(prj_get_item $prj_verbosemode)
 
@@ -470,8 +478,11 @@ while true; do
 	$b_nodiffst && optstr="$optstr""-d "
 	$b_nopaths  && optstr="$optstr""-p "
 	$b_strict   && optstr="$optstr""-s "
-	$b_verbose  && optstr="$optstr""-v "
-	$b_veryverb && optstr="$optstr""-V "
+
+	case $verbosemode in
+	    $vmode_on   ) optstr="$optstr""-v ";;
+	    $vmode_very ) optstr="$optstr""-V ";;
+	esac
 
 	echo "patbatcmp $optstr -o $ofile $rhdir $usdir"
 	patbatcmp $optstr -o $ofile $rhdir $usdir
