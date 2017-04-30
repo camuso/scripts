@@ -201,30 +201,33 @@ nuke() {
 }
 
 function show_settings {
-	settingstr=$(
+	local current_head=$(git log --oneline -n1)
+	local current_head_trunc=${current_head:0:50}
+	local settingstr=$(
 cat <<EOF
 $BLD
-    $UND\0Environment        $OFF$BLD
-    Most recent tag             :$OFF $lasttag$BLD
- b  Current git branch          :$OFF $gitbranch$BLD
- d  RHEL Patch directory        :$OFF $indir$BLD has$OFF $infilecount$BLD files
- w  Upstream patch directory    :$OFF $outdir$BLD
- e  Diff Editor                 :$OFF $editor$BLD
+    $UND\0Environment       $OFF$BLD
+    Most recent tag         :$OFF $lasttag$BLD
+    Current Head            :$OFF $current_head_trunc$BLD
+ b  Current git branch      :$OFF $gitbranch$BLD
+ d  $indirstr directory         :$OFF $indir$BLD has$OFF $infilecount$BLD files
+ w  $outdirstr directory          :$OFF $outdir$BLD
+ e  Diff Editor             :$OFF $editor$BLD
 
-    $UND\0Run Parameters     $OFF$BLD
- 1  Rename input files          :$OFF $b_rename_infiles$BLD
- 2  Save git head               :$OFF $b_save_githead$BLD
- 3  Format upstream patches     :$OFF $b_fmt_upstream$BLD
- 4  Size of commit hash         :$OFF $(show_hash_size)$BLD digits
- 5  Compare mode                :$OFF $(show_cmpmode)$BLD
- 6  Patch apply mode            :$OFF $(show_applymode)$BLD$(show_failover 7 )
+    $UND\0Run Parameters    $OFF$BLD
+ 1  Rename input files      :$OFF $b_rename_infiles$BLD
+ 2  Save git head           :$OFF $b_save_githead$BLD
+ 3  Format upstream patches :$OFF $b_fmt_upstream$BLD
+ 4  Size of commit hash     :$OFF $(show_hash_size)$BLD digits
+ 5  Compare mode            :$OFF $(show_cmpmode)$BLD
+ 6  Patch apply mode        :$OFF $(show_applymode)$BLD
 
-    $UND\0Control            $OFF$BLD
+    $UND\0Control           $OFF$BLD
  r  Run patch review
  i  Init to defaults
  G  Git reset to most recent tag of current branch
  H  Choose a session git head
- C  Clean RHEL and Upstream Directories
+ C  Clean $indirstr and $outdirstr Directories
  S  Clean Session File
  N  Nuke directories & session, reset head to most recent tag
  h  help text
@@ -247,9 +250,9 @@ function menu_parser {
 		b )	git_setbranch
 			git_get_lasttag lasttag $last_tag_file
 			;;
-		d )	prj_set_directory "RHEL" $prj_indir indir quiet
+		d )	prj_set_directory "$indirstr" $prj_indir indir quiet
 			;;
-		w )	prj_set_directory "Upstream" $prj_outdir outdir quiet
+		w )	prj_set_directory "$outdirstr" $prj_outdir outdir quiet
 			;;
 		e )	set_editor
 			;;
@@ -264,11 +267,8 @@ function menu_parser {
 		5 )	ui_cycle_state cmpmode 4
 			prj_set_item $prj_cmpmode $cmpmode
 			;;
-		6 )	ui_cycle_state applymode 3
+		6 )	ui_cycle_state applymode 4
 			prj_set_item $prj_applymode $applymode
-			;;
-		7 )	[ $applymode -ne $applymode_off ] \
-				&& ui_toggle b_gitam_err_abort
 			;;
 		C )	clean_directories
 			;;
@@ -306,8 +306,8 @@ function menu_loop {
 
 	# get the patch and work directories.
 	#
-	check_dir $prj_indir "RHEL" indir
-	check_dir $prj_outdir "Upstream" outdir
+	check_dir $prj_indir "$indirstr" indir
+	check_dir $prj_outdir "$outdirstr" outdir
 
 	# get the editor
 	#
@@ -409,8 +409,8 @@ if [ $? -ne 0 ]; then
 	echo "want us to put the output of this script, and your choice"
 	echo "of editor."
 	echo
-	prj_set_directory "RHEL" $prj_indir indir quiet
-	prj_set_directory "Upstream" $prj_outdir outdir quiet
+	prj_set_directory "$indirstr" $prj_indir indir quiet
+	prj_set_directory "$outdirstr" $prj_outdir outdir quiet
 	set_editor
 	init_booleans
 	cmpmode=$cmpmode_batch

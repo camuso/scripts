@@ -10,7 +10,7 @@
 #
 # MYLIB must be defined in the file that includes this one.
 
-version="5.5"
+version="6.0"
 
 b_ui_int_first_getyn=false	# For lib/ui.source
 
@@ -76,6 +76,7 @@ declare -i cmpmode_setup=3
 declare -i applymode_off=0
 declare -i applymode_norm=1
 declare -i applymode_3way=2
+declare -i applymode_patch=3
 
 declare rhel6kernstr="kernel-2.6.32"
 declare rhel7kernstr="kernel-3.10.0"
@@ -345,58 +346,6 @@ function create_commit_msg {
 	done < "$1"
 }
 
-# retry_patch
-#
-# $1 - pathname of patch
-#
-# GLOBALS
-#	commit_msg_file
-#	outdir
-#
-function retry_patch {
-	local retrystat
-	local retryname=$(basename -s .patch "$1")
-	local commit_msg_path="$outdir"/"$commit_msg_file"
-
-	git am --abort
-	echo -e "\ngit am aborted. Trying patch with fuzz..\n"
-	create_commit_msg "$1" "$2"
-	git clean -df --exclude=*.rej
-	patch --fuzz=3 -p1 < "$1" 2>&1 | tee "$outdir"/"$retryname".retry
-	retrystat=$?
-	if [ $retrystat -ne 0 ]; then
-		echo "Unable to apply "$1""
-		echo "Exiting script with nonzero status"
-		echo
-		exit 1
-	fi
-
-	# get any .rej files out of the way by moving them to the $outdir
-	#
-	git status --porcelain
-	for rej in $(git status --porcelain); do
-		[ -d "$rej" ] && continue
-		if [[ $(echo "$rej" | tail -c4) == "rej" ]]; then
-			echo $rej
-			mkdir -p $outdir/$(dirname $rej)
-			mv $rej $outdir/$(dirname $rej)/.
-			# read -n1
-		fi
-	done
-
-	git status
-	git add .
-	git commit . -F "$commit_msg_path"
-	echo
-	# git log --pretty -n1
-	# read -n1
-}
-
-exit_on_gitam_err() {
-	echo -e "\ngit am aborted. Exiting script ...\n"
-	exit 1
-}
-
 # apply_patches
 #
 # GLOBALS
@@ -420,15 +369,21 @@ function apply_patches {
 		case $applymode in
 		    $applymode_norm  ) git am $patch; stat=$? ;;
 		    $applymode_3way  ) git am -3 $patch; stat=$? ;;
+		    $applymode_patch ) patch --fuzz=3 -p1 < $patch; stat=$? ;;
 		esac
 
 		if [ $stat -ne 0 ]; then
-			$b_gitam_err_abort && exit_on_gitam_err \
-				           || retry_patch "$patch"
+			echo -en "$BLD"
+			echo -e "\nPatch: $OFF$patch$BLD"
+			echo -e "Failed to apply.$OFF Exiting script ...\n"
+			exit_me 1
 		fi
 
-		printf "%3d " $patchcount >> "$outdir/$bp_commits"
-		git log --oneline -n1 >> "$outdir/$bp_commits"
+
+		[ $applymode -ne $applymode_patch ] && {
+			printf "%3d " $patchcount >> "$outdir/$bp_commits"
+			git log --oneline -n1 >> "$outdir/$bp_commits"
+		}
 	done
 
 	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
@@ -456,23 +411,9 @@ show_applymode() {
 	    $applymode_off   )	echo "OFF" ;;
 	    $applymode_norm  )	echo "git am" ;;
 	    $applymode_3way  )	echo "git am 3-way merge" ;;
+	    $applymode_patch )  echo "patch --fuzz=3 -p1 <" ;;
 	                   * )	echo "Not a valid apply mode" ;;
 	esac
-}
-
-get_failovermode() {
-	$b_gitam_err_abort && echo "Abort" || echo "try \"patch --fuzz=3\""
-}
-
-show_failover() {
-	local num=$1
-	local failoverstr=$(
-cat <<EOF
-
- $num  Action on git am error      :$OFF $(get_failovermode)$BLD
-EOF
-)
-	[ $applymode -ne $applymode_off ] && echo -e "$failoverstr"
 }
 
 # init_session_file()
@@ -514,21 +455,26 @@ check_patchvbranch() {
 
 	dist=${pat:0:5}
 
+	while :; do
 	case $dist in
 	    "RHEL6" ) ;&
 	    "Rhel6" ) ;&
-	    "rhel6" ) [ "$tag" == "rhel6kernstr" ] || show_branch_mismatch "$lasttag" "RHEL6";;
+	    "rhel6" ) [ "$tag" == "$rhel6kernstr" ] \
+		    	&& break || show_branch_mismatch "$lasttag" "$dist";;
 
 	    "RHEL7" ) ;&
 	    "Rhel7" ) ;&
-	    "rhel7" ) [ "$tag" == "rhel7kernstr" ] || show_branch_mismatch "$lasttag" "RHEL7";;
+	    "rhel7" ) [ "$tag" == "$rhel7kernstr" ] \
+		    	&& break || show_branch_mismatch "$lasttag" "$dist";;
 
 	    "PEGAS" ) ;&
 	    "Pegas" ) ;&
-	    "pegas" ) [ "$tag" == "pegaskernstr" ] || show_branch_mismatch "$lasttag" "Pegas";;
+	    "pegas" ) [ "$tag" == "$pegaskernstr" ] \
+		    	&& break || show_branch_mismatch "$lasttag" "$dist";;
 
 	          * ) show_branch_mismatch "$lasttag" "$dist";;
 	esac
+	done
 
 	return 0
 }
