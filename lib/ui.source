@@ -243,11 +243,15 @@ loop_range() {
 	local min=$1
 	local max=$2
 	local number
-	local pstr="Please enter a number between$OFF $min$BLD and$OFF $max: "
+	local __cmd__
+	local pstr=\
+"$BLD\0Please enter a number between$OFF $min$BLD and$OFF $max: "
 
+	[ $max -lt 10 ] && __cmd__=promptgetchar || cmd=getuser
 	echo
 	while true; do
-		getuser "Please enter a number between$OFF $min$BLD and$OFF $max: " number
+		$__cmd__ "$pstr" number
+
 		if [[ $number =~ ^-?[0-9]+$ ]]  && \
 		   [[ $number -ge $min ]]       && \
 		   [[ $number -le $max ]]; then

@@ -209,7 +209,7 @@ $BLD
  b  Current git branch          :$OFF $gitbranch$BLD
  d  RHEL Patch directory        :$OFF $indir$BLD has$OFF $infilecount$BLD files
  w  Upstream patch directory    :$OFF $outdir$BLD
- e  Editor                      :$OFF $editor$BLD
+ e  Diff Editor                 :$OFF $editor$BLD
 
     $UND\0Run Parameters     $OFF$BLD
  1  Rename input files          :$OFF $b_rename_infiles$BLD

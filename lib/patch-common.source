@@ -91,6 +91,7 @@ declare rc_run=1	# Run
 function exit_me {
 	set_booleans
 	prj_set_item $prj_applymode $applymode
+	prj_set_item $prj_cmpmode $cmpmode
 	[ -e "$last_tag_file" ] && rm -f $last_tag_file
 	exit $1
 }
@@ -103,26 +104,61 @@ control_c()
 	exit_me $CTLC_EXIT
 }
 
+# test_editor() - tests for the existence of the chosen editor
+#
+# If the editor was not installed, the user is given a choice to exit now
+# to install it or to select another editor. The function returns a 1 in
+# this case to signal the caller that the editor is not installed and the
+# user wants to see the choices available again.
+#
+# If the editor was installed, then it is set in the project file and the
+# caller is signaled with a return of zero that the editor has been
+# successfully chosen.
+#
+# $1 - the string name of the editor
+#
+# returns 0 if editor was found
+# returns 1 if editor was not found
+#
+test_editor() {
+	local _editor_="$1"
+	local _ans_
+	local _noed_=\
+"$BLD$_editor_$OFF is not installed. Do you want to exit and install it now?$OFF"
+	local _pstr_=\
+"$OFF\0Press '$BLD\0y$OFF' to exit now or '$BLD\0n$OFF' to select another editor: "
+
+	which "$_editor_" > /dev/null 2>&1
+
+	if [ $? -ne 0 ]; then
+		echo -e "$_noed_"
+		getyn "$_pstr_" _ans_
+		$_ans_ && exit_me 0
+		return 1
+	fi
+
+	prj_set_item $prj_editor "$_editor_"
+	return 0
+}
+
+
 function set_editor {
+	local choice
 	echo -e "$attr_bold"
-	echo -e "Select one of these currently supported editors."
-	echo -e " 1 - Vim"
-	echo -e " 2 - Emacs"
-	promptgetchar "Your choice: " choice
+	echo -e "Select one of these currently supported diff editors.\n"
+	echo -e " 1 -$OFF vimdiff$BLD"
+	echo -e " 2 -$OFF emacs$BLD"
+	echo -e " 3 -$OFF tkdiff$BLD"
 
 	while true; do
+		loop_range 1 3 choice
 		case $choice in
-
-			1 )	editor="Vim"
-				prj_set_item $prj_editor "$editor"
-				break
-				;;
-
-			2)	editor="Emacs"
-				prj_set_item $prj_editor "$editor"
-				break
-				;;
+			1 )	editor="vimdiff";;
+			2 )	editor="emacs"	;;
+			3 )	editor="tkdiff"
 		esac
+		test_editor "$editor"
+		[ $? -eq 0 ] && break
 	done
 }
 

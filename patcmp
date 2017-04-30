@@ -48,7 +48,7 @@ cat <<EOF
 
 $(basename $0) [options] dir-1 dir-2
 
-  Call vimdiff ir ediff to compare the patch files in the two directories.
+  Call a diff editor to compare the patch files in the two directories.
   The directories must have the same number of ".patch" files.
 
   -z zstr    - A special action string displayed for the 'z' menu
@@ -377,6 +377,10 @@ emacs_cmd() {
 	emacs --eval "(ediff-files \"$1\" \"$2\")" -geometry 160x40
 }
 
+tkdiff_cmd() {
+	tkdiff "$1" "$2"
+}
+
 #############################################
 # Initialization
 ############################################
@@ -439,11 +443,13 @@ if ((mlcount != uscount)); then
 fi
 
 case "$editor" in
-    "Vim"   )	editcmd=vim_cmd
-	    	;;
-    "Emacs" )	editcmd=emacs_cmd
+    "vimdiff" )	editcmd=vim_cmd
 		;;
-    *       )	echo "$editor"" is not a supported editor."
+    "emacs"   )	editcmd=emacs_cmd
+		;;
+    "tkdiff"  )	editcmd=tkdiff_cmd
+		;;
+    *         )	echo "$editor"" is not a supported editor."
 		exit_patcmp 1
 		;;
 esac
