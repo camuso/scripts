@@ -1,6 +1,6 @@
-===========
-Patchreview
-===========
+================
+Patchreview v6.0
+================
 
 This menu-driven script allows the user to compare his set of patches
 with patches from upstream.
@@ -27,24 +27,25 @@ Runing the script
 The script must be run from the top of a git tree. If not, it will exit
 with an error message.
 
-A directory containing the RHEL patches must be scpecified as well as a
-directroy for the upstream patches. These directories must not be the
-same.
+A directory containing the patches being backported or developed must be
+scpecified as well as a directroy for the upstream patches. These directories
+must not be the same.
 
 These directories are identified by the script as follows.
 
-RHEL patch directory: the directory containing the RHEL patches
+Patch directory: the directory containing the patches being backported or
+                 developed.
 
-Upstream directory: the directory into which the script will put upstream
-                    patches that were formatted using the upstream commit
-                    hashes in the commit logs of the user's patches.
+Work directory: the directory into which the script will put upstream
+                patches that were formatted using the upstream commit
+                hashes in the commit logs of the patches in the Patch
+                directory.
 
-The very first item listed under "Environment", is the most recent tag
-in the current branch. This information is useful for knowing to which
-kernel the patches will be applied.
+The first two items in the "Environment" section reflect the current
+state of the git tree.
 
-The next item is the current working git branch. This can be changed
-with the b option.
+   - most recent tag in the current git branch.
+   - current head of the current git branch.
 
 The first time the script is run, the user is queried for the following
 items.
@@ -53,36 +54,36 @@ items.
 
 * The Upstream patch directory
 
-* The user's preferred editor. Currently only Vim and Emacs are
-  supported.
+* The user's preferred diff editor.
+  vimdiff, emacs, and tkdiff are supported.
 
 _________________________________________________________________________
 
     Environment
-    --------------------
-    Most recent tag             : kernel-3.10.0-654.el7
- b  Current git branch          : rh7.work
- d  RHEL Patch directory        : /home/tcamuso/Maildir/work/cur has 13 files
- w  Upstream patch directory    : ../temp
- e  Editor                      : Vim
+    ------------------
+    Most recent tag         : kernel-3.10.0-658.el7
+    Current Head            : 8761009 powerpc/mm: Add support for runtime config
+ b  Current git branch      : rh7.work
+ d  Patch directory         : /home/tcamuso/Maildir/work/cur has 7 files
+ w  Work directory          : ../temp
+ e  Diff Editor             : tkdiff
 
     Run Parameters
-    --------------------
- 1  Rename input files          : true
- 2  Save git head               : true
- 3  Format upstream patches     : true
- 4  Size of commit hash         : 40 digits
- 5  Compare mode                : Batch
- 6  Patch apply mode            : git am
- 7  Action on git am error      : Abort
+    ------------------
+ 1  Rename input files      : true
+ 2  Save git head           : true
+ 3  Format upstream patches : true
+ 4  Size of commit hash     : 40 digits
+ 5  Compare mode            : Batch
+ 6  Patch apply mode        : git am
 
     Control
-    --------------------
+    ------------------
  r  Run patch review
  i  Init to defaults
  G  Git reset to most recent tag of current branch
  H  Choose a session git head
- C  Clean RHEL and Upstream Directories
+ C  Clean Patch and Work Directories
  S  Clean Session File
  N  Nuke directories & session, reset head to most recent tag
  h  help text
@@ -102,7 +103,7 @@ the script. Sticky items will be indicated with a * in the help text below.
 The "Evironment" section of the menu sets up the operating environment
 for the patchreview script with the following selections.
 
-b * Set's the git branch from which you will be operating. It is assumed
+b * Sets the git branch from which you will be operating. It is assumed
     that you have at least one RHEL branch and one upstream branch in
     your git directory. When selecting this option, you will be
     presented with a numbered choice as follows.
@@ -119,12 +120,12 @@ d * RHEL directory, as described above in "Running the script".
 
 w * Upstream directory, as described above in "Running the script".
 
-e * This is the editor that will be used to perform an interactive diff
-    of the files.
+e * This is the diff editor that will be used to perform an interactive
+    diff of the files.
 
-The "Run Parameters" section controls what happens when the 'r' (Run) menu
-selection is pressed. These options can be toggled from true to false by
-pressing the corresponding option number.
+The "Run Parameters" section controls what happens when the 'r' (Run)
+menu selection is pressed. These options can be cycled through their
+states by pressing the corresponding option number.
 
 1 * When true, the files extracted from the mail client and residing in
     the "RHEL directory" are renamed using their subject line for the
@@ -191,21 +192,10 @@ pressing the corresponding option number.
 
     git am 3-way merge - Applies the RHEL patches using "git am -3"
 
+    patch --fuzz=3 -p1 - Applies the patches using the patch application.
+
     OFF - does not attempt to apply the RHEL patches.
 
-7 * "Action on git am error" is what the script will do if the selected
-    patch apply mode encounters an error.
-
-    This option is only visible when option 6 above is not OFF, since it
-    only makes sense when patches are being applied.
-
-    Abort - (default)
-
-    try "patch --fuzz=3" - this option allows a fallback if the attempt
-	to apply the patch failed. If the patch can be applied with
-	fuzz, then it simply needs to be refreshed against the current
-	branch. If not, then the patch is probably defective for a more
-	fundamental reason.
 
 The "Control" section of the Batch Comparison Setup menu executes
 operations as follows.
