@@ -426,12 +426,25 @@ init_session_file() {
 
 }
 
+# show_branch_mismatch - prints discrepency between distro and kernel
+#
+# If user options to switch branches, the global lasttag is refreshed.
+#
+# Globals:
+# 	lasttag
+# 	last_tag_file
+#
+# $1 - current distro
+# $2 - user's y or n response to query to switch branches
+#
 show_branch_mismatch() {
-	local lasttag="$1"
-	local distro="$2"
+	local _distro_="$1"
+	local _yn_
 
-	echo -e "$BLD\0Patches are$OFF $distro$BLD but kernel is$OFF $lasttag"
-	doyn "Switch branches now?" "git_setbranch"
+	echo -e "$BLD\0Patches are$OFF $_distro_$BLD but kernel is$OFF $lasttag"
+	doyn "Switch branches now?" "git_setbranch" "" _yn_
+	$_yn_ && git_get_lasttag lasttag $last_tag_file
+	eval $2=$_yn_
 }
 
 # check_patchvbranch - see if the patch names match the branch
@@ -439,41 +452,48 @@ show_branch_mismatch() {
 # Globals
 # 	rhel*str, pegas*str - strings that represent the correspoinding kernels
 # 	indir - directory containing the RHEL patches
+# 	lasttag
 #
 check_patchvbranch() {
 	local pat
 	local dist
-	local lasttag=$(cat $last_tag_file)
-	local tag=${lasttag:0:$krnstrlen}
+	local tag
+	local krnstr
+	local yn
 
 	[ $indir ] || return 1
+
 	stat $indir/*.patch > /dev/null 2>&1
 	[ $? -eq 0 ] || return 1
-	echo "indir: $indir"
+
 	pat=$(ls -1 $indir/*.patch | head -1)
 	pat=$(basename $pat)
-
 	dist=${pat:0:5}
 
 	while :; do
-	case $dist in
-	    "RHEL6" ) ;&
-	    "Rhel6" ) ;&
-	    "rhel6" ) [ "$tag" == "$rhel6kernstr" ] \
-		    	&& break || show_branch_mismatch "$lasttag" "$dist";;
+	    tag=${lasttag:0:$krnstrlen}
+	    case $dist in
+		"RHEL6" ) ;&
+		"Rhel6" ) ;&
+		"rhel6" ) krnstr="$rhel6kernstr";;
 
-	    "RHEL7" ) ;&
-	    "Rhel7" ) ;&
-	    "rhel7" ) [ "$tag" == "$rhel7kernstr" ] \
-		    	&& break || show_branch_mismatch "$lasttag" "$dist";;
+		"RHEL7" ) ;&
+		"Rhel7" ) ;&
+		"rhel7" ) krnstr="$rhel7kernstr";;
 
-	    "PEGAS" ) ;&
-	    "Pegas" ) ;&
-	    "pegas" ) [ "$tag" == "$pegaskernstr" ] \
-		    	&& break || show_branch_mismatch "$lasttag" "$dist";;
+		"PEGAS" ) ;&
+		"Pegas" ) ;&
+		"pegas" ) krnstr="$pegaskernstr";;
+	    esac
 
-	          * ) show_branch_mismatch "$lasttag" "$dist";;
-	esac
+	    [ "$tag" == "$krnstr" ] && break \
+		    || show_branch_mismatch "$dist" yn
+
+	    # If user did not opt to switch branches, then user wants to apply
+	    # patches to current branch, even though they appear to the script
+	    # to be mismatched.
+	    #
+	    $yn || break
 	done
 
 	return 0
