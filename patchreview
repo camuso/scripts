@@ -450,6 +450,7 @@ while true; do
 		apply_patches
 		git_log_head
 		applymode=$applymode_off
+		prj_set_item $prj_applymode $applymode
 	fi
 
 	# Generate a patch set from the original upstream patches.

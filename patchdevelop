@@ -335,7 +335,8 @@ while true; do
 		check_patchvbranch
 		apply_patches
 		applymode=$applymode_off
-	fi
+		prj_set_item $prj_applymode $applymode
+ 	fi
 
 	# Generate a patch set from the original upstream patches.
 	#
