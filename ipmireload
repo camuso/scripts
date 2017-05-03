@@ -1,12 +1,27 @@
 #!/bin/bash
 
-set -v
-echo "cp -vf drivers/char/ipmi/ipmi_*.ko /lib/modules/"$(uname -r)"/kernel/drivers/char/ipmi/."
-cp -vf drivers/char/ipmi/ipmi_*.ko /lib/modules/$(uname -r)/kernel/drivers/char/ipmi/.
-modprobe -rv ipmi_devintf
-modprobe -rv ipmi_watchdog
-modprobe -rv ipmi_si
-modprobe -v ipmi_si
-modprobe -v ipmi_devintf
-modprobe -v ipmi_watchdog
-set +v
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Unloads and reloads the currently loaded ipmi modules.
+\0
+EOF
+)
+
+[ "$1" == "-h" ] && { echo -e "$usagestr"; exit 0; }
+
+declare mod
+declare ipmilist=$(lsmod | grep ipmi)
+
+while read line; do
+	mod=$(echo $line | cut -d' ' -f1)
+	modprobe -rv $mod
+done <<< "$ipmilist"
+
+while read line; do
+	mod=$(echo $line | cut -d' ' -f1)
+	modprobe -v $mod
+done <<< "$ipmilist"
+
