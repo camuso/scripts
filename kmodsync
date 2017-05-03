@@ -1,22 +1,81 @@
 #!/bin/bash
+#
+# kmodcopy
+#
+
+shopt -s extglob
+
+declare kpath
+declare libdir="/lib/modules/$(uname -r)/kernel"
+declare arch=$(uname -i)
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) kmod-directory
+
+Where kmod-directory is where the kmods are that you want to sync with
+the same directory relative to lib/modules/$(uname -r)/kernel/
+
+Must be executed from the top of the kernel build tree.
+
+The original kmod will be saved as:
+$libdir/$(uname -r)/kernel/<kmod-subdir>/*.orig
+
+The .orig file will not be overwritten once it is created.
+\0
+EOF
+)
+
+notktreestr=$(
+cat <<EOF
+
+$(basename $0) must be invoked from the top of a kernel tree.
+
+Type $(basename $0) -h for more information.
+
+You are currently in $PWD
+\0
+EOF
+)
 
 nodir() {
-        echo "/lib directory for $1 does not seem to exist."
+        echo "$1 does not seem to exist."
         exit 1
 }
 
-# set -x
+# iskerneltree
+#
+# Returns 0 if we're at the top of a kernel tree, else returns 1
+#
+iskerneltree() {
+	[ -e README ] && [ -e Makefile ] && [ -d kernel ] || return 1
+	local line_1="$(head -1 README)"
+	[[ "$line_1" == *"Linux kernel"* ]] && return 0 || return 1
+}
 
-kmoddir=$1
+$(iskerneltree) || { echo -e "$notktreestr"; exit 1; }
+[ $# -eq 1 ] || { echo -e "$usagestr"; exit 1; }
 
-libdir=$(find /lib/modules/$(uname -r) -type d -name $kmoddir)
-blddir=$(find ./drivers/ -type d -name $kmoddir)
+[ "$1" == "-h" ] && { echo -e $usagestr; exit 0; }
 
-[ -d "$libdir" ] || nodir "$libdir"
-[ -d "$blddir" ] || nodir "$blddir"
+# Get the kmod path relative to the top of the kernel tree.
+# If the last character is a slash, then remove it.
+#
+kpath="$1"
+[ "${kpath: -1}" == "/" ] && kpath=${kpath:0: -1}
 
-echo "rsync -Pvat $blddir $libdir"
-rsync -Pvat $blddir/*.ko $libdir/.
+[ -d "$kpath" ] || nodir
+[ -d "$libdir"/"$kpath" ] || nodir
 
-set +x
+cd "$libdir"/"$kpath"
+
+# Save the original .ko files, if they have not been saved already.
+#
+for f in $(ls -1 *.ko); do
+	[ -f $(basename $f .ko).orig ] || cp -v $f $(basename $f .ko).orig
+done
+
+cd -
+rsync -Pvat $kpath/*.ko "$libdir"/"$kpath"/.
 
