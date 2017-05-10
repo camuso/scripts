@@ -38,7 +38,7 @@ installer=false
 while getopts "ihf:" OPTION; do
 	case "$OPTION" in
 		f )	file="$OPTARG"
-			[ "$file" ] || do_usage
+			[ -f "$file" ] || do_usage
 			;;
 		i )	installer=true
 			;;
