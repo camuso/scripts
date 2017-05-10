@@ -20,10 +20,16 @@ echo "***************************" >> "$logfile" 2>&1
 echo "* Clone the scripts       *" >> "$logfile" 2>&1
 echo "***************************" >> "$logfile" 2>&1
 echo
-[[ -d "scripts" ]] && rm -rf scripts
-[[ -d "bin" ]] && rm -rf bin
-git clone https://github.com/camuso/scripts.git
-mv -fv scripts bin 2>&1 | tee -a $logfile
+
+# If the bin directory exists, leave it alone and just note that
+# in the log file.
+#
+[ -d "bin" ] \
+	&& echo -e "
+----------------------------------------
+- bin directory exists. Not cloning..  -
+----------------------------------------\n" >> "$logfile" 2>&1 \
+	|| git clone https://github.com/camuso/scripts.git bin
 
 # Unpack the archives and save them in the ~/ark directory
 #
