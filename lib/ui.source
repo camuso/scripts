@@ -571,9 +571,9 @@ function ui_strindex {
 #
 #   declare -a array=(3 8 12 7 16 9 3)
 #
-#   # The following will echo true
+#   # The following will echo "found"
 #   #
-#   [ $(inarray 12 array[@]) -eq 0 ] && echo "found" || echo "not found"
+#   $(inarray 12 array[@]) && echo "found" || echo "not found"
 #
 #   # The following will echo '2', because 12 is at index 2
 #   #
@@ -599,6 +599,35 @@ ui_inarray() {
 	[ $# -eq 3 ] && eval $3=-1
 	echo 1
 	return 1
+}
+
+# ui_isdigit - determines if $1 is a digit
+#
+# returns 0 if digit, 1 if not
+#
+# example:
+#
+# $(isdigit $foo) && echo yup || echo nope
+#
+ui_isdigit() {
+	[[ $1 =~ ^-?[0-9]+$ ]] && return 0 || return 1
+}
+
+# ui_strtok - tokenizes a string and returns an array
+#
+# $1 - the string to tokenize
+# $2 - the string of delimiters
+# $3 - returns the tokenized string as an array
+#
+# examples:
+#
+# ui_strtok kernel-pegas-4.11.0-2.el7.x86_64 ".-" array
+#
+# ${array[@]} will contain all the tokens separated by delimiters "."
+# and "-", and the delimiters will be replaced by spaces.
+#
+ui_strtok() {
+	IFS="$2" read -r -a $3 <<< "$1"
 }
 
 ui_source_loaded=true
