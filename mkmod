@@ -180,7 +180,7 @@ shift $shcount
 ($orig && $sync) && report_mutually_exclusive_options "-s" "-o"
 
 $orig && { mkcfg=false; clean=false; prep=false; sync=false; }
-set -x
+
 kmoddir="$1"
 $mkcfg && { echo "make rh-configs"; mkconfig; }
 $clean && { echo "make clean"; make clean; }
