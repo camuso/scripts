@@ -10,6 +10,23 @@ remove_spaces()
     done
 }
 
+# strtok - tokenizes a string and returns an array
+#
+# $1 - the string to tokenize
+# $2 - the string of delimiters
+# $3 - returns the tokenized string as an array
+#
+# examples:
+#
+# strtok kernel-pegas-4.11.0-2.el7.x86_64 ".-" array
+#
+# ${array[@]} will contain all the tokens separated by delimiters "."
+# and "-", and the delimiters will be replaced by spaces.
+#
+strtok() {
+	IFS="$2" read -r -a $3 <<< "$1"
+}
+
 function usage {
 	echo
 	echo "renmutpat <directory>"
@@ -24,10 +41,13 @@ function usage {
 
 cd $1
 echo "Changing directory to "$PWD""
-count=1
-total=$(ls | wc -l)
-prefix=$2
+declare -i count=1
+declare -i total=$(ls | wc -l)
 declare subject
+declare subary
+declare word
+declare iszero=false
+
 
 echo "$PWD has $total files."
 
@@ -58,7 +78,29 @@ for filename in $(ls -1 !(*.patch)); do
 	# Remove the word "Subject: " from the line
 	#
 	subject=$(echo "$subject" | cut -d' ' -f2-)
+
+	# If the next character is not '[', then it is not a patch.
 	#
+	[ "${subject:0:1}" == "[" ] || continue
+
+	# Tokenize the subject line.
+	# Look for the first token with a '/' in it.
+	# If all the characters leading up to the '/' are zero, then it
+	# is a prologue, not a patch.
+	#
+	strtok "$subject" " " subary
+	for ((i = 0; i < ${#subary[@]}; i++)); do
+		word=${subary[$i]}
+		[[ $word == *"/"* ]] && break
+	done
+
+	for ((i = 0; i < ${#word}; i++)); do
+		[[ ${word:$i:1} == "0" ]] && iszero=true || iszero=false
+		[[ ${word:$i:1} == "/" ]] && break
+	done
+
+	$iszero && continue
+
 	# Remove any brackets, parentheses, and quotes
 	#
 	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
