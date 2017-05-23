@@ -95,8 +95,8 @@ for filename in $(ls -1 !(*.patch)); do
 	done
 
 	for ((i = 0; i < ${#word}; i++)); do
-		[[ ${word:$i:1} == "0" ]] && iszero=true || iszero=false
 		[[ ${word:$i:1} == "/" ]] && break
+		[[ ${word:$i:1} == "0" ]] && iszero=true || iszero=false
 	done
 
 	$iszero && continue
