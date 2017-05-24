@@ -198,6 +198,10 @@ nuke() {
 	# Init the booleans to their defaults
 	init_booleans
 	get_booleans
+
+	# Set the apply mode to its default value
+	applymode=$applymode_norm
+	prj_set_item $prj_applymode $applymode
 }
 
 function show_settings {
