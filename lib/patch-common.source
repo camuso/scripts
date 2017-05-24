@@ -452,17 +452,22 @@ show_branch_mismatch() {
 # Globals
 # 	rhel*str, pegas*str - strings that represent the correspoinding kernels
 # 	indir - directory containing the RHEL patches
+#	krnstrlen - length of the string that defines which kernel
 # 	lasttag
 #
 check_patchvbranch() {
 	local pat
 	local dist
 	local tag
-	local krnstr
-	local yn
+	local krnstr=""
+	local yn=false
+	local ary
+	local i
 
 	[ $indir ] || return 1
 
+	# See if there are any .patch files in the $indir
+	#
 	stat $indir/*.patch > /dev/null 2>&1
 	[ $? -eq 0 ] || return 1
 
@@ -470,31 +475,56 @@ check_patchvbranch() {
 	pat=$(basename $pat)
 	dist=${pat:0:5}
 
-	while :; do
-	    tag=${lasttag:0:$krnstrlen}
-	    case $dist in
-		"RHEL6" ) ;&
-		"Rhel6" ) ;&
-		"rhel6" ) krnstr="$rhel6kernstr";;
+	# Get the current kernel branch tag
+	#
+	tag=${lasttag:0:$krnstrlen}
 
-		"RHEL7" ) ;&
-		"Rhel7" ) ;&
-		"rhel7" ) krnstr="$rhel7kernstr";;
+	# Tokenize the patchname using '-' as the token separator
+	#
+	ui_strtok "$pat" "-" ary
 
-		"PEGAS" ) ;&
-		"Pegas" ) ;&
-		"pegas" ) krnstr="$pegaskernstr";;
-	    esac
+	# Ignore case in this block
+	#
+	shopt -s nocasematch
 
-	    [ "$tag" == "$krnstr" ] && break \
-		    || show_branch_mismatch "$dist" yn
+	for ((i = 0; i < ${#ary}; ++i)); do
 
-	    # If user did not opt to switch branches, then user wants to apply
-	    # patches to current branch, even though they appear to the script
-	    # to be mismatched.
+	    dist="${ary[i]}"
+
+	    # It's possible that the distribution string had a hyphen in it, in
+	    # which case the distro major release will be a separate token. If
+	    # so, append the distro major release to the distribution string.
 	    #
-	    $yn || break
+	    [[ "$dist" == "rhel" ]] && dist="$dist""${ary[i+1]}"
+
+	    # Only interested in the first five characters
+	    #
+	    dist=${dist:0:5}
+
+	    case "$dist" in
+		"rhel6" ) krnstr="$rhel6kernstr"; break;;
+		"rhel7" ) krnstr="$rhel7kernstr"; break;;
+		"pegas" ) krnstr="$pegaskernstr"; break;;
+		      * ) continue
+	    esac
 	done
+
+	# See if the kernel branch matches the lasttag
+	# If not, present the mismatch and ask the user what s/he wants to do.
+	#
+	[ "$tag" == "$krnstr" ] || show_branch_mismatch "$dist" yn
+
+	# Restore case sensitivity
+	#
+	shopt -u nocasematch
+
+	# If user did not opt to switch branches, then user wants to apply
+	# patches to current branch, even though they appear to the script
+	# to be mismatched.
+	# If the user did switch branches, call this routine recursively to
+	# see if s/he chose the correct branch.
+	#
+	$yn && check_patchvbranch
 
 	return 0
 }
