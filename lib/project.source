@@ -71,7 +71,7 @@ function prj_init_prjfile {
 		local size=$(cat $prjfile | wc -l)
 		sizediff=$(( size - prj_prjfile_size ))
 
-		if [ $sizediff -ne 0 ]; then
+		if [ $sizediff -ne 0 ] || [ $size -eq 0 ]; then
 			cat /dev/null > $prjfile
 			prj_addblanklines $prjfile $prj_prjfile_size
 			return 2
