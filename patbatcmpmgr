@@ -424,7 +424,8 @@ done
 
 prj_entries=$index
 [ -d "$prj_dir" ] || mkdir $prj_dir
-[ -e "$prj_file" ] || touch $prj_file
+[ -f "$prj_file" ] || touch $prj_file
+
 prj_init_prjfile $prj_file $prj_entries
 stat=$?
 
