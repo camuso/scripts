@@ -44,6 +44,8 @@ declare b_nodiffst
 declare b_nopaths
 declare b_strict
 declare b_exec_exit=false
+declare b_extern_rhdir=false
+declare b_extern_usdir=false
 
 declare -i verbosemode
 declare -i vmode_off=0
@@ -382,8 +384,10 @@ while getopts hXR:U:o: OPTION; do
 	h ) usage | less
 	    ;;
 	R ) rhdir=$OPTARG
+	    b_extern_rhdir=true
 	    ;;
 	U ) usdir=$OPTARG
+	    b_extern_usdir=true
 	    ;;
 	o ) pfile=$OPTARG
 	    ;;
@@ -443,6 +447,9 @@ if [ $stat -ne 0 ]; then
 	prj_set_item $prj_verbosemode $verbosemode
 fi
 
+$b_extern_rhdir && prj_set_item $prj_rhdir $rhdir
+$b_extern_usdir && prj_set_item $prj_usdir $usdir
+
 # If the caller passed a desired output file name (pfile), then use that
 # Else, if the ofile saved in the project file is an empty string,
 # use the default /dev/stdout
@@ -462,6 +469,7 @@ while true; do
 
 	check_dir $prj_rhdir "$rhdirstr" rhdir
 	check_dir $prj_usdir "$usdirstr" usdir
+
 	ofile="$(prj_get_item $prj_ofile)"
 	verbosemode=$(prj_get_item $prj_verbosemode)
 
