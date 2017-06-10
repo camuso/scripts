@@ -80,8 +80,7 @@ declare -i applymode_patch=3
 
 declare rhel6kernstr="kernel-2.6.32"
 declare rhel7kernstr="kernel-3.10.0"
-declare pegaskernstr="kernel-pegas-"
-declare -i krnstrlen=${#rhel6kernstr}
+declare pegaskernstr="kernel-alt-"
 
 ########################################
 # Function Return Codes
@@ -459,6 +458,7 @@ check_patchvbranch() {
 	local pat
 	local dist
 	local tag
+	local krn
 	local krnstr=""
 	local yn=false
 	local ary
@@ -473,11 +473,19 @@ check_patchvbranch() {
 
 	pat=$(ls -1 $indir/*.patch | head -1)
 	pat=$(basename $pat)
-	dist=${pat:0:5}
 
-	# Get the current kernel branch tag
+	# Remove any brackets, parentheses, and quotes
 	#
-	tag=${lasttag:0:$krnstrlen}
+	pat=$(echo "$pat" | sed 's/[][<>(),"]//g')
+	pat=$(echo "$pat" | sed "s/'//g")
+
+	# remove any leading whitespace
+	#
+	pat="$(echo -e "$pat" | sed -e 's/^[[:space:]]*//')"
+
+	# Replace spaces, slashes, colons and semicolons with hyphens
+	#
+	pat=$(echo "$pat" | sed "s\[/:; ]\-\g")
 
 	# Tokenize the patchname using '-' as the token separator
 	#
@@ -497,11 +505,7 @@ check_patchvbranch() {
 	    #
 	    [[ "$dist" == "rhel" ]] && dist="$dist""${ary[i+1]}"
 
-	    # Only interested in the first five characters
-	    #
-	    dist=${dist:0:5}
-
-	    case "$dist" in
+	    case "${dist:0:5}" in
 		"rhel6" ) krnstr="$rhel6kernstr"; break;;
 		"rhel7" ) krnstr="$rhel7kernstr"; break;;
 		"pegas" ) krnstr="$pegaskernstr"; break;;
@@ -509,10 +513,15 @@ check_patchvbranch() {
 	    esac
 	done
 
-	# See if the kernel branch matches the lasttag
-	# If not, present the mismatch and ask the user what s/he wants to do.
+	# Tokenize the current kernel branch tag and the krnstr
 	#
-	[ "$tag" == "$krnstr" ] || show_branch_mismatch "$dist" yn
+	ui_strtok "$lasttag" "-" tag
+	ui_strtok "$krnstr" "-" krn
+
+	# The second token will be the determining factor to see if the tag
+	# matches the kernel.
+	#
+	[ "${tag[1]}" == "${krn[1]}" ] || show_branch_mismatch "$dist" yn
 
 	# Restore case sensitivity
 	#
