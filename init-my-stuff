@@ -217,9 +217,11 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 				git checkout -b rh6 rh6/master
 				;;
 			"7" )	git remote add rh7 git://git.app.eng.bos.redhat.com/rhel7.git
+				git remote add pegas http://git.app.eng.bos.redhat.com/git/kernel-alt.git/
 				git remote update
-				git fetch
+				git fetch --all
 				git checkout -b rh7 rh7/master
+				git checkout -b pegas pegas/master
 				;;
 		esac
 	fi
