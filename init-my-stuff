@@ -193,6 +193,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	krb5-workstation \
 	krb5-libs \
 	krb5-auth-dialog \
+	patchutils \
 	trousers \
 	trousers-devel \
 	rhpkg \
