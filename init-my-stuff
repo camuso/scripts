@@ -204,6 +204,13 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	mkdir -p /work/us
 	cd /work/us
+	git clone https://github.com/HewlettPackard/netperf.git
+	cd netperf
+	./autogen.sh
+	./configure
+	make
+	make install
+	cd -
 	git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 	cd /work/us/linux
 
