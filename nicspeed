@@ -25,5 +25,6 @@ argcount=1
 
 [ $# -eq  $argcount ] || usage 1
 
+echo "cat /sys/class/net/"$1"/speed"
 cat /sys/class/net/"$1"/speed
 
