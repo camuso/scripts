@@ -1,0 +1,26 @@
+#!/bin/bash
+#
+# ipv6off
+#
+
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Turns off ipv6 and disables it for subsequent boots.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  0 ] || usage 0
+
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
