@@ -1,0 +1,81 @@
+#!/bin/bash
+#
+# netperf-client
+#
+
+. lib/ui.source
+
+declare -i optcount=0
+declare -i count=1
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] server_ip
+
+  Runs netperf on the host system. A server listening for netperf traffic
+  must be running netserver daemon at the server_ip required at the
+  command line.
+
+  See https://hewlettpackard.github.io/netperf/
+
+  If netperf is not installed, you will be asked if you want to install it.
+
+  Arguments:
+  server_ip - REQUIRED ip of the server that is listening for netperf
+              traffic.
+
+  Options:
+  -c count - the number of iterations to run the netperf
+\0
+EOF
+)
+
+install_netperf() {
+	local _pwd_="$PWD"
+	local _ans_
+	local _no_netperf_="\
+$BLD\0netperf$OFF is not installed.
+Press '$BLD\0y$OFF' to install it now or '$BLD\0n$OFF' to quit this script."
+
+	getyn "$_no_netperf_" _ans_
+	$_ans_ || exit 1
+
+	sudo yum install texinfo automake -y
+	cd
+	git clone https://github.com/HewlettPackard/netperf.git
+	cd netperf
+	./autogen.sh
+	./configure
+	make
+	sudo make install
+	cd "$_pwd_"
+}
+
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+while getopts c: OPTION; do
+    case "$OPTION" in
+
+	c ) count=$OPTARG
+	    optcount=$((optcount+2))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 1 ] || usage 1
+
+server_ip="$1"
+
+which netperf > /dev/null 2>&1
+[ $? -eq 0 ] || install_netperf
+
+for ((i = 0; i < $count; ++i)); do netperf -H "$server_ip"; done
+
