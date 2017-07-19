@@ -1,0 +1,74 @@
+#!/bin/bash
+#
+# netperf-server
+#
+
+. lib/ui.source
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options]
+
+  Runs netserver on the host system to listen for netperf traffic from
+  netperf client hosts.
+
+  See https://hewlettpackard.github.io/netperf/
+
+  If netserver is not installed, you will be given the opportunity to
+  install netperf, which includes netserver, from within this script.
+
+  Options:
+  -h  - print this help text
+\0
+EOF
+)
+
+install_netperf() {
+	local _pwd_="$PWD"
+	local _ans_
+	local _no_netperf_="\
+$BLD\0netperf$OFF and $BLD\0netserver$OFF are not installed.
+Press '$BLD\0y$OFF' to install now or '$BLD\0n$OFF' to quit this script."
+
+	getyn "$_no_netperf_" _ans_
+	$_ans_ || exit 1
+
+	sudo yum install texinfo automake -y
+	cd
+	git clone https://github.com/HewlettPackard/netperf.git
+	cd netperf
+	./autogen.sh
+	./configure
+	make
+	sudo make install
+	cd "$_pwd_"
+}
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+while getopts h OPTION; do
+    case "$OPTION" in
+
+	h ) optcount=$((optcount+1))
+	    usage
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 0 ] || usage 1
+
+which netperf > /dev/null 2>&1
+[ $? -eq 0 ] || install_netperf
+
+netserver -d -v3
+
