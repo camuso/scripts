@@ -27,6 +27,7 @@ $(basename $0) [options] server_ip
 
   Options:
   -c count - the number of iterations to run the netperf
+  -h       - this help text
 \0
 EOF
 )
@@ -57,11 +58,14 @@ usage() {
 	exit 1
 }
 
-while getopts c: OPTION; do
+while getopts hc: OPTION; do
     case "$OPTION" in
 
 	c ) count=$OPTARG
 	    optcount=$((optcount+2))
+	    ;;
+	h ) usage
+	    optcount=$((optcount+1))
 	    ;;
 	* ) echo "unrecognized option -$OPTION"
 	    echo -e "$usagestr"
