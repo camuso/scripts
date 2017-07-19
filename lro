@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# lro
+#
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] NIC state
+
+  Sets the lro (large-receive-offload) of the given NIC device to the
+  given state (on or off).
+
+  NIC   - the ifcfg name of the NIC whose lro will be set to on or off
+  state - "on" or "off"
+
+  Options
+  -h  - prints this help text
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+while getopts h OPTION; do
+    case "$OPTION" in
+
+	h ) optcount=$((optcount+1))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 2 ] || usage 1
+
+nic="$1"
+state="$2"
+
+ethtool -K $nic lro $state
+
