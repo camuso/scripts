@@ -499,6 +499,10 @@ check_patchvbranch() {
 
 	    dist="${ary[i]}"
 
+	    # If this is RHEL7-Alt, then it is pegas
+	    #
+	    [[ "${ary[i+1]}" == "alt" ]] && dist="pegas"
+
 	    # It's possible that the distribution string had a hyphen in it, in
 	    # which case the distro major release will be a separate token. If
 	    # so, append the distro major release to the distribution string.
