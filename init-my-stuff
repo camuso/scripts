@@ -201,7 +201,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	trousers-devel \
 	rhpkg \
 	koji \
-	brewkoji
+	brewkoji \
+	http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
 
 	mkdir -p /work/us
 	cd /work/us
