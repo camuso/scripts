@@ -11,6 +11,7 @@ $(basename $0)
 	BIOS Information
 		Vendor
 		Version
+		Revision (if any)
 		Release Date
 	System Information
 		Manufacturer
@@ -36,6 +37,8 @@ while IFS= read line; do
 	[[ "$line" == "BIOS Information"* ]] && { echo "$line"; printnext=true; }
 	[[ "$line" == "System Information"* ]] && { echo "$line"; printnext=true; }
 	[[ "$line" == *"Vendor"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Firmware"* ]] && $printnext && echo -e "$line"
+	[[ "$line" == *"Revision"* ]] && $printnext && echo -e "$line"
 	[[ "$line" == *"Version"* ]] && $printnext && echo -e "$line"
 	[[ "$line" == *"Release"* ]] && $printnext && echo -e "$line"
 	[[ "$line" == *"Manufacturer"* ]] && $printnext && echo -e "$line"
