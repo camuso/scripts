@@ -283,8 +283,8 @@ set diffopt=vertical
 set ignorecase smartcase
 
 " Use ctrl-s to save while editing in insert mode.
-inoremap <c-s> <c-o>:update<CR>
-noremap <c-s> :update<CR>
+inoremap <c-w> <c-o>:update<CR>
+noremap <c-w> :update<CR>
 
 " Use ctrl-x to quit from insert mode.
 inoremap <c-x> <esc>:quit<CR>
