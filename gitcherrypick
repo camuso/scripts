@@ -523,6 +523,8 @@ Spawning a new shell so you can edit conflicts.
 	shell. In that case, be sure to manually update the following commit
 	file with the cherry-picked and backported commits.
 
+	Type \"exit 3\" if you want to kill the gitcherrypick process when
+	you exit the new shell.
 	"$attr_bold""$cpcommitsfile"
 	"$bpcommitsfile""$attr_OFF"
 "
@@ -577,6 +579,7 @@ while true; do
 			retval=$?
 			[ $retval -eq 1 ] && b_shellcommit=true
 			[ $retval -eq 2 ] && b_shellcommit_noauto=true
+			[ $retval -eq 3 ] && { git cherry-pick --abort; exit; }
 			str_cmtmsg="$str_conflicts"
 			let shellindex++
 		else
