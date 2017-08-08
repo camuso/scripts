@@ -218,7 +218,7 @@ endif
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 "
 " Set the highlight for tabs
-highlight WhitespaceTabs ctermbg=4 guibg=4
+"highlight WhitespaceTabs ctermbg=4 guibg=4
 "
 " Build a vim command to match tabs
 let s:tab_matcher = 'match WhitespaceTabs /\t/'
