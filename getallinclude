@@ -1,0 +1,59 @@
+#!/bin/bash
+#
+# getallinclude
+#
+
+declare -i optcount=0
+declare recur=false
+declare directory
+declare inclist
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] directory
+
+  Parses all the .c and .h files in a directory for #include declarations.
+  Option to parse recursively.
+
+  directory - the directory in which to start the search
+
+  Options
+  -r  - recursive search
+  -h  - this help text
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+while getopts rh OPTION; do
+    case "$OPTION" in
+
+	r ) optcount=$((optcount+1))
+	    recur=true
+	    ;;
+	h ) optcount=$((optcount+1))
+	    usage 1
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 1 ] || { echo -e "\nNeed the directory!"; usage 1; }
+
+shopt -s extglob
+
+directory="$1"
+[ -d "$directory" ] || {
+	echo -e "\n"$directory" not a valid directory!"; usage 2;
+}
+
+inclist="$(grep "#include" "$directory"/*.[ch] | cut -d':' -f2)"
+while read line; do foo=$(getinclude "$line"); echo $foo; done <<< "$inclist"
