@@ -226,4 +226,4 @@ echo -e  "    esac" >> $file
 echo -e  "done\n" >> $file
 echo -e  'shift $optcount' >> $file
 echo -e  '[ $# -eq '"$argcount ] || usage 1\n" >> $file
-
+chmod +x $file

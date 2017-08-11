@@ -92,6 +92,7 @@ echo -en '#!/bin/bash
 if $b_opts; then
 	$b_args && createoptions -o "$opts" -a "$args" $ofile \
 	        || createoptions -o "$opts" $ofile
+	chmod +x "$ofile"
 	exit 0
 fi
 
