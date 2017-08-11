@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+# getinclude
+#
+
+declare -i argcount=1
+declare includestring
+declare leadstring
+declare includefile
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) includestring
+
+  Extracts the include filename, including full path, from the string.
+  If the string does not start with #include, it will be ignored and
+  the script will exit silently with no affect, but with a nonzero
+  value.
+
+  includestring - the string containing '#include'
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+shopt -s extglob
+
+includestring="$1"
+leadstring=$(echo "$includestring" | cut -d' ' -f1)
+
+[ "$leadstring" == "#include" ] || exit 1
+
+echo "include/$(echo $includestring | sed -r "s/<|>//g" | cut -d' ' -f2)"
+
