@@ -1,0 +1,76 @@
+#!/bin/bash
+#
+# findinclude
+#
+
+declare -i optcount=0
+declare -i _FOUNDIT_=32
+declare -i _NOINCLUDES_=8
+declare incfile
+declare srcfile
+declare inclist
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] incfile srcfile
+
+  Search the given source file for the given include file. If the include
+  file we are seeking is not in the source file, then each of the include
+  files in the source file will be recursively searched for the given
+  include file.
+
+  incfile - the include file we are seeking
+  srcfile - the source file that we believe contains it or contains other
+            include files that contain it.
+
+  Options
+  -h  - this help text
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+while getopts h OPTION; do
+    case "$OPTION" in
+
+	h ) optcount=$((optcount+1))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 2 ] || usage 1
+
+incfile="$1"
+srcfile="$2"
+
+IFS=
+echo
+echo "findinclude srcfile: $srcfile"
+inclist=$(getallinclude $srcfile)
+[ $? -eq $_NOINCLUDES_ ] && { echo "no includes"; exit 0; }
+echo "$inclist"
+
+#set -x
+while read line; do
+	echo "$line" | grep -w "$incfile"
+	[ $? -eq 0 ] && { echo ""$srcfile" contains "$incfile""; exit $_FOUNDIT_; }
+done <<< "$inclist"
+
+while read line; do
+	echo "parse $line for $incfile"
+	[ -f "$line" ] || continue
+	findinclude "$incfile" "$line"
+	[ $? -eq $_FOUNDIT_ ] && exit 0
+	[ $? -ne 0 ] && exit 1
+done <<< "$inclist"
+exit 1
+
