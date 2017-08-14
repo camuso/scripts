@@ -8,10 +8,14 @@ declare includestring
 declare leadstring
 declare includefile
 
+declare -i _LOCALINCLUDE_=16
+
 declare usagestr=$(
 cat <<EOF
 
 $(basename $0) includestring
+
+  NOTE: This is intended to be executed from the top of a kernel tree.
 
   Extracts the include filename, including full path, from the string.
   If the string does not start with #include, it will be ignored and
@@ -38,5 +42,13 @@ leadstring=$(echo "$includestring" | cut -d' ' -f1)
 
 [ "$leadstring" == "#include" ] || exit 1
 
-echo "include/$(echo $includestring | sed -r "s/<|>//g" | cut -d' ' -f2)"
+includefile=$(echo "$includestring" | cut -d' ' -f2)
+
+if [ "${includefile:0:1}" == '"' ]; then
+	echo "$includefile"
+	exit $_LOCALINCLUDE_
+else
+	echo "include/$(echo $includefile | sed -r "s/<|>//g")"
+	exit 0
+fi
 
