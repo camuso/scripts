@@ -4,38 +4,49 @@
 #
 
 declare -i optcount=0
-declare recur=false
-declare directory
+declare filepath
 declare inclist
+declare incpath
+declare dir
+
+
+declare -i stat
+declare -i _LOCALINCLUDE_=16
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options] directory
+$(basename $0) [options] filepath
 
-  Parses all the .c and .h files in a directory for #include declarations.
-  Option to parse recursively.
+  NOTE: This is intended to be executed from the top of a kernel tree.
 
-  directory - the directory in which to start the search
+  Parses the given files in a directory for #include declarations.
+
+  filepath - the complete path, including directories to the file to search.
 
   Options
-  -r  - recursive search
   -h  - this help text
 \0
 EOF
 )
+
+getlist() {
+	echo $1
+	find $1 -type f -name \*.[ch] \
+		-exec echo '{}' \; 
+	#	-exec sh -c ' \
+	#	grep "#include" $1 | cut -d':' -f2;' \
+	#	sh {} \;
+}
 
 usage() {
 	echo -e "$usagestr"
 	exit $1
 }
 
-while getopts rh OPTION; do
+while getopts h OPTION; do
     case "$OPTION" in
 
-	r ) optcount=$((optcount+1))
-	    recur=true
-	    ;;
 	h ) optcount=$((optcount+1))
 	    usage 1
 	    ;;
@@ -46,14 +57,25 @@ while getopts rh OPTION; do
 done
 
 shift $optcount
-[ $# -eq 1 ] || { echo -e "\nNeed the directory!"; usage 1; }
+[ $# -eq 1 ] || { echo -e "\nNeed the filepath!"; usage 1; }
 
 shopt -s extglob
+shopt -s globstar
 
-directory="$1"
-[ -d "$directory" ] || {
-	echo -e "\n"$directory" not a valid directory!"; usage 2;
+
+filepath="$1"
+[ -f "$filepath" ] || {
+	echo -e "\n"$filepath" not a valid file!"; usage 2;
 }
 
-inclist="$(grep "#include" "$directory"/*.[ch] | cut -d':' -f2)"
-while read line; do foo=$(getinclude "$line"); echo $foo; done <<< "$inclist"
+dir=$(dirname $filepath)
+inclist="$(grep "#include" "$filepath" | cut -d':' -f2)"
+
+while read line; do
+	incpath=$(getinclude "$line");
+
+	# If the call to getinclude() returned the exit code _LOCALINCLUDE_
+	# then the include path is local to the current directory.
+	#
+	[ $? -eq $_LOCALINCLUDE_ ] && echo $dir/$incpath || echo $incpath
+done <<< "$inclist"
