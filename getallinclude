@@ -12,6 +12,7 @@ declare dir
 
 declare -i stat
 declare -i _LOCALINCLUDE_=16
+declare -i _NOINCLUDES_=8
 
 declare usagestr=$(
 cat <<EOF
@@ -57,19 +58,23 @@ while getopts h OPTION; do
 done
 
 shift $optcount
-[ $# -eq 1 ] || { echo -e "\nNeed the filepath!"; usage 1; }
+[ $# -eq 1 ] || { echo -e "\nNeed the filepath!"; exit 1; }
 
 shopt -s extglob
 shopt -s globstar
 
+> .tmp.out
 
 filepath="$1"
 [ -f "$filepath" ] || {
-	echo -e "\n"$filepath" not a valid file!"; usage 2;
+	echo -e "\n$filepath -> .tmp.out";
+	echo $filepath >> .tmp.out
+	exit 0;
 }
 
 dir=$(dirname $filepath)
 inclist="$(grep "#include" "$filepath" | cut -d':' -f2)"
+[ "$inclist" ] || exit $_NOINCLUDES_
 
 while read line; do
 	incpath=$(getinclude "$line");
