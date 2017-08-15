@@ -3,6 +3,17 @@
 # findinclude
 #
 
+#
+# Text attributes
+#
+attr_bold="\033[1m"
+attr_under="\033[4m"
+attr_OFF="\033[0m"
+
+BLD="$attr_bold"
+UND="$attr_under"
+OFF="$attr_OFF"
+
 declare -i optcount=0
 declare -i _FOUNDIT_=32
 declare -i _NOINCLUDES_=8
@@ -54,10 +65,9 @@ incfile="$1"
 srcfile="$2"
 
 IFS=
-echo
-echo "findinclude srcfile: $srcfile"
+echo -e "\n$BLD\0findinclude $incfile $srcfile$OFF"
 inclist=$(getallinclude $srcfile)
-[ $? -eq $_NOINCLUDES_ ] && { echo "no includes"; exit 0; }
+[ $? -eq $_NOINCLUDES_ ] && { echo -e "$BLD\tno includes$OFF"; exit 0; }
 echo "$inclist"
 
 #set -x
@@ -67,12 +77,12 @@ while read line; do
 done <<< "$inclist"
 
 while read line; do
-	echo "parse $line for $incfile"
+	echo -e "$BLD\0parse $line for $incfile$OFF"
 	[ -f "$line" ] || continue
 	findinclude "$incfile" "$line"
 	stat=$?
 	[ $stat -eq $_FOUNDIT_ ] && exit 0
-	[ $stat -ne 0 ] && exit 1
+	# [ $stat -ne 0 ] && exit 1
 done <<< "$inclist"
 exit 1
 
