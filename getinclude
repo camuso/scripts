@@ -45,6 +45,7 @@ leadstring=$(echo "$includestring" | cut -d' ' -f1)
 includefile=$(echo "$includestring" | cut -d' ' -f2)
 
 if [ "${includefile:0:1}" == '"' ]; then
+	includefile=$(echo $includefile | sed -r 's/"//g')
 	echo "$includefile"
 	exit $_LOCALINCLUDE_
 else
