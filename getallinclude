@@ -3,6 +3,17 @@
 # getallinclude
 #
 
+#
+# Text attributes
+#
+attr_bold="\033[1m"
+attr_under="\033[4m"
+attr_OFF="\033[0m"
+
+BLD="$attr_bold"
+UND="$attr_under"
+OFF="$attr_OFF"
+
 declare -i optcount=0
 declare filepath
 declare inclist
@@ -67,9 +78,8 @@ shopt -s globstar
 
 filepath="$1"
 [ -f "$filepath" ] || {
-	echo -e "\n$filepath -> .tmp.out";
-	echo $filepath >> .tmp.out
-	exit 0;
+	echo -e "\n\t$BLD$filepath not found!$OFF"
+	exit 0
 }
 
 dir=$(dirname $filepath)
