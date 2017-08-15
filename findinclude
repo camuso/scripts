@@ -6,6 +6,7 @@
 declare -i optcount=0
 declare -i _FOUNDIT_=32
 declare -i _NOINCLUDES_=8
+declare -i stat
 declare incfile
 declare srcfile
 declare inclist
@@ -57,7 +58,7 @@ echo
 echo "findinclude srcfile: $srcfile"
 inclist=$(getallinclude $srcfile)
 [ $? -eq $_NOINCLUDES_ ] && { echo "no includes"; exit 0; }
-echo "$inclist"
+echo "$inclist"
 
 #set -x
 while read line; do
@@ -69,8 +70,9 @@ while read line; do
 	echo "parse $line for $incfile"
 	[ -f "$line" ] || continue
 	findinclude "$incfile" "$line"
-	[ $? -eq $_FOUNDIT_ ] && exit 0
-	[ $? -ne 0 ] && exit 1
+	stat=$?
+	[ $stat -eq $_FOUNDIT_ ] && exit 0
+	[ $stat -ne 0 ] && exit 1
 done <<< "$inclist"
 exit 1
 
