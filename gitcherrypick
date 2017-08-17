@@ -5,14 +5,32 @@
 # Provide some automation for cherrypicking.
 #
 
-VERSION="2.0"
+VERSION="3.0"
 
-########################################
-# Library FIles
-########################################
-source ~/bin/lib/ui.source
-source ~/bin/lib/project.source
-source ~/bin/lib/gitutilities.source
+#######################################
+# Default file locations
+#######################################
+#
+# Whatever directory this script and its companions are located in
+# must be in the executable path.
+#
+# export PATH=$PATH:MYDIR
+#
+# Where MYDIR is the directory in which this script and its companions
+# are located.
+#
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+declare MYDATA=$MYDIR/.data
+declare MYPRJ=$MYDATA/gitcherrypick.prj
+
+#######################################
+# External Source Files
+#######################################
+source $MYLIB/ui.source
+source $MYLIB/project.source
+source $MYLIB/gitutilities.source
+
 
 # Herald
 #
@@ -444,9 +462,12 @@ done
 # above for-loop and init the project file.
 #
 prj_entries=$index
-[ -d "$HOME/bin/.data" ] || mkdir $HOME/bin/.data
-[ -e "$HOME/bin/.data/gitcherrypick.prj" ] || touch $HOME/bin/.data/gitcherrypick.prj
-prj_init_prjfile ~/bin/.data/gitcherrypick.prj $prj_entries	# ~/bin
+[ -d "$MYDATA" ] || mkdir $MYDATA
+[ -f "$MYPRJ" ] || touch $MYPRJ
+
+# Disable blank checking
+#
+prj_init_prjfile "$MYPRJ" $prj_entries disable_blank_check
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
 # new project file has been created and its values must be initialized.
