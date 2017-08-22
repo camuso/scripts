@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# gitfilehistory
+#
+
+declare -i argcount=1
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) file
+
+  Performs the following git log on the given file.
+  git log --date=short --follow --pretty=format:"%<(8)%h %<(32,mtrunc)%ae %ad  %s"
+
+  This will print all the commits by any author, one commit per line, starting
+  with the most recent.
+
+  file - full pathname of file to be explored.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+git log --date=short --follow --pretty=format:"%<(8)%h %<(32,mtrunc)%ae %ad  %s" $1
