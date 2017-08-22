@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# gitone
+#
+
+declare -i argcount=1
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) commit
+
+  Presents a short, formatted git log of the "commit" argument according to
+  this formula.
+
+  git log --date=short --pretty=format:"%<(8)%h %<(32,mtrunc)%ae %ad%n%s" -n1
+
+  commit - the commit to be formatted.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+git log --date=short --pretty=format:"%<(8)%h %<(32,mtrunc)%ae %ad%s" -n1 $1
