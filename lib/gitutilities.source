@@ -5,6 +5,9 @@
 # NOTE: ~/bin/ui.source must be included before this file.
 #
 
+declare scratchdir=/dev/shm
+declare scratchfile=$scratchdir/scratch
+
 # git_commit2patchset
 # 	creates a patchset from contiguous commits starting with the most
 #	recent.
@@ -223,6 +226,7 @@ EOF
 
 	echo "commitsfile: $commitsfile"
 	> $commitsfile
+	> $scratchfile
 	# grep "commit " "$srdir"/*.patch | cut -d' ' -f2 > $commitsfile
 
 	for srcfile in $(ls -1 "$srcdir"/*.patch  | sort -V); do
@@ -242,13 +246,13 @@ EOF
 		# delete later.
 		#
 		egrep -i 'commit|cherry|upstream|pick|kernel' $srcfile \
-			| egrep "\b[0-9a-f]{$hashsize}\b" > $srcdir/scratch
+			| egrep "\b[0-9a-f]{$hashsize}\b" > $scratchfile
 
 		# If there is more than one line with what appears to be a
 		# commit in it, then ask the user from which line he wants
 		# to extract the commit.
 		#
-		cmtcnt=$(cat $srcdir/scratch | wc -l)
+		cmtcnt=$(cat $scratchfile | wc -l)
 
 		# If there are exactly two commits, then see if they are
 		# identical. If so, no need to query the user for which
@@ -259,7 +263,7 @@ EOF
 			while read line; do
 				commitarray[$cmtindex]=$(git_excisecommit "$line" "$hashsize")
 				let cmtindex++
-			done < $srcdir/scratch
+			done < $scratchfile
 
 			for ((cmtindex=1; cmtindex < cmtcnt; cmtindex++))
 			do
@@ -274,7 +278,7 @@ EOF
 
 			for ((cmtindex=1; cmtindex <= cmtcnt; cmtindex++))
 			do
-				line=$(ui_readline $cmtindex $srcdir/scratch)
+				line=$(ui_readline $cmtindex $scratchfile)
 				printf "%d - $line\n" $cmtindex
 			done
 
@@ -284,8 +288,8 @@ EOF
 			linenumber=1
 		fi
 
-		line=$(ui_readline $linenumber $srcdir/scratch)
-		rm -f "$srcdir"/scratch
+		line=$(ui_readline $linenumber $scratchfile)
+		rm -f $scratchfile
 		commit=$(git_excisecommit "$line" "$hashsize")
 
 		if [ "$commit" ]; then
