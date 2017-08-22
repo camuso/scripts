@@ -113,9 +113,33 @@ lsf(){
 	[ "$1" ] && cd -;
 }
 
+# comment2commits source-dir dest-file
+#
+# Parses the patchfiles in source-dir for commit numbers and writes them
+# to dest-file as a 40-char hash followed a number/total for each commit
+# in the patch series.
+#
+# $1 - directory in which the *.patch files are kept
+# $2 - the file into which the commits will be written
+#
 comment2commits(){
-	echo "comment2commits source-dir dest-file"
+	echo "comment2commits source-dir:$1  dest-file: $2"
 	source ~/bin/lib/ui.source;
 	source ~/bin/lib/gitutilities.source;
 	git_comment2commitsfile "$1" "$2";
+}
+
+# comment2list source-dir
+#
+# Parses the patchfiles in source dir for commit numbers and writes them
+# to stdout in 'git log --oneline' format.
+#
+comment2list(){
+	local templist=/dev/shm/templist
+
+	comment2commits "$1" $templist 2>&1>/dev/null
+	while read line; do
+		git log --oneline -n1 $(echo $line | cut -d' ' -f1)
+	done < $templist
+	rm -f $templist
 }
