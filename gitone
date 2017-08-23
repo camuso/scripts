@@ -27,4 +27,27 @@ usage() {
 
 [ $# -eq  "$argcount" ] || usage 1
 
-git log --date=short --pretty=format:"%<(8)%h %<(32,mtrunc)%ae %ad%s" -n1 $1
+# get git version
+#
+
+declare gver=$(git --version | cut -d' ' -f3)
+declare -i gmaj=$(echo $gver | cut -d'.' -f1)
+declare -i gmin=$(echo $gver | cut -d'.' -f2)
+
+declare fmt1=\
+"%C(bold green)%h  "\
+"%C(bold yellow)%ae  "\
+"%C(bold green)%ad  "\
+"%C(reset)%s"
+
+declare fmt2=\
+"%<(8)%C(bold green)%h "\
+"%<(32,mtrunc)%C(bold yellow)%ae "\
+"%C(bold green)%ad  "\
+"%C(reset)%s"
+
+if [ $gmaj -lt 2 ] && [ $gmin -lt 8 ]; then
+	git log --date=short --pretty=format:"$fmt1" -n1 $1
+else
+	git log --date=short --pretty=format:"$fmt2" -n1 $1
+fi
