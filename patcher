@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# patcher
+#
+
+declare -i optcount=0
+declare dry=""
+declare patch=""
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] patch
+
+  patch - the patch to be applied
+
+  Options
+  -d dryrun - test the patch without applying it
+  -h        - this help text
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+while getopts dh OPTION; do
+    case "$OPTION" in
+
+	d ) optcount=$((optcount+1))
+	    dry="--dry-run"
+	    ;;
+	h ) optcount=$((optcount+1))
+	    usage 0
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 1 ] || usage 1
+
+echo "patch --fuzz=3 $dry -p1 < "$1""
+patch --fuzz=3 $dry -p1 < "$1"
