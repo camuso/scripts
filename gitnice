@@ -4,7 +4,7 @@
 #
 
 declare -i optcount=0
-declare number=""
+declare number="-n 1"
 declare cmtauth=""
 declare cmtdate=""
 declare reverse=""
@@ -33,7 +33,9 @@ $(basename $0) [options] commitexpr
   -s number - space out author to neat columns of "number" width(git 2.8+ only
   -r        - show in reverse order (oldest first)
   -n number - number of contiguous commits, if not already determined by
-              commit expression, which takes precedence
+              commit expression, which takes precedence.
+	      If the commit expression names only one commit, the default
+	      is to print only one log, if there is no -n option submitted.
   -h        - this help text
 \0
 EOF
