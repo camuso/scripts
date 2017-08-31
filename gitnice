@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# gitnice
+#
+
+declare -i optcount=0
+declare number=""
+declare cmtauth=""
+declare cmtdate=""
+declare reverse=""
+declare hashwid=""
+declare authwid=""
+declare fmtstr=""
+declare cmtexpr=""
+
+declare gver=$(git --version | cut -d' ' -f3)
+declare -i gmaj=$(echo $gver | cut -d'.' -f1)
+declare -i gmin=$(echo $gver | cut -d'.' -f2)
+declare oldgit
+[ $gmaj -lt 2 ] && [ $gmin -lt 8 ] && gitold=true || gitold=false
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] commitexpr
+
+  commitexpr - Commit expression can be any valid commit expression, e.g.
+  1234567, or 89abcde...f0123456, or -12
+
+  Options
+  -d        - show date
+  -a        - show author
+  -s number - space out author to neat columns of "number" width(git 2.8+ only
+  -r        - show in reverse order (oldest first)
+  -n number - number of contiguous commits, if not already determined by
+              commit expression, which takes precedence
+  -h        - this help text
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+# leading colon in options list tells the option parser to parse errors
+# silently, allowing the user to address parsing errors.
+#
+while getopts :s:adrn:h OPTION; do
+    case "$OPTION" in
+
+	s ) optcount=$((optcount+2))
+	    $gitold && continue
+	    authwid="%<($OPTARG,mtrunc)"
+	    ;;
+	a ) optcount=$((optcount+1))
+	    cmtauth="%C(bold yellow)%ae "
+	    ;;
+	d ) optcount=$((optcount+1))
+	    cmtdate="%C(bold green)%ad "
+	    ;;
+	r ) optcount=$((optcount+1))
+	    reverse="--reverse"
+	    ;;
+	n ) number=$OPTARG
+	    optcount=$((optcount+2))
+	    number="-n $number"
+	    ;;
+	h ) optcount=$((optcount+1))
+	    usage 0
+    esac
+done
+
+shift $optcount
+[ $# -eq 1 ] || usage 1
+
+cmtexpr="$1"
+
+$gitold || hashwid="%<(9)"
+[ "$cmtauth" ] || authwid=""
+
+fmtstr="$hashwid%C(bold green)%h $authwid$cmtauth$cmtdate%C(reset)%s"
+git log $reverse $number --date=short --pretty=format:"$fmtstr" "$cmtexpr"
+
