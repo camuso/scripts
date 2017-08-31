@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+declare -i argc
+declare -a argv
+declare lastarg=""
+declare lastargflag=false
+declare options=""
+
+# Need to see if the last argument is a hyphen-number, because that's
+# a git relative reference, not an option. If it is, take it out of
+# the argument list, pass the remainder to the option parser.and set a
+# flag to be used later.
+#
+argc=$#
+# IFS=" " read -r -a argv <<< "$@"
+argv=($@)
+lastarg=${argv[$((argc-1))]}
+
+[[ "$lastarg" =~ [[:digit:]] ]] && lastargflag=true || lastargflag=false
+
+if $lastargflag; then
+	unset argv[$((argc-1))]
+	options="${argv[@]}"
+fi
+
