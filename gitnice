@@ -11,7 +11,7 @@ declare reverse=""
 declare hashwid=""
 declare authwid=""
 declare fmtstr=""
-declare cmtexpr=""
+declare cmtexpr="-1"
 
 declare gver=$(git --version | cut -d' ' -f3)
 declare -i gmaj=$(echo $gver | cut -d'.' -f1)
@@ -22,7 +22,11 @@ declare oldgit
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options] commitexpr
+$(basename $0) [options] [commitexpr]
+
+  Displays commits in --oneline format, with options as detailed below.
+  With no options and no arguments, the most recent commit is displayed
+  as "git log --oneline -n1"
 
   commitexpr - Commit expression can be any valid commit expression, e.g.
   1234567, or 89abcde...f0123456, or -12
@@ -30,12 +34,12 @@ $(basename $0) [options] commitexpr
   Options
   -d        - show date
   -a        - show author
-  -s number - space out author to neat columns of "number" width(git 2.8+ only
+  -s number - space out author to neat columns of "number" width (git 2.8+ only
   -r        - show in reverse order (oldest first)
   -n number - number of contiguous commits, if not already determined by
               commit expression, which takes precedence.
 	      If the commit expression names only one commit, the default
-	      is to print only one log, if there is no -n option submitted.
+	      is to print only one log.
   -h        - this help text
 \0
 EOF
@@ -52,32 +56,29 @@ usage() {
 while getopts :s:adrn:h OPTION; do
     case "$OPTION" in
 
-	s ) optcount=$((optcount+2))
-	    $gitold && continue
+	s ) $gitold && continue
 	    authwid="%<($OPTARG,mtrunc)"
+	    let optcount++
 	    ;;
-	a ) optcount=$((optcount+1))
-	    cmtauth="%C(bold yellow)%ae "
+	a ) cmtauth="%C(bold yellow)%ae "
+	    let optcount++
 	    ;;
-	d ) optcount=$((optcount+1))
-	    cmtdate="%C(bold green)%ad "
+	d ) cmtdate="%C(bold green)%ad "
+	    let optcount++
 	    ;;
-	r ) optcount=$((optcount+1))
-	    reverse="--reverse"
+	r ) reverse="--reverse"
+	    let optcount++
 	    ;;
-	n ) number=$OPTARG
-	    optcount=$((optcount+2))
-	    number="-n $number"
+	n ) number="-n$OPTARG"
+	    let optcount++
 	    ;;
-	h ) optcount=$((optcount+1))
+	h ) echo "Option: $OPTION"
 	    usage 0
     esac
 done
 
 shift $optcount
-[ $# -eq 1 ] || usage 1
-
-cmtexpr="$1"
+[ $# -eq 1 ] && cmtexpr="$1"
 
 $gitold || hashwid="%<(9)"
 [ "$cmtauth" ] || authwid=""
