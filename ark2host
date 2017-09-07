@@ -10,10 +10,12 @@
 usage=$(
 cat <<EOF
 
-$0 <user@host> [-f file]
-	-f file	- send only the named archive
-	-i install default apps at destination
-	-h help
+$0 [options] <user@host>
+
+Options:
+  -f file  - send only the named archive
+  -i       - install default apps to root@host
+  -h       - this help text
 
 EOF
 
