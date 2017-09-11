@@ -206,7 +206,6 @@ while [ $index -lt $optnum ]; do
 	optarg=${optargarray[$index]}
 	echo -en "\t$optflg ) " >> $file
 
-
 	if [[ $optarg ]]; then
 		echo -e "$optarg=\$OPTARG" >> $file
 		echo -e "\t    "'optcount=$((optcount+2))' >> $file

@@ -30,7 +30,7 @@ a usage function
   -o options, a quote enclosed string containing a list of space separated
      option flags with optional corresponding arguments.
 
-     Example: "n:number f:file d:directory x h"
+     Example: -o "n:number f:file d:directory x h"
 
      Creates options for -n number,  -f file, -d directory, -x and -h
      with no arguments.
@@ -40,6 +40,8 @@ a usage function
      If the number of arguments following the options is not exactly
      this number, then the newly created script will print its usage
      message and exit.
+
+     Example: -a "arg1 arg2"
 \0
 EOF
 )
