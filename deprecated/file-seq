@@ -1,0 +1,141 @@
+#!/bin/bash
+#
+
+function usage {
+	echo
+	echo "Sequentially rename files with a prefix-number-suffix."
+	echo ""
+	echo "Usage: file-seq -e ext -i in-dir -o out-dir -p prefix -s suffix -n number"
+	echo "       -e ext     - File extension (default is all files)"
+	echo "       -i ind-dir - The directory having the files (default is ./)."
+	echo "       -o out-dir - The directory to receive the files (default is ./)"
+	echo "       -p prefix  - Optional prefix (default is nothing)"
+	echo "       -s suffix  - Optional suffix (default is nothing)"
+	echo "       -n number  - starting number (default is 0001)"
+	echo "       -h help    - this help screen"
+	echo
+	exit
+}
+
+function min_parms {
+	echo "**************************************************************"
+	echo "You did not enter both the source and destination directories,"
+	echo "Try again."
+	echo "**************************************************************"
+	echo
+	exit $FAILURE
+}
+
+[ $# -ge 1 ] || usage
+
+ext=""
+indir=""
+outdir=""
+prefix=""
+suffix=""
+number=""
+
+# Walk through the argument list.
+#
+while [ "$1" != "" ]; do
+
+        str="$1"
+        firstchr=${str:0:1}
+
+	if [ $firstchr = "-" ]; then
+                case $1 in
+                        -e | --ext )	shift
+                                        ext=$1
+					echo "ext    : $ext"
+                                        ;;
+                        -i | --indir )  shift
+                                        indir=$1
+					echo "indir  : $indir"
+                                        ;;
+                        -o | --outdir ) shift
+                                        outdir=$1
+					echo "outdir : $outdir"
+                                        ;;
+                        -p | --prefix ) shift
+                                        prefix=$1
+					echo "prefix : $prefix"
+                                        ;;
+                        -s | --suffix ) shift
+					suffix=$1
+					echo "suffix : $suffix"
+                                        ;;
+                        -n )            shift
+					number=$1
+					echo "number : $number"
+                                        ;;
+                        -? | h | --help )   usage
+                                        ;;
+                        * )             echo "Invalid parameter"
+					usage
+                                        ;;
+                esac
+	else
+		usage
+
+	fi
+	shift
+done
+
+
+[ -n "$ext" ]    || echo "No ext, so all files."
+[ -n "$indir" ]  || echo "No specific indir, using ./"
+[ -n "$indir"  ] || indir="./"
+[ -n "$outdir" ] || echo "No specific outdir, using ./"
+[ -n "$outdir" ] || outdir="./"
+[ -n "$prefix" ] || echo "No prefix"
+[ -n "$suffix" ] || echo "No suffix"
+[ -n "$number" ] || echo "No starting number specified, using 1."
+
+echo
+read -p "Press any key to continue, or ctrl-c to quit here."
+
+############
+# Test to see if $PhotosPath exists, if not prompt for new path / exit.
+if [ ! -d $indir ] ; then
+	echo "$indir does not exist."
+	usage
+fi
+
+if [ ! -d $outdir ]; then
+	echo "$outdir does not exist."
+	usage
+fi
+
+############
+# rename 
+a=$number
+find $indir -type f -iname "*.jpg" \
+-exec mv '{}' $prefix$a$suffix$ext; $a++ \;
+#| gawk 'BEGIN{ a=1 }{ printf "mv %s LMC-%04d.jpg\n", $0, $a++ }' \
+#| bash
+
+
+###########
+# Sort files into folders using $CharFromName letters of the file name
+#
+#ls $SortPath | while read file; do
+ # extract first $CharFromName characters from filename
+# FolderDate=${file:0:$CharFromName}
+ # create directory if it does not exist
+# test -d $LibraryPath/$FolderDate || mkdir $LibraryPath/$FolderDate
+ # move the current file to the destination dir
+# mv -v $SortPath/$file $LibraryPath/$FolderDate/$file
+#done
+
+##########
+# move sorted files into photo library
+# mv -v $SortPath/* $LibraryPath/
+
+##########
+# Umount the card
+# umount $CameraPath
+
+##########
+# End notification
+echo
+echo
