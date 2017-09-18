@@ -3,16 +3,31 @@
 # tboot-info
 #
 
-cmdline=tboot-info
+# Text attributes
+#
+attr_bold="\033[1m"
+attr_under="\033[4m"
+attr_OFF="\033[0m"
+
+BLD="$attr_bold"
+UND="$attr_under"
+OFF="$attr_OFF"
+
+declare realeasestr
+declare cpumodelstr
+declare tbootverstr
+declare kernelverstr
 
 usagestr=$(
 cat <<EOF
 
-tboot-info pathname
+$0 [pathname]
+
+Where pathname is the path to the optional output file.
+Prints tboot information to the terminal and to an optional output file.
 
 Example: tboot-info /tmp/tboot-info.txt
 
-Where filename is the path to the output file
 \0
 EOF
 )
@@ -22,18 +37,53 @@ usage() {
 	exit
 }
 
-[ $# -eq 1 ] || usage
+getdmi() {
+	local dmi=$(dmidecode)
+	local printnext=false
+
+	which dmidecode 2>&1 > /dev/null
+	[ $? -eq 0 ] || return
+
+	echo
+	while IFS= read line; do
+		[[ "$line" == "Handle"* ]] && { printnext=false; }
+		[[ "$line" == "BIOS Information"* ]] && { echo "$line"; printnext=true; }
+		[[ "$line" == "System Information"* ]] && { echo "$line"; printnext=true; }
+		[[ "$line" == *"Vendor"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Firmware"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Revision"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Version"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Release"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Manufacturer"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Product Name"* ]] && $printnext && echo -e "$line"
+		[[ "$line" == *"Serial Number"* ]] && $printnext && echo -e "$line"
+	done <<< "$dmi"
+	echo
+}
 
 [ $UID -ne 0 ] && echo -e "\nYou must be root to execute this script\n" && exit 1
 
-outfil="$1"
+([ "$1" == "help" ] || [ "$1" == "-h" ]) && usage
 
-cat /etc/redhat-release | tee -a $outfile
-uname -r | tee -a $outfile
-dmidecode | grep -e Date -e Vendor -e Version -e Product -e "BIOS Revision" | head -5 | tee $outfil
-cpumod=$(cat /proc/cpuinfo | grep -m1 'model name')
-echo $cpumod | tee -a $outfile
-rpm -qa | grep -w tboot | tee -a $outfile
+[ "$1" ] && outfile="$1" || outfile=/dev/null
+
+> outfile
+
+echo
+releasestr=$(cat /etc/redhat-release)
+echo -e "$BLD\0Distro Release:$OFF $releasestr" | tee -a $outfile
+
+kernelverstr=$(uname -r)
+echo -e "$BLD\0Kernel Version:$OFF $kernelverstr" | tee -a $outfile
+
+getdmi | tee -a $outfil
+
+cpumodelstr=$(cat /proc/cpuinfo | grep -m1 'model name')
+cpumodelstr=$(echo $cpumodelstr | cut -d':' -f2-)
+echo -e "$BLD\0CPU model:$OFF $cpumodelstr " | tee -a $outfile
+
+tbootverstr=$(rpm -qa | grep -w tboot)
+echo -e "$BLD\0tboot Version:$OFF $tbootverstr" | tee -a $outfile
+echo
 [ -d "/sys/firmware/efi" ] && echo -e "\niBoot installed with UEFI. tboot is not supported on UEFI systems.\n"  | tee -a $outfile
-
 
