@@ -308,8 +308,10 @@ for ((index = 0; index < $fcountA; ++index)); do
 		# that have "+" or "-" as the first character in the line.
 		#
 		if $strict; then
-			firstch="${lineA:0:1}"
-			[ "$firstch" == "+" ] || [ "$firstch" == "-" ] || continue
+			firstchA="${lineA:0:1}"
+			firstchB="${lineB:0:1}"
+			([ "$firstchA" == "+" ] || [ "$firstchA" == "-" ]  ||
+			 [ "$firstchB" == "+" ] || [ "$firstchB" == "-" ]) || continue
 		fi
 
 		if $vverbose; then
