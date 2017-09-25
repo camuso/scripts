@@ -1,0 +1,10 @@
+# strindex string substring
+#
+# Return zero-based index of substring in string
+# Returns -1 if substring is not found in string
+#
+function strindex {
+	x="${1%%$2*}"
+	[[ "$x" = "$1" ]] && echo -1 || echo ${#x}
+}
+
