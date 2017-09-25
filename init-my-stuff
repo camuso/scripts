@@ -161,7 +161,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	elif [[ "$distro" == *"RedHat"* ]]; then
 		yum install -y redhat-lsb-core
 		majversion="$(lsb_release -rs | cut -f1 -d.)"
-		rhpkgurl="http://download.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
+		# rhpkgurl="http://download.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
+		rhpkgurl="http://download-node-02.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
 		rcmurl="$(get_rcmurl $majversion)"
 		installagent="yum"
 	else
@@ -169,8 +170,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 		exit 1
 	fi
 
-	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
-	curl -L -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
+	#curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
+	#curl -L -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
 
 	$installagent groupinstall -y 'X Window System' 'GNOME'
 
@@ -195,6 +196,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	krb5-workstation \
 	krb5-libs \
 	krb5-auth-dialog \
+	elinks \
+	lynx \
 	patchutils \
 	texinfo \
 	trousers \
