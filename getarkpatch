@@ -1,0 +1,227 @@
+#!/bin/bash
+#
+# getarkpatch
+#
+
+declare -i optcount=0
+declare -i number=1	# assume single patch
+declare homelink
+declare homebase
+declare patchfile="/dev/shm/getarkpatchfile"
+declare directory="./"
+declare patlist
+declare line
+declare hrefstr='href="'
+declare href
+declare -a hrefary
+declare -i hrefstrsiz=${#hrefstr}
+declare -i chindex
+declare -i count
+declare -i index
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] link
+
+
+  link - the link to the patch or to the prologue for a patch set.
+
+  Options
+  -n number    - number of patches (default is 1)
+  -d directory - optional output directory, default is PWD: $PWD
+  -h           - this help text
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+# strindex string substring
+#
+# Return zero-based index of substring in string
+# Returns -1 if substring is not found in string
+#
+function strindex {
+	x="${1%%$2*}"
+	[[ "$x" = "$1" ]] && echo -1 || echo ${#x}
+}
+
+renapatch(){
+	local patfil="$1"
+	local found=false
+	local line
+	local lastto
+	local lastfrom
+	local temp
+	local newname
+
+	while IFS= read -r line; do
+		if ! $found  \
+			&& [ $(strindex "$line" "To:") -ge 0 ]; then
+			lastto=$line
+		fi
+		if ! $found  \
+			&& [ $(strindex "$line" "From:") -ge 0 ]; then
+			lastfrom=$line
+		fi
+		if ! $found  \
+			&& [ $(strindex "$line" "Subject: ") -ge 0 ] \
+			&& [ $(strindex "$line" "RHEL") -ge 0 ]; then
+
+			found=true
+
+			# Remove the word "Subject: " from the temp
+			#
+			temp=$(echo "$line" | cut -d' ' -f2-)
+
+			# Remove any brackets, parentheses, and quotes
+			#
+			temp=$(echo "$temp" | sed 's/[][{}<>(),"!@#$%^&]//g')
+			temp=$(echo "$temp" | sed "s/'//g")
+
+			# Replace spaces, tabs, slashes, colons and semicolons
+			# with hyphens
+			#
+			temp=$(echo "$temp" | sed "s\[/:; ]\-\g")
+			temp=$(echo "$temp" | tr -d '[:space:]' )
+
+			# Create the new name
+			#
+			newname=$(printf "%s.patch" "$temp")
+
+			echo "*********************"
+			echo $newname
+			echo "*********************"
+			echo $lastto > "$newname"
+			echo $lastfrom >> "$newname"
+			echo $line >> "$newname"
+			continue
+		fi
+
+		$found && echo "$line" >> "$newname"
+
+	done < $patfil
+}
+
+getapatch() {
+
+	# $directory is global defined at top of this script
+	#
+	local patlin="$1"
+	local patfil="$2"
+	local filename
+	echo "link: $patlin"
+	echo "file: $patfil"
+
+	curl -k "$patlin" | \
+		sed -r -e 's/(<!--)|(-->)//g' -e 's/<[a-zA-Z\/][^>]*>//g' \
+		> "$patfil"
+
+	# Convert the HTML entities in the file back to ASCII characters
+	#
+	sed -i 's/&amp;/\&/g; s/&lt;/\</g; s/&gt;/\>/g; s/&quot;/\"/g; s/#&#39;/\'"'"'/g; s/&ldquo;/\"/g; s/&rdquo;/\"/g;' $patfil
+	renapatch "$patfil"
+}
+
+while getopts n:d:h OPTION; do
+    case "$OPTION" in
+
+	n ) number=$OPTARG
+	    optcount=$((optcount+2))
+	    ;;
+	d ) directory=$OPTARG
+	    optcount=$((optcount+2))
+	    ;;
+	h ) optcount=$((optcount+1))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 1 ] || usage 1
+
+# Home link must be the prologue of a patch set or a single patch.
+#
+# Single patch is assumed, unless user submitted -n number.
+#
+# If the number of patches to be extracted is greater than 1, then that
+# number is used to help parse the list of links on the home link page
+# for the links to the patches in the set and replies to them.
+#
+# The list of links must be parsed to remove the html tags, leaving only
+# the relative links.
+#
+# To create the complete URL of each patch, the home link is stripped of
+# the last field after the last '/' and the relative link of the
+# corresponding patch is appended.
+#
+# Each patch extracted will have its html tags stripped.
+#
+
+homelink="$1"
+echo "homelink: $homelink"
+
+# If there is only one patch to process, then do that and exit with
+# good status
+#
+[ $number -eq 1 ] && { getpatch "$homelink" "$patchfile"; exit 0; }
+
+# If we get this far, we are processing a patch set.
+# Get the list of patches and replies in the set.
+#
+patlist=$(curl -k "$homelink" | awk '/\[/ && /'$number'\]/')
+
+# Extract the base link, everything but the html filename at the end
+# of the link.
+#
+homebase=$(echo "$homelink" | rev | cut -d'/' -f2- | rev)/
+echo "homebase: $homebase"
+
+# Loop through the list of links discovered on the homepage and
+# create the urls of the links to the individual patches in the
+# patchset.
+#
+index=0
+while read line; do
+
+	# Find the href in the line. If there is no href, then
+	# skip the line.
+	#
+	chindex=$(strindex "$line" "$hrefstr")
+	[ $chindex -eq -1 ] && continue
+	chindex=$((chindex + hrefstrsiz))
+
+	# Create the URL of the patch
+	#
+	href="$homebase"$(echo ${line:$chindex} | cut -d'"' -f1)
+	echo "href: $href"
+
+	# Get the remainder of the line after the href
+	#
+	line="$(echo ${line:$chindex} | cut -d'>' -f2-)"
+
+	# Not gonna process replies as patches
+	#
+	[ "${line:0:3}" == "Re:" ] && continue
+
+	hrefary[$index]="$href"
+	let index++
+done <<< "$patlist"
+
+# At this point, the hrefary array only contains urls of patches in
+# this patch set.
+# Loop through the hrefary array and get the patches.
+#
+count=$index
+for ((index=0; index < count; ++index)); do
+	getapatch "${hrefary[$index]}" "$patchfile"
+done
+
+exit 0
