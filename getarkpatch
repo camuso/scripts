@@ -8,7 +8,7 @@ declare -i number=1	# assume single patch
 declare homelink
 declare homebase
 declare patchfile="/dev/shm/getarkpatchfile"
-declare directory="./"
+declare directory="$PWD"
 declare patlist
 declare line
 declare hrefstr='href="'
@@ -50,8 +50,15 @@ function strindex {
 	[[ "$x" = "$1" ]] && echo -1 || echo ${#x}
 }
 
+# renapatch() - rename a patchfile taken from a web archive
+#
+# $1 - the path to the patchfile downloaded from the archive
+# $2 - the directory into which the renamed file is to be moved
+# $3 - returns the new path to the renamed file
+#
 renapatch(){
 	local patfil="$1"
+	local dir="$2"
 	local found=false
 	local line
 	local lastto
@@ -105,6 +112,8 @@ renapatch(){
 		$found && echo "$line" >> "$newname"
 
 	done < $patfil
+
+	eval $3="$newname"
 }
 
 getapatch() {
@@ -114,17 +123,26 @@ getapatch() {
 	local patlin="$1"
 	local patfil="$2"
 	local filename
+	local newpat
+
 	echo "link: $patlin"
 	echo "file: $patfil"
 
-	curl -k "$patlin" | \
-		sed -r -e 's/(<!--)|(-->)//g' -e 's/<[a-zA-Z\/][^>]*>//g' \
-		> "$patfil"
+	# Download the patch and strip the HTML comment markers to expose
+	# comments for parsing.
+	#
+	curl -k "$patlin" | sed -r -e 's/(<!--X-)|(-->)//g' \
+		-e 's/<[!a-zA-Z\/][^>]*>//g'> "$patfil"
+
+	renapatch "$patfil" "$directory" newpat
+
+	# Strip all the remaining HTML tags from the file
+	#
+	# sed -i 's/<[!a-zA-Z\/][^>]*>//g' $newpat
 
 	# Convert the HTML entities in the file back to ASCII characters
 	#
-	sed -i 's/&amp;/\&/g; s/&lt;/\</g; s/&gt;/\>/g; s/&quot;/\"/g; s/#&#39;/\'"'"'/g; s/&ldquo;/\"/g; s/&rdquo;/\"/g;' $patfil
-	renapatch "$patfil"
+	sed -i 's/&amp;/\&/g; s/&lt;/\</g; s/&gt;/\>/g; s/&quot;/\"/g; s/#&#39;/\'"'"'/g; s/&ldquo;/\"/g; s/&#45;/-/g; s/&rdquo;/\"/g; s/&nbsp/ /g;' $newpat
 }
 
 while getopts n:d:h OPTION; do
