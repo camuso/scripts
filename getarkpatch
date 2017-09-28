@@ -67,6 +67,7 @@ renapatch(){
 	local newname
 
 	while IFS= read -r line; do
+
 		if ! $found  \
 			&& [ $(strindex "$line" "To:") -ge 0 ]; then
 			lastto=$line
@@ -75,9 +76,7 @@ renapatch(){
 			&& [ $(strindex "$line" "From:") -ge 0 ]; then
 			lastfrom=$line
 		fi
-		if ! $found  \
-			&& [ $(strindex "$line" "Subject: ") -ge 0 ] \
-			&& [ $(strindex "$line" "RHEL") -ge 0 ]; then
+		if ! $found && [ $(strindex "$line" "Subject: ") -ge 0 ]; then
 
 			found=true
 
@@ -189,7 +188,7 @@ echo "homelink: $homelink"
 # If there is only one patch to process, then do that and exit with
 # good status
 #
-[ $number -eq 1 ] && { getpatch "$homelink" "$patchfile"; exit 0; }
+[ $number -eq 1 ] && { getapatch "$homelink" "$patchfile"; exit 0; }
 
 # If we get this far, we are processing a patch set.
 # Get the list of patches and replies in the set.
