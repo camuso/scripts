@@ -273,8 +273,6 @@ for ((index = 0; index < $fcountA; ++index)); do
 	#
 	exec 5<"${faryA[$index]}"	# open the files for reading
 	exec 6<"${faryB[$index]}"
-	echo "fileA: "${faryA[$index]}""
-	echo "fileB: "${faryB[$index]}""
 
 	$nodiffst && get_firstline_nodiffstat || get_firstline
 	$vverbose && pr_start
