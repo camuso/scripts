@@ -61,6 +61,9 @@ declare verbosity=0	# level of verbose-ness
 declare -i optcnt=0	# count the options
 declare -i lincnt=0	# line counter
 declare b_stdout=true	# indicates output is going to /dev/stdout
+declare eofA=false	# found the end of file A
+declare eofB=false	# found the end of file B
+declare b_done=false	# loop control
 
 # list of files in each directory
 #
@@ -227,8 +230,8 @@ pr_header() {
 }
 
 pr_start() {
-	fprintf "%d A: comparing from line: %5d\n" $(($index+1)) $((lcA+1))
-	fprintf "%d B: comparing from line: %5d\n" $(($index+1)) $((lcB+1))
+	fprintf "%d A: comparing from line: %5d\n" $(($index+1)) $lcA
+	fprintf "%d B: comparing from line: %5d\n" $(($index+1)) $lcB
 	$strict && fecho "Only comparing lines beginning with + or -"
 	fecho
 }
@@ -270,23 +273,32 @@ for ((index = 0; index < $fcountA; ++index)); do
 	#
 	exec 5<"${faryA[$index]}"	# open the files for reading
 	exec 6<"${faryB[$index]}"
+	echo "fileA: "${faryA[$index]}""
+	echo "fileB: "${faryB[$index]}""
 
 	$nodiffst && get_firstline_nodiffstat || get_firstline
 	$vverbose && pr_start
+
+	# Set loop control variables.
+	#
+	equiv=true	# will be set to false if a mismatch is detected
+	eofA=false	# will be set true if we detect an end of file
+	eofB=false	# :
+	b_done=false	# Will be set true if both eof markers are set
 
 	# Read lines from each patch file in a loop and compare them until
 	# a mismatch is detected or we've reached the end of the first
 	# patch.
 	#
-	equiv=true	# will be set to false if a mismatch is detected
+	until $b_done; do
 
-	while read lineA; do		# get a line from the first patch file
-		read -u 6 lineB;	# get a line from the second patch file
-
-		# We've read the next line, so increment the line counters
+		# read returns non-zero after reading the last line.
+		# If we find the EOF of either file, we are processing the
+		# last line to be compared.
 		#
-		let ++lcA
-		let ++lcB
+		read -u 5 lineA || eofA=true
+		read -u 6 lineB || eofB=true
+		($eofA && $eofB) && b_done=true
 
 		# Exclude line positions and index marker.  These can be
 		# different and yet the actual patched code is congruent.
@@ -301,8 +313,8 @@ for ((index = 0; index < $fcountA; ++index)); do
 
 		# break when we've found the end of the patch
 		#
-		[ "${lineA:0:3}" == "-- " ] && break
-		[ "${lineB:0:3}" == "-- " ] && break
+		#($eofA && [ "${lineA:0:3}" == "--" ]) && break
+		#($eofA && [ "${lineB:0:3}" == "--" ]) && break
 
 		# If strict is true, then user only wants to compare lines
 		# that have "+" or "-" as the first character in the line.
@@ -320,12 +332,24 @@ for ((index = 0; index < $fcountA; ++index)); do
 			fecho
 		fi
 
+		# Increment the line counters for the next line.
+		#
+		$eofA || let ++lcA
+		$eofB || let ++lcB
+
+		# Mismatch detection with rules for determining false positive
+		# mismatches.
+		#
 		if [ "$lineA" != "$lineB" ]; then
+
+			([ "${lineA:0:2}" == "--" ] || [ "${lineB:0:2}" == "--" ]) \
+				&& continue
+
 			equiv=false
 			! $verbose && fecho "PATCH: $((index+1))"
 			break
 		fi
-	done <&5
+	done
 
 	# How to do a if-then-if-then-else-fi-fi on one line ;)
 	#
