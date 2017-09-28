@@ -54,7 +54,6 @@ declare ofile="/dev/stdout"	# default output file
 #
 declare strict=false	# exclude lines whose first char is not + or -
 declare nopaths=false	# exclude the paths from comparison
-declare nodiffst=false	# exclude the diff stat at the top of patch
 declare verbose=false	# print whether or not files are congruent
 declare vverbose=false	# print each line compared
 declare verbosity=0	# level of verbose-ness
@@ -237,13 +236,8 @@ pr_start() {
 }
 
 get_firstline() {
-	while read line; do [ "$line" == "---" ] && break; let lcA++; done <&5
-	while read line; do [ "$line" == "---" ] && break; let lcB++; done <&6
-}
-
-get_firstline_nodiffstat() {
-	while read line; do [ "${line:0:10}" == "diff --git" ] && break; let lcA++; done <&5
-	while read line; do [ "${line:0:10}" == "diff --git" ] && break; let lcB++; done <&6
+	while read line; do let ++lcA; [ "${line:0:10}" == "diff --git" ] && break; done <&5
+	while read line; do let ++lcB; [ "${line:0:10}" == "diff --git" ] && break; done <&6
 }
 
 # At this point, we know the level of verbosity of the output. We need
@@ -259,8 +253,8 @@ $b_stdout || fprintf "verbose level: %d\n" $verbosity
 #
 for ((index = 0; index < $fcountA; ++index)); do
 
-	lcA=1	# Line counter for line from file A
-	lcB=1   # Line counter for line from file B
+	lcA=0	# Line counter for line from file A
+	lcB=0   # Line counter for line from file B
 
 	$vverbose && pr_header
 
@@ -274,7 +268,7 @@ for ((index = 0; index < $fcountA; ++index)); do
 	exec 5<"${faryA[$index]}"	# open the files for reading
 	exec 6<"${faryB[$index]}"
 
-	$nodiffst && get_firstline_nodiffstat || get_firstline
+	get_firstline
 	$vverbose && pr_start
 
 	# Set loop control variables.
@@ -288,7 +282,17 @@ for ((index = 0; index < $fcountA; ++index)); do
 	# a mismatch is detected or we've reached the end of the first
 	# patch.
 	#
+	# NOTE: bash read strips leading and trailing whitespace unless IFS
+	# is set to NULL. We very much need leading and trailing whitespace
+	# for our line comparisons and to know where a patch ends.
+	#
+	IFS=
 	until $b_done; do
+
+		# Increment the line counters.
+		#
+		$eofA || let ++lcA
+		$eofB || let ++lcB
 
 		# read returns non-zero after reading the last line.
 		# If we find the EOF of either file, we are processing the
@@ -309,11 +313,6 @@ for ((index = 0; index < $fcountA; ++index)); do
 		$nopaths && [ "${lineA:0:6}" == "+++ b/" ] && continue
 		$nodiffst && [ "${lineA:0:10}" == "diff --git" ] && continue
 
-		# break when we've found the end of the patch
-		#
-		#($eofA && [ "${lineA:0:3}" == "--" ]) && break
-		#($eofA && [ "${lineB:0:3}" == "--" ]) && break
-
 		# If strict is true, then user only wants to compare lines
 		# that have "+" or "-" as the first character in the line.
 		#
@@ -330,17 +329,12 @@ for ((index = 0; index < $fcountA; ++index)); do
 			fecho
 		fi
 
-		# Increment the line counters for the next line.
-		#
-		$eofA || let ++lcA
-		$eofB || let ++lcB
-
 		# Mismatch detection with rules for determining false positive
 		# mismatches.
 		#
 		if [ "$lineA" != "$lineB" ]; then
 
-			([ "${lineA:0:2}" == "--" ] || [ "${lineB:0:2}" == "--" ]) \
+			([ "${lineA:0:3}" == "-- " ] || [ "${lineB:0:3}" == "-- " ]) \
 				&& continue
 
 			equiv=false
