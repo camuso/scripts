@@ -298,9 +298,17 @@ for ((index = 0; index < $fcountA; ++index)); do
 		# If we find the EOF of either file, we are processing the
 		# last line to be compared.
 		#
-		read -u 5 lineA || eofA=true
-		read -u 6 lineB || eofB=true
+		# NOTE: Must use 'read -r' to prevent backslashes in the
+		# line from being taken as a continuation for the read.
+		# Without the -r switch, read will consider lines ending
+		# with backslashes to be one line with the following line
+		# of text. This will mess up line-by-line comparison for
+		# certain sure.
+		#
+		read -r -u 5 lineA || eofA=true
+		read -r -u 6 lineB || eofB=true
 		($eofA && $eofB) && b_done=true
+
 
 		# Exclude line positions and index marker.  These can be
 		# different and yet the actual patched code is congruent.
