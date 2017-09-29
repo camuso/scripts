@@ -3,6 +3,8 @@
 # patbatcmpmgr
 #
 
+declare version="v2.0"
+
 # run if user hits control-c
 #
 control_c()
@@ -40,7 +42,6 @@ declare -i boolcount=0
 declare -i boolindex=0
 
 declare b_found_first_bool=false
-declare b_nodiffst
 declare b_nopaths
 declare b_strict
 declare b_exec_exit=false
@@ -83,9 +84,14 @@ cat <<EOF
 
 $(basename $0) [-h -R -U -X -o <file>]
 
+  Version $version
+
   Performs a batch comparison of the patches in two different directories.
   Comparison for any given pair of files stops at the first mismatched
   line.
+
+  Commit logs and diffstats are not included in the line-by-line comparisons.
+  Line-by-line comparisons start at the first instance of 'diff --git'.
 
   All files are compared up to the first detected mismatched line.
 
@@ -123,12 +129,6 @@ $(basename $0) [-h -R -U -X -o <file>]
 
   o - Change the output file.
       Default: /dev/stdout
-
-  d - When true, excludes diff stat lines from the comparison.
-      It is possible for the patches to still be congruent even when
-      the diff stats are different. For example, when the RHEL patch is
-      a subset of the upstream patch
-      Default: true
 
   p - When true, excludes path lines from the comparison
       You will want to do this if the file being patched has been renamed
@@ -194,7 +194,6 @@ init_booleans() {
 get_booleans() {
 	index=$boolindex
 	for bool in \
-	b_nodiffst \
 	b_nopaths \
 	b_strict
 	do
@@ -212,7 +211,6 @@ get_booleans() {
 set_booleans() {
 	index=$boolindex
 	for bool in \
-	b_nodiffst \
 	b_nopaths \
 	b_strict
 	do
@@ -246,7 +244,7 @@ show_settings() {
 	settingstr=$(
 cat <<EOF
 $BLD
-     $UND\0Batch Comparison of RHEL Patches with Upstream$OFF$BLD
+     $UND\0Batch Comparison of RHEL Patches with Upstream - $version$OFF$BLD
 
      $UND\0Environment       $OFF$BLD
      Most Recent Tag            : $OFF$lasttag$BLD
@@ -255,7 +253,6 @@ $BLD
   o  Output file.               : $OFF$ofile$BLD
 
      $UND\0Lines to exclude  $OFF$BLD
-  d  diff stats                 : $OFF$b_nodiffst$BLD
   p  file paths                 : $OFF$b_nopaths$BLD
   s  without leading + or -     : $OFF$b_strict$BLD
 
@@ -289,8 +286,6 @@ menu_parser() {
 			;;
 		o )	getuser "Output file: " ofile
 			prj_set_item $prj_ofile $ofile
-			;;
-		d )	ui_toggle b_nodiffst
 			;;
 		p )	ui_toggle b_nopaths
 			;;
@@ -484,7 +479,6 @@ while true; do
 		[ $? -eq $rc_run ] && break
 	done
 
-	$b_nodiffst && optstr="$optstr""-d "
 	$b_nopaths  && optstr="$optstr""-p "
 	$b_strict   && optstr="$optstr""-s "
 
