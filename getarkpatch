@@ -86,7 +86,7 @@ renapatch(){
 
 			# Remove any brackets, parentheses, and quotes
 			#
-			temp=$(echo "$temp" | sed 's/[][{}<>(),"!@#$%^&]//g')
+			temp=$(echo "$temp" | sed 's/[][{}<>()|,"!@#$%^&*]//g')
 			temp=$(echo "$temp" | sed "s/'//g")
 
 			# Replace spaces, tabs, slashes, colons and semicolons
@@ -148,7 +148,7 @@ while getopts n:d:h OPTION; do
     case "$OPTION" in
 
 	n ) number=$OPTARG
-	    optcount=$((optcount+2))
+	    optcount=$((optcount+1))
 	    ;;
 	d ) directory=$OPTARG
 	    optcount=$((optcount+2))
