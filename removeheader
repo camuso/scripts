@@ -1,0 +1,58 @@
+#!/bin/bash
+#
+# removeheader
+#
+
+declare -i argcount=2
+declare b_inhdr=true
+declare hdrend
+declare filespec
+declare tmpfile
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) hdrend filespec
+
+  Exclude all lines upto and including the line consisting of the
+  hdrend string
+
+  hdrend   - string that determines the end of the header
+  filespec - patch to file needing the header stripped
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+
+hdrend="$1"
+filespec="$2"
+tmpfile="$filespec".tmp
+
+echo "tmpfile: $tmpfile"
+
+mv -v "$filespec" "$tmpfile"
+> "$filespec"
+echo "header end: $hdrend"
+
+while read line; do
+
+
+
+	if $b_inhdr; then
+		[[ "$line" != "$hdrend" ]] && continue
+		b_inhdr=false
+		continue
+	fi
+
+	echo "$line" >> "$filespec"
+
+done < "$tmpfile"
+
