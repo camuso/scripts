@@ -72,7 +72,24 @@ str_noconflicts="Cherry-picked without conflicts from the following upstream com
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
 str_cpprompt="\nPress \"Enter\" to skip this step.\nCherrypick from commit: "
+declare str_shellmsg
+declare str_extcmt_query
+declare str_extcmt_validate
 
+#########################################
+# Functions
+#########################################
+
+#===  FUNCTION  ================================================================
+#          NAME:  init_dynstrings
+#   DESCRIPTION:  Init strings containing dynamic runtime information
+#    PARAMETERS:  none
+#       GLOBALS:  str_shellmsg
+#                 str_extcmt_query
+#                 str_extcmt_validate
+#       RETURNS:  None
+#===============================================================================
+init_dynstrings() {
 str_shellmsg="
 Spawning a new shell so you can edit conflicts.
 	Type \"exit\" or \"ctrl-D\" to return here and pick up where
@@ -81,16 +98,18 @@ Spawning a new shell so you can edit conflicts.
 	Type \"exit 1\" if you used a different upstream commit in your
 	shell session, and you will be prompted for the commit you used.
 
-	Type \"exit 2\" if you use different upstream commits and already
+	Type \"exit 2\" if you had to use different upstream commits and already
 	committed your backports and commit messages before exiting the
-	shell. In that case, be sure to manually update the commit log
+	shell. In that case, be sure to manually update the commit logs
 	with the new backported commit(s).
+	File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
+	File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
 
 	Type \"exit 3\" if you want to kill the gitcherrypick process when
 	you exit this shell.
 	git cherry-pick --abort will be executed.
-	Cherry-picked commits file :$BLD $uscommitsfile$OFF
-	Backported commits file    :$BLD $dscommitsfile$OFF
+
+	To see this message again, type $BLD\0shmsg$OFF at the command prompt.
 "
 
 str_extcmt_query="
@@ -100,14 +119,22 @@ when you were executing in an external shell. Please enter that commit now."
 str_extcmt_validate="
 You signaled that you have completed the commits in an extermal shell and
 have updated the following commits files accordingly
-	"$attr_bold""$uscommitsfile"
-	"$dscommitsfile""$attr_OFF"
+	File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
+	File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
+
 If you want to exit to a shell to take care of unfinished business, or to
 recheck your work, press \"x\" now, or any other key to continue. "
+}
 
-#########################################
-# Functions
-#########################################
+#===  FUNCTION  ================================================================
+#          NAME:  shmsg
+#   DESCRIPTION:  Simply print the script's herald defined above
+#    PARAMETERS:  Implicit global, str_herald
+#       RETURNS:  None
+#===============================================================================
+shmsg() {
+	echo -e "$str_shellmsg"
+}
 
 #===  FUNCTION  ================================================================
 #          NAME:  print_herald
@@ -389,6 +416,13 @@ validate_last_upstream_hash() {
 	# then show nothing.
 	#
 	uscmtstartline=$(grep -m1 -n "$lastuphash" "$uscommitsfile" | cut -d':' -f1)
+
+	# The grep will return the line in uscommitsfile of the most recent
+	# successfully backported upstream commit. The one we want to start
+	# with is the commit after that.
+	#
+	let uscmtstartline++
+
 	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
 
 	$lasthashvalid && lastuplog=$(git log -n1 --oneline $lastuphash)
@@ -500,7 +534,7 @@ function menu_parser {
 		i )	init_booleans
 			get_booleans
 			;;
-		h )	less ~/bin/.data/help-gitcherrypick.txt		# ~/bin
+		h )	less ~/bin/.data/help-gitcherrypick.txt	# ~/bin
 			;;
 		q )	exit_gitcherrypick 0
 			;;
@@ -511,6 +545,7 @@ function menu_parser {
 			return $rc_run
 			;;
 		r )	set_booleans
+			uscmtstartline=1
 			return $rc_run
 			;;
 	esac
@@ -563,8 +598,8 @@ resolve_conflicts() {
 		b_shellcommit=false
 		b_shellcommit_noauto=false
 
-		echo -e "$str_shellmsg"
 		git status
+		echo -e "$str_shellmsg"
 
 		# bash 3>&2>&1 | tee $workdir/shell_$shell_index
 		# \tThe activity in the new shell will be saved in ...\n\
@@ -628,11 +663,7 @@ process_commit() {
 
 	echo "picking commit: $commit"
 	git cherry-pick "$commit"
-	#callstat=$?
-	#[ $callstat -eq 0 ] || return $callstat
-
 	gitstat=$(git status --porcelain)
-	git status
 
 	[ -z "$gitstat" ] || {
 		echo "You have conflicts to fix."
@@ -668,8 +699,6 @@ process_commit() {
 		let index++
 		continue
 	fi
-
-	prj_set_item $prj_lastupcmt $commit
 
 	if $b_autocommit; then
 
@@ -715,6 +744,8 @@ process_commit() {
 		#
 		git log -n1 --oneline >> "$dscommitsfile"
 	fi
+
+	prj_set_item $prj_lastupcmt $commit
 
 	return 0
 }
@@ -844,7 +875,7 @@ menu_loop
 # If user did not give us a uscommitsfile (cherry-pick commits file), then
 # set b_use_uscmtlog to false
 #
-[ $uscommitsfile ] && b_use_uscmtlog=true || b_use_uscmtlog=false
+[ -f $uscommitsfile ] && b_use_uscmtlog=true || b_use_uscmtlog=false
 
 if $b_use_uscmtlog; then
 	cpcommitscount=$(cat "$uscommitsfile" | wc -l)
@@ -856,18 +887,29 @@ fi
 # created by cherrypicking into the current git tree, then be sure the
 # file is empty.
 #
-echo "File for resulting downstream commits:    "$dscommitsfile""
+echo "Resulting downstream commits:    "$dscommitsfile""
 $b_use_dscmtlog && cat /dev/null > "$dscommitsfile"
 
-# Initialize this session's counters.
+# Init the strings containing dynamic runtime information.
 #
-index=1
+init_dynstrings
+
+# Export the shmsg function for used in spawned shells.
+#
+export str_shellmsg
+typeset -fx  shmsg
+
+# Set the starting index to the line in the uscommitsfile we want to
+# start cherry-picking.
+#
+index=$uscmtstartline
 
 while true; do
 
 	commit=""
 
 	if $b_use_uscmtlog; then
+
 		if [ $index -le $cpcommitscount ]; then
 			commit="$(ui_readline $index $uscommitsfile)"
 			[ "${commit:0:1}" == "#" ] && let index++ && continue
