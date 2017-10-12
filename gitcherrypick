@@ -23,6 +23,7 @@ declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
 declare MYDATA=$MYDIR/.data
 declare MYPRJ=$MYDATA/gitcherrypick.prj
+declare MYSHLVL=/dev/shm/gcpshlvl
 
 #######################################
 # External Source Files
@@ -30,11 +31,6 @@ declare MYPRJ=$MYDATA/gitcherrypick.prj
 source $MYLIB/ui.source
 source $MYLIB/project.source
 source $MYLIB/gitutilities.source
-
-
-# Herald
-#
-str_herald="\n"$attr_bold"gitcherrypick "$VERSION" - Automates cherrypicking"
 
 ########################################
 # Function Return Codes
@@ -52,7 +48,9 @@ declare commit=""
 declare cmtmsgfile
 declare str_cmtmsg
 declare workdir
-declare lasthashvalid
+declare lasthashvalid=false
+declare lastuplog=""
+declare uscmtstartline=1
 
 declare prj_entries=0
 declare index=0
@@ -61,22 +59,19 @@ declare boolindex=0
 declare b_found_first_bool=false
 declare gitbranch
 declare ui_bools=""
-declare cpcommitsfile=""
-declare bpcommitsfile=""
-declare b_use_cpcmtlog
-declare b_use_bpcmtlog
-
+declare uscommitsfile=""	# File of upstream commits to cherry-pick
+declare dscommitsfile=""	# File of resulting downstream commits
+declare b_use_uscmtlog=false
+declare b_use_dscmtlog=false
 
 ########################################
 # Strings
 ########################################
+str_herald="\n"$attr_bold"gitcherrypick "$VERSION" - Automates cherrypicking"
 str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
 str_cpprompt="\nPress \"Enter\" to skip this step.\nCherrypick from commit: "
-
-# \tThe activity in the new shell will be saved in ...\n\
-# \t\t"$attr_bold""$workdir"/shell_$shellindex.log"$attr_OFF"\n\
 
 str_shellmsg="
 Spawning a new shell so you can edit conflicts.
@@ -88,13 +83,14 @@ Spawning a new shell so you can edit conflicts.
 
 	Type \"exit 2\" if you use different upstream commits and already
 	committed your backports and commit messages before exiting the
-	shell. In that case, be sure to manually update the following commit
-	file with the cherry-picked and backported commits.
+	shell. In that case, be sure to manually update the commit log
+	with the new backported commit(s).
 
 	Type \"exit 3\" if you want to kill the gitcherrypick process when
-	you exit the new shell.
-	"$attr_bold""$cpcommitsfile"
-	"$bpcommitsfile""$attr_OFF"
+	you exit this shell.
+	git cherry-pick --abort will be executed.
+	Cherry-picked commits file :$BLD $uscommitsfile$OFF
+	Backported commits file    :$BLD $dscommitsfile$OFF
 "
 
 str_extcmt_query="
@@ -104,8 +100,8 @@ when you were executing in an external shell. Please enter that commit now."
 str_extcmt_validate="
 You signaled that you have completed the commits in an extermal shell and
 have updated the following commits files accordingly
-	"$attr_bold""$cpcommitsfile"
-	"$bpcommitsfile""$attr_OFF"
+	"$attr_bold""$uscommitsfile"
+	"$dscommitsfile""$attr_OFF"
 If you want to exit to a shell to take care of unfinished business, or to
 recheck your work, press \"x\" now, or any other key to continue. "
 
@@ -268,9 +264,9 @@ function get_booleans {
 #          NAME:  set_booleans
 #   DESCRIPTION:  Write the current values of the program flow booleans into
 #   		  the project file.
-#    PARAMETERS:  Global symbols:
-#    			ui_bools
-#    			boolindex
+#    PARAMETERS:  none
+#       GLOBALS:  ui_bools
+#    		  boolindex
 #       RETURNS:  0
 #===============================================================================
 function set_booleans {
@@ -283,61 +279,83 @@ function set_booleans {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_cpcommitsfile
+#          NAME:  get_uscommitsfile
 #   DESCRIPTION:  Gets the name of the file that contains the commits to
 #                 be cherrypicked.
-#    PARAMETERS:  Global symbols modified by this function
-#			cpcommitsfile - file containing the commits to be
-#					cherry-picked
-#			b_use_cpcmtlog - boolean set true
-#					 is not ""
-#       RETURNS:  none
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile - file containing the commits to be cherrypicked
+#       	  prj_cpcommits - offset into project file for uscommitsfile
+#       RETURNS:  status of call to ui_getfilespec()
 #===============================================================================
-function get_cpcommitsfile {
+function get_uscommitsfile {
 	local stat
 	ui_getfilespec "File containing the commits to be cherry-picked: " \
-		cpcommitsfile
+		uscommitsfile
 	stat=$?
-	prj_set_item $prj_cpcommits $cpcommitsfile
+	prj_set_item $prj_cpcommits $uscommitsfile
 	return $stat
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_bpcommitsfile
+#          NAME:  get_dscommitsfile
 #   DESCRIPTION:  Gets the name of the file that will contain the new commits
 #                 resulting from those that were cherry-picked.
-#    PARAMETERS:  Global symbols modified by this function
-#			bpcommitsfile - file containing the new commits resulting
-#					from those that were cherry-picked
-#			b_use_bpcmtlog - boolean set true if the filename
-#					 is not ""
-#       RETURNS:  none
+#    PARAMETERS:  none
+#	GLOBALS:  dscommitsfile - file containing the new commits resulting from
+#	                          those that were cherry-picked
+#	          b_use_dscmtlog - boolean set true if the filename is not ""
+#	          prj_bpcommits  - offset into project file for dscommitsfile
+#       RETURNS:  1 if no dscommitsfile, else 0
 #===============================================================================
-function get_bpcommitsfile {
-	getuser "File to store the commits that were cherry-picked: " bpcommitsfile
+function get_dscommitsfile {
+	getuser "File to store the commits that were cherry-picked: " dscommitsfile
 
-	if [ $bpcommitsfile ]; then
-		b_use_bpcmtlog=true
-		echo true
+	if [ $dscommitsfile ]; then
+		b_use_dscmtlog=true
+		# echo true
 	else
-		b_use_bpcmtlog=false
-		echo false
+		b_use_dscmtlog=false
+		# echo false
 		return 1
 	fi
 
-	[ ! -f $bpcommitsfile ] && touch $bpcommitsfile
-	prj_set_item $prj_bpcommits $bpcommitsfile
+	[ ! -f $dscommitsfile ] && touch $dscommitsfile
+	prj_set_item $prj_bpcommits $dscommitsfile
 	return 0
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  cont_from_last
-#   DESCRIPTION:  Continue from the last upstream commit
+#          NAME:  warn_lasthashinv
+#   DESCRIPTION:  Issues warning that the attempt to restart cherrypicking from
+#                 the last committed hash did not succeed, because it is not
+#                 part of the current set of upstream hashes to cherrypick.
 #    PARAMETERS:  none
+#       GLOBALS:  lastuplog     - most recently applied commit
+#                 uscommitsfile - file of upstream commits to cherrypick
+#                 uscmtstartline- starting line for uscommitsfile
 #       RETURNS:  none
 #===============================================================================
-cont_from_last() {
-	return 0
+warn_lasthashinv() {
+	local lasthashinvstr=$(
+cat <<EOF
+
+  The most recently applied commit: ${lastuplog:0:40}
+  is not part of the current set of upstream commmits to be processed as
+  listed in the file: $uscommitsfile
+  We will start cherrypicking with the first commit in that file.
+\0
+EOF
+)
+	local lasthashempstr=$(
+cat <<EOF
+  There was no recently applied commit found, so we will start cherrypicking
+  with the first commit in file: $uscommitsfile
+\0
+EOF
+)
+	uscmtstartline=1
+	[ -z "$lastuplog" ] \
+		&& echo -e "$lasthashempstr" || echo -e "$lasthashinvstr"
 }
 
 #===  FUNCTION  ================================================================
@@ -345,18 +363,23 @@ cont_from_last() {
 #   DESCRIPTION:  validates whether the hash stored in the project file is
 #                 valid for this instance of gitcherrypick
 #    PARAMETERS:  none
-#       GLOBALS:  cpcommitsfile - the cherry-pick commits file containing the
+#       GLOBALS:  uscommitsfile - the cherry-pick commits file containing the
 #                                 hashes of the commits to be backported.
-#                 lasthashvalid - global boolean indicating last hash was valid
+#                 lasthashvalid - boolean indicating last hash was valid
+#                 lasthashlog   - updated if lasthashvalid
+#                 uscmtstartline- the line in the commits file where processing
+#                                 should start (default is 1)
 #       RETURNS:  none
 #===============================================================================
 validate_last_upstream_hash() {
 	local lastuphash=$(prj_get_item $prj_lastupcmt)
-	local lastuplog=$(git log -n1 --oneline $lastuphash)
+
+	uscmtstartline=1
+	lasthashvalid=true
 
 	# If we don't have a commits file, we are interactive, so show nothing
 	#
-	[ -f $cpcommitsfile ] || lasthashvalid=false
+	[ -f $uscommitsfile ] || lasthashvalid=false
 
 	# If there is no hash saved in the project file, then show nothing.
 	#
@@ -365,10 +388,10 @@ validate_last_upstream_hash() {
 	# If the commit stored in the project file is not in the commits file
 	# then show nothing.
 	#
-	grep -m1 -qs "$lastupcmt" "$cpcommitsfile"
-	[ $? -eq 0 ] || lasthashvalid=false
+	uscmtstartline=$(grep -m1 -n "$lastuphash" "$uscommitsfile" | cut -d':' -f1)
+	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
 
-	lasthashvalid=true
+	$lasthashvalid && lastuplog=$(git log -n1 --oneline $lastuphash)
 }
 
 #===  FUNCTION  ================================================================
@@ -397,7 +420,7 @@ show_cont() {
 	local contstr=$(
 cat <<EOF
 
- F  Forward from Last Upstream Commit
+ >  Forward from Last Upstream Commit
 EOF
 )
 	# echo -e "$contstr"
@@ -424,8 +447,8 @@ $attr_bold
  b  Current git branch		: $OFF$(get_gitbranch)$BLD
  p  Current subject prefix	: $OFF$subjectprefix$BLD
  w  Working directory		: $OFF$workdir$BLD
- s  Source commits file		: $OFF$cpcommitsfile$BLD
- d  Destination commits file	: $OFF$bpcommitsfile$BLD
+ s  Source commits file		: $OFF$uscommitsfile$BLD
+ d  Destination commits file	: $OFF$dscommitsfile$BLD
 
     $attr_under\0Options            $attr_OFF$attr_bold
  a  Automate commits		: $OFF$b_autocommit$BLD
@@ -441,7 +464,6 @@ $attr_bold
 $attr_OFF
 EOF
 )
-	validate_last_upstream_hash
 	echo -e "$settings"
 }
 
@@ -453,6 +475,7 @@ EOF
 #       	  continue looping.
 #===============================================================================
 function menu_parser {
+	validate_last_upstream_hash
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
@@ -464,9 +487,9 @@ function menu_parser {
 			;;
 		w )	prj_set_directory "working" $prj_workdir workdir quiet
 			;;
-		s )	get_cpcommitsfile
+		s )	get_uscommitsfile
 			;;
-		d )	get_bpcommitsfile
+		d )	get_dscommitsfile
 			;;
 		a )	ui_toggle b_autocommit
 			;;
@@ -484,7 +507,8 @@ function menu_parser {
 		x )	set_booleans
 			ui_sh_spawn
 			;;
-		F )	$lasthashvalid && cont_from_last
+		'>' )	$lasthashvalid || warn_lasthashinv
+			return $rc_run
 			;;
 		r )	set_booleans
 			return $rc_run
@@ -497,14 +521,21 @@ function menu_parser {
 #          NAME:  menu_loop
 #   DESCRIPTION:  Infinite loop presenting the menu until user quits
 #    PARAMETERS:  none, but lots of side effects
+#       GLOBALS:  workdir
+#                 cmtmsgfile
+#                 uscommitsfile
+#                 dscommitsfile
+#                 prj_workdir
+#                 prj_cpcommits
+#                 prj_bpcommits
 #       RETURNS:  stat, which is the value returned by the call to menu_parser
 #===============================================================================
 function menu_loop {
 	# get_booleans
 	workdir=$(prj_get_item $prj_workdir)
 	cmtmsgfile=""$workdir"commitmessage"
-	cpcommitsfile=$(prj_get_item $prj_cpcommits)
-	bpcommitsfile=$(prj_get_item $prj_bpcommits)
+	uscommitsfile=$(prj_get_item $prj_cpcommits)
+	dscommitsfile=$(prj_get_item $prj_bpcommits)
 	local stat=0
 
 	while $true; do
@@ -516,42 +547,67 @@ function menu_loop {
 	return $stat
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  resolve_conflicts
+#   DESCRIPTION:  Loop through resolve conflict procedure until done
+#    PARAMETERS:  none
+#       GLOBALS:  b_shellcommit
+#                 b_shellcommit_noauto
+#                 str_shellmsg
+#                 str_conflicts
+#       RETURNS:  none
+#===============================================================================
 resolve_conflicts() {
 	local yn
 	while :; do
+		b_shellcommit=false
+		b_shellcommit_noauto=false
+
 		echo -e "$str_shellmsg"
 		git status
+
 		# bash 3>&2>&1 | tee $workdir/shell_$shell_index
+		# \tThe activity in the new shell will be saved in ...\n\
+		# \t\t"$attr_bold""$workdir"/shell_$shellindex.log"$attr_OFF"\n\
+
 		bash
 		retval=$?
 		[ $retval -eq 1 ] && b_shellcommit=true
 		[ $retval -eq 2 ] && b_shellcommit_noauto=true
 		[ $retval -eq 3 ] && { git cherry-pick --abort; exit; }
 		str_cmtmsg="$str_conflicts"
-		let shellindex++
 		git status
 		getyn "\nDone fixing conflicts?" yn
 		$yn && break
 	done
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  edit_commit
+#   DESCRIPTION:  Loop through process to edit commit message until done
+#    PARAMETERS:  none
+#       GLOBALS:  cmtmsgfile
+#       RETURNS:  none
+#===============================================================================
 edit_commit() {
+	local yup
 	while :; do
 		# Display the git log message and inquire if it needs more
 		# editing.
 		#
+		git log -n1 > $cmtmsgfile
 		cat $cmtmsgfile
 		echo
-		getyn "Edit this commit message?" yes
+		getyn "Edit this commit message?" yup
 
-		$yes && git commit --amend || break
+		$yup && git commit --amend || break
 	done
 }
 
 #===  FUNCTION  ================================================================
 #          NAME:  process_commit
 #   DESCRIPTION:  Given a commit, process it using the global variables
-#    PARAMETERS:  commit
+#    PARAMETERS:  $1 - commit
 #       GLOBALS:  b_shellcommit
 #		  b_shellcommit_noauto
 #		  b_autocommit
@@ -568,15 +624,17 @@ process_commit() {
 	local spawnshell
 	local description
 	local callstat
+	local gitstat
 
+	echo "picking commit: $commit"
 	git cherry-pick "$commit"
-	callstat=$?
-	[ $callstat -eq 0 ] || return $callstat
+	#callstat=$?
+	#[ $callstat -eq 0 ] || return $callstat
 
 	gitstat=$(git status --porcelain)
 	git status
 
-	if [ "$gitstat" ]; then
+	[ -z "$gitstat" ] || {
 		echo "You have conflicts to fix."
 
 		if $b_autocommit; then
@@ -584,7 +642,7 @@ process_commit() {
 		else
 			getyn "Do you want to fix them now?" conflicts
 		fi
-	fi
+	}
 
 	$conflicts && resolve_conflicts || str_cmtmsg="$str_noconflicts"
 
@@ -647,7 +705,6 @@ process_commit() {
 		# and a Signed-off-by: ("-s") line.
 		#
 		git commit -s --amend --reset-author --file=$cmtmsgfile
-		git log -n1 > $cmtmsgfile
 
 		# If there are conflicts, give the user the option to edit
 		# the commit log.
@@ -656,10 +713,10 @@ process_commit() {
 
 		# Write the new commit into the backport commits file.
 		#
-		git log -n1 --oneline >> "$bpcommitsfile"
+		git log -n1 --oneline >> "$dscommitsfile"
 	fi
 
-	let index++
+	return 0
 }
 
 #############################
@@ -768,8 +825,8 @@ fi
 # Initialize booleans that are not presented in the ui.
 #
 b_shellcommit=false
-b_default_cpcommitsfile=true
-b_other_cpcommitsfile=false
+b_default_uscommitsfile=true
+b_other_uscommitsfile=false
 
 # Retrieve the saved boolean values, or defaults if they've not been saved
 # before.
@@ -784,43 +841,40 @@ get_booleans
 #
 menu_loop
 
-# If user did not give us a cpcommitsfile (cherry-pick commits file), then
-# set b_use_cpcmtlog to false
+# If user did not give us a uscommitsfile (cherry-pick commits file), then
+# set b_use_uscmtlog to false
 #
-[ $cpcommitsfile ] && b_use_cpcmtlog=true || b_use_cpcmtlog=false
+[ $uscommitsfile ] && b_use_uscmtlog=true || b_use_uscmtlog=false
 
-if $b_use_cpcmtlog; then
-	cpcommitscount=$(cat "$cpcommitsfile" | wc -l)
-	echo -n "cherry-picked commits file: $cpcommitsfile "
-	echo "has $cpcommitscount commits to process."
+if $b_use_uscmtlog; then
+	cpcommitscount=$(cat "$uscommitsfile" | wc -l)
+	echo -n "Upstream commits file: $uscommitsfile "
+	echo "has $cpcommitscount commits to cherry-pick."
 fi
 
 # If the user provides a bpcommits file to contain the new commits
 # created by cherrypicking into the current git tree, then be sure the
 # file is empty.
 #
-echo "backported commits file:    "$bpcommitsfile""
-$b_use_bpcmtlog && cat /dev/null > "$bpcommitsfile"
+echo "File for resulting downstream commits:    "$dscommitsfile""
+$b_use_dscmtlog && cat /dev/null > "$dscommitsfile"
 
 # Initialize this session's counters.
 #
-shellindex=1
 index=1
 
 while true; do
 
-	b_shellcommit=false
-	b_shellcommit_noauto=false
 	commit=""
 
-	if $b_use_cpcmtlog; then
+	if $b_use_uscmtlog; then
 		if [ $index -le $cpcommitscount ]; then
-			commit="$(ui_readline $index $cpcommitsfile)"
+			commit="$(ui_readline $index $uscommitsfile)"
 			[ "${commit:0:1}" == "#" ] && let index++ && continue
-			echo -e ""$attr_bold""$commit""$attr_off""
+			echo -e "Proccessing: $commit"
 			commit="$(echo $commit | cut -d' ' -f1)"
 		else
-			echo -e "No more commits in "$attr_bold""$cpcommitsfile""$attr_OFF""
+			echo -e "No more commits in "$attr_bold""$uscommitsfile""$attr_OFF""
 			commit=""
 			break
 		fi
@@ -829,10 +883,11 @@ while true; do
 		getuser "$str_cpprompt" commit
 	fi
 
-	[ "$commit" ] && process_commit commit
-	[ $? -eq 0 ] || echo "Commit $commit is bogus."
+	[ "$commit" ] && process_commit $commit
+	[ $? -eq 0 ] || { echo "Commit $commit is bogus."; break; }
+	let index++
 
-	if ! $b_use_cpcmtlog; then
+	if ! $b_use_uscmtlog; then
 		getyn "Cherry-pick another commit?" ans
 		$ans || break
 	fi
@@ -858,36 +913,35 @@ function check_commitsfile {
 bppatchcount=0
 if $b_create_patchset; then
 	echo
-	check_commitsfile $bpcommitsfile bppatchcount
+	check_commitsfile $dscommitsfile bppatchcount
 
 	# After applying all the patches, the git pointer should be
-	# at the last commit, so no commit hash is necessary, only
-	# the number of commits to format.
+	# at the most recent commit, so no commit hash is necessary,
+	# only the number of commits to format.
 	#
 	git format-patch -$bppatchcount -o $workdir
 	echo
 fi
 
-ui_sh_backout $myshlvl
 echo
 echo "Done."
 echo
-exit
+exit 0
 
 # code below kept for historical reasons
 #
-if [ $bppatchcount -gt 0 ] && [ $cpcommitsfile ]; then
+if [ $bppatchcount -gt 0 ] && [ $uscommitsfile ]; then
 	git log --reverse -n$bppatchcount | grep "    commit" \
-		| cut -d' ' -f6 > $cpcommitsfile
+		| cut -d' ' -f6 > $uscommitsfile
 
 	echo
 	echo -e "\tFollowing are the commits you cherry-picked from upstream to"
 	echo -e "\tcreate the backported patch set."
 	echo
-	cat "$cpcommitsfile"
+	cat "$uscommitsfile"
 
 	getyn "Create patches from cherry-picked commits?" yes
 	if $yes; then
-		git_file2patchset $cpcommitsfile $workdir
+		git_file2patchset $uscommitsfile $workdir
 	fi
 fi
