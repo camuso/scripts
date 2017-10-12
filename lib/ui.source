@@ -198,7 +198,11 @@ function getchar {
 	local char
 	read -n1 char
 	echo
-	[ $# -gt 0 ] && eval $1=$char
+
+	# In order to receive special characters, like '>', pass quotes
+	# to eval by escaping them on the command line.
+	#
+	[ $# -gt 0 ] && eval $1=\"$char\"
 }
 
 # promptgetchar()
