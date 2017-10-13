@@ -21,6 +21,7 @@ VERSION="4.0"
 #
 declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
+declare MYMAN=$MYDIR/man
 declare MYDATA=$MYDIR/.data
 declare MYPRJ=$MYDATA/gitcherrypick.prj
 declare MYSHLVL=/dev/shm/gcpshlvl
@@ -37,12 +38,15 @@ source $MYLIB/gitutilities.source
 ########################################
 declare rc_continue=0	# Continue for another pass
 declare rc_run=1	# Run gitcherrypick
+declare exit_good=0	# Normal exit
+declare exit_abort=1	# Abort cherrypick and exit
 
 #########################################
 # Global Variables
 #########################################
 declare b_shellcommit=false
 declare b_shellcommit_noauto=false
+declare b_shellcommit_abort=false
 declare conflicts=false
 declare commit=""
 declare cmtmsgfile
@@ -71,10 +75,12 @@ str_herald="\n"$attr_bold"gitcherrypick "$VERSION" - Automates cherrypicking"
 str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
-str_cpprompt="\nPress \"Enter\" to skip this step.\nCherrypick from commit: "
+str_cpprompt="\nPress \"Enter\" to skip this step or q to abort this session.
+	Last upstream commit backported: "
 declare str_shellmsg
 declare str_extcmt_query
 declare str_extcmt_validate
+declare str_abort
 
 #########################################
 # Functions
@@ -87,40 +93,63 @@ declare str_extcmt_validate
 #       GLOBALS:  str_shellmsg
 #                 str_extcmt_query
 #                 str_extcmt_validate
+#                 uscommitsfile
+#                 dscommitsfile
 #       RETURNS:  None
 #===============================================================================
 init_dynstrings() {
 str_shellmsg="
 Spawning a new shell so you can edit conflicts.
-	Type \"exit\" or \"ctrl-D\" to return here and pick up where
-	you left off.
+	In each exit case below, except for the abort, a commit message
+	based on the upstream commit log for the commit will be created
+	automatically when you exit. You will be given the opportunity to
+	edit that commit log.
 
-	Type \"exit 1\" if you used a different upstream commit in your
-	shell session, and you will be prompted for the commit you used.
+	Type $BLD\0exit$OFF or $BLD\0ctrl-D$OFF to return here and pick up where
+	you left off. This exit strategy covers everything you could
+	do with the same commit/patch that brought you to this shell.
 
-	Type \"exit 2\" if you had to use different upstream commits and already
-	committed your backports and commit messages before exiting the
-	shell. In that case, be sure to manually update the commit logs
-	with the new backported commit(s).
+	Type $BLD\0exit 1$OFF if you wish to discard this commit altogether and
+	move on to the next commit.
+
+	Type $BLD\0exit 2$OFF if you used a different upstream commit in this shell
+	session. You will be prompted for that upstream commit. Be sure to
+	manually update the following session logfiles accordingly.
 	File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
 	File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
 
-	Type \"exit 3\" if you want to kill the gitcherrypick process when
-	you exit this shell.
-	git cherry-pick --abort will be executed.
+	Type $BLD\0exit 3$OFF if you want to abort the gitcherrypick process when you
+	exit this shell. The cherry-pick will be aborted, no commit message
+	will be created, and the state of the repo will return to that of
+	the last successfull commit.
 
-	To see this message again, type $BLD\0shmsg$OFF at the command prompt.
+	Type $BLD\0shmsg$OFF at the command prompt of the new shell to
+	see this message again.
+"
+
+str_abort="
+You have signaled that you want to abort the current cherry-pick and exit
+this script. Be sure that the state of your repo is what you want and that
+the session log files properly reflect what you have done up to this point.
+File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
+File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
+
+Following are the most recent successfully completed commits formatted as
+$BLD\0git log --oneline$OFF
+
+$BLD\0NOTE:$OFF While the commit hashes will be different, their summary lines should
+      be identical. If not, you must check your work after you exit.
 "
 
 str_extcmt_query="
-You signaled that you used an upstream commit other than $commit
+You signaled that you used one or more upstream commits other than $BLD$commit$OFF
 when you were executing in an external shell. Please enter that commit now."
 
 str_extcmt_validate="
 You signaled that you have completed the commits in an extermal shell and
 have updated the following commits files accordingly
-	File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
-	File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
+File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
+File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
 
 If you want to exit to a shell to take care of unfinished business, or to
 recheck your work, press \"x\" now, or any other key to continue. "
@@ -454,7 +483,7 @@ show_cont() {
 	local contstr=$(
 cat <<EOF
 
- >  Forward from Last Upstream Commit
+ >  Continue from Last Upstream Commit
 EOF
 )
 	# echo -e "$contstr"
@@ -534,9 +563,9 @@ function menu_parser {
 		i )	init_booleans
 			get_booleans
 			;;
-		h )	less ~/bin/.data/help-gitcherrypick.txt	# ~/bin
+		h )	less $MYMAN/gitcherrypick.txt
 			;;
-		q )	exit_gitcherrypick 0
+		q )	exit_gitcherrypick $exit_good
 			;;
 		x )	set_booleans
 			ui_sh_spawn
@@ -587,7 +616,8 @@ function menu_loop {
 #   DESCRIPTION:  Loop through resolve conflict procedure until done
 #    PARAMETERS:  none
 #       GLOBALS:  b_shellcommit
-#                 b_shellcommit_noauto
+#       	  b_shellcommit_discard
+#                 b_shellcommit_abort
 #                 str_shellmsg
 #                 str_conflicts
 #       RETURNS:  none
@@ -595,9 +625,6 @@ function menu_loop {
 resolve_conflicts() {
 	local yn
 	while :; do
-		b_shellcommit=false
-		b_shellcommit_noauto=false
-
 		git status
 		echo -e "$str_shellmsg"
 
@@ -607,11 +634,12 @@ resolve_conflicts() {
 
 		bash
 		retval=$?
-		[ $retval -eq 1 ] && b_shellcommit=true
-		[ $retval -eq 2 ] && b_shellcommit_noauto=true
-		[ $retval -eq 3 ] && { git cherry-pick --abort; exit; }
+		[ $retval -eq 1 ] && b_shellcommit_discard=true
+		[ $retval -eq 2 ] && b_shellcommit=true
+		[ $retval -eq 3 ] && b_shellcommit_abort=true
 		str_cmtmsg="$str_conflicts"
-		git status
+
+
 		getyn "\nDone fixing conflicts?" yn
 		$yn && break
 	done
@@ -640,16 +668,42 @@ edit_commit() {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  abort_gitcherrypick
+#   DESCRIPTION:  Exit the script in an orderly fashion.
+#    PARAMETERS:  $1 - exit code
+#       GLOBALS:  str_abort
+#                 uscommitsfile
+#                 dscommitsfile
+#                 lastuplog
+#       RETURNS:  none
+#===============================================================================
+function abort_gitcherrypick() {
+	local exitcode=$1
+	local lastdnlog=$(git log --oneline -n1)
+
+	echo -en "$str_abort"
+	echo -e "Upstream  : $BLD${lastuplog:0:60}$OFF"
+	echo -e "Downstream: $BLD${lastdnlog:0:60}$OFF\n"
+	git cherry-pick --abort >/dev/null 2>&1
+	echo -e "\tExiting ..."
+	exit_gitcherrypick $exitcode
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  process_commit
 #   DESCRIPTION:  Given a commit, process it using the global variables
 #    PARAMETERS:  $1 - commit
 #       GLOBALS:  b_shellcommit
-#		  b_shellcommit_noauto
-#		  b_autocommit
+#		  b_shellcommit_discard
+#		  b_autocommit_abort
 #		  cmtmsgfile
 #		  str_cmtmsg
-#		  str_extcmt_validate
+#		  str_shellmsg
+#		  str_extcmt_query
 #		  str_noconflicts
+#		  str_conflicts
+#		  str_abort
+#		  lastuplog
 #       RETURNS:  git cherry-pick status
 #===============================================================================
 process_commit() {
@@ -660,6 +714,10 @@ process_commit() {
 	local description
 	local callstat
 	local gitstat
+
+	b_shellcommit_discard=false
+	b_shellcommit=false
+	b_shellcommit_abort=false
 
 	echo "picking commit: $commit"
 	git cherry-pick "$commit"
@@ -677,73 +735,74 @@ process_commit() {
 
 	$conflicts && resolve_conflicts || str_cmtmsg="$str_noconflicts"
 
-	# If user typed "exit 1" when exiting the external shell, he is signaling
-	# that he used a different upstream commit.
+	# If user typed "exit 1" when exiting the spawned conflict shell,
+	# then s/he wants to discard the current commit and move on to 
+	# the next one.
+	#
+	if $b_shellcommit_discard; then
+		echo -e "Discarding commit: $BLD$commit$OFF"
+		git cherry-pick --abort
+		return 0
+	fi
+
+	# If user typed "exit 2" when exiting the external shell, s/he is
+	# signaling that s/he used a different upstream commit.
 	#
 	if $b_shellcommit; then
 		echo -e "$str_extcmt_query"
 		getuser "$str_cpprompt" commit
 	fi
 
-	# If user typed "exit 2" when exiting the external shell, he is signaling
-	# that he has taken care of this commit manually. Give him one last chance
-	# to check his work or take care of unfinished business, and set the
-	# commit string to null so we don't query for auto commit or update the
-	# commit log files.
+	# If user typed "exit 3" when exiting the external shell, s/he is
+	# signaling that s/he wants to exit this script and leave the repo
+	# with the last
 	#
-	if $b_shellcommit_noauto; then
-		echo -en "$str_extcmt_validate"
-		read -n1 spawnshell
-		[ "$spawnshell" == "x" ] && ui_sh_spawn
-		echo -e "\tContinuing ..."
-		let index++
-		continue
+	if $b_shellcommit_abort; then
+		echo -e "Commit: $BLD$commit$OFF will not be applied."
+		abort_gitcherrypick $exit_abort
 	fi
 
-	if $b_autocommit; then
+	git commit -aC "$commit"
 
-		git commit -aC "$commit"
+	# Create the new commit message in a file consisting of ..
+	#	The user of this script as author of the patch
+	#	The current date
+	#	Descriptor line, with leading whitespace trimmed
+	#	Standard commit message (str_cmtmsg in this file)
+	#	Original commit message from cherry-picked commit
+	#	Signed-off-by: line
+	#
+	echo -e "\n" > $cmtmsgfile
+	description=$(git log -n1 "$commit" | head -5 | tail -1)
 
-		# Create the new commit message in a file consisting of ..
-		#	The user of this script as author of the patch
-		#	The current date
-		#	Descriptor line, with leading whitespace trimmed
-		#	Standard commit message (str_cmtmsg in this file)
-		#	Original commit message from cherry-picked commit
-		#	Signed-off-by: line
-		#
-		echo -e "\n" > $cmtmsgfile
-		description=$(git log -n1 "$commit" | head -5 | tail -1)
+	# Trim leading whitespace from description line and append
+	# it to the commit message. Also append the standard commit
+	# message.
+	#
+	description=$(echo -e $description)
+	echo "$description" >> $cmtmsgfile
+	echo -e "\n" >> $cmtmsgfile
+	echo -e "$str_cmtmsg" >> $cmtmsgfile
+	echo -e "\n" >> $cmtmsgfile
 
-		# Trim leading whitespace from description line and append
-		# it to the commit message. Also append the standard commit
-		# message.
-		#
-		description=$(echo -e $description)
-		echo "$description" >> $cmtmsgfile
-		echo -e "\n" >> $cmtmsgfile
-		echo -e "$str_cmtmsg" >> $cmtmsgfile
-		echo -e "\n" >> $cmtmsgfile
+	# Append the oroginal commit message.
+	#
+	git log -n1 "$commit" >> $cmtmsgfile
 
-		# Append the oroginal commit message.
-		#
-		git log -n1 "$commit" >> $cmtmsgfile
+	# Amend the commit messsage with you as author, using the
+	# commit message file we built in the previous few lines,
+	# and a Signed-off-by: ("-s") line.
+	#
+	git commit -s --amend --reset-author --file=$cmtmsgfile
 
-		# Amend the commit messsage with you as author, using the
-		# commit message file we built in the previous few lines,
-		# and a Signed-off-by: ("-s") line.
-		#
-		git commit -s --amend --reset-author --file=$cmtmsgfile
+	# If there are conflicts, give the user the option to edit
+	# the commit log.
+	#
+	($conflicts || (! $b_autocommit)) && edit_commit
 
-		# If there are conflicts, give the user the option to edit
-		# the commit log.
-		#
-		$conflicts && edit_commit
-
-		# Write the new commit into the backport commits file.
-		#
-		git log -n1 --oneline >> "$dscommitsfile"
-	fi
+	# Write the new commit into the backport commits file.
+	#
+	git log -n1 --oneline >> "$dscommitsfile"
 
 	prj_set_item $prj_lastupcmt $commit
 
@@ -753,6 +812,19 @@ process_commit() {
 #############################
 # Start of Script Execution
 #############################
+
+# run if user hits control-c
+#
+ctrl_c() {
+	echo
+	validate_last_upstream_hash
+	init_dynstrings
+	abort_gitcherrypick $CTLC_EXIT         # defined in lib/ui.source
+}
+
+# trap keyboard interrupt (control-c)
+#
+trap ctrl_c SIGINT
 
 # Print the herald
 #
@@ -913,7 +985,7 @@ while true; do
 		if [ $index -le $cpcommitscount ]; then
 			commit="$(ui_readline $index $uscommitsfile)"
 			[ "${commit:0:1}" == "#" ] && let index++ && continue
-			echo -e "Proccessing: $commit"
+			echo -e "\nProcessing: $commit"
 			commit="$(echo $commit | cut -d' ' -f1)"
 		else
 			echo -e "No more commits in "$attr_bold""$uscommitsfile""$attr_OFF""
@@ -972,6 +1044,18 @@ exit 0
 
 # code below kept for historical reasons
 #
+	# If user typed "exit 2" when exiting the external shell, he is signaling
+	# that s/he wants to exit this script and leave the repo with the last
+	#
+	if $b_shellcommit_abort; then
+		echo -en "$str_extcmt_validate"
+		read -n1 spawnshell
+		[ "$spawnshell" == "x" ] && ui_sh_spawn
+		echo -e "\tContinuing ..."
+		let index++
+		continue
+	fi
+
 if [ $bppatchcount -gt 0 ] && [ $uscommitsfile ]; then
 	git log --reverse -n$bppatchcount | grep "    commit" \
 		| cut -d' ' -f6 > $uscommitsfile
