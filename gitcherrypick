@@ -44,6 +44,9 @@ declare exit_abort=1	# Abort cherrypick and exit
 #########################################
 # Global Variables
 #########################################
+tlines=$(tput lines)		# number of lines in the terminal
+tcols=$(tput cols)
+
 declare b_shellcommit=false
 declare b_shellcommit_noauto=false
 declare b_shellcommit_abort=false
@@ -134,7 +137,7 @@ the session log files properly reflect what you have done up to this point.
 File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
 File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
 
-Following are the most recent successfully completed commits formatted as
+Following is the most recent successfully completed cherrypick formatted as
 $BLD\0git log --oneline$OFF
 
 $BLD\0NOTE:$OFF While the commit hashes will be different, their summary lines should
@@ -345,7 +348,7 @@ function set_booleans {
 #===============================================================================
 function get_uscommitsfile {
 	local stat
-	ui_getfilespec "File containing the commits to be cherry-picked: " \
+	ui_getfilespec "File of the upstream commits to be cherry-picked: " \
 		uscommitsfile
 	stat=$?
 	prj_set_item $prj_cpcommits $uscommitsfile
@@ -364,7 +367,8 @@ function get_uscommitsfile {
 #       RETURNS:  1 if no dscommitsfile, else 0
 #===============================================================================
 function get_dscommitsfile {
-	getuser "File to store the commits that were cherry-picked: " dscommitsfile
+	getuser "File for resulting downstream commits from the cherry-pick: " \
+		dscommitsfile
 
 	if [ $dscommitsfile ]; then
 		b_use_dscmtlog=true
@@ -378,6 +382,89 @@ function get_dscommitsfile {
 	[ ! -f $dscommitsfile ] && touch $dscommitsfile
 	prj_set_item $prj_bpcommits $dscommitsfile
 	return 0
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  lookup_hash
+#   DESCRIPTION:  Find the given hash in the commits file
+#    PARAMETERS:  $1 - hash
+#                 $2 - will return the number of the line in the commits file
+#                      that has the hash.
+#       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
+#       RETURNS:  nonzero if lookup fails
+#===============================================================================
+lookup_hash() {
+	local hash=$1
+	local counter=1
+	local linecount=$(cat $uscommitsfile | wc -l)
+	local line
+
+	while read line; do
+		line=$(echo $line | cut -d' ' -f1)
+		[ "$hash" = "$line" ] && break
+		let counter++
+	done < $uscommitsfile
+
+	if [ $counter -gt $linecount ]; then
+		echo "Can't find $has in $uscommitsfile. Try again."
+		return 1
+	fi
+
+	echo "counter: $counter"
+	eval $2=$counter
+	return 0
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  get_startcmt
+#   DESCRIPTION:  Select the starting commit from the uscommitsfile.
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
+#                 uscmtstartline- starting line for uscommitsfile
+#                 tlines        - number of lines in the terminal window
+#                 tcols         - number of columns in the terminal window
+#       RETURNS:  none
+#===============================================================================
+get_startcommit() {
+	local counter=1
+	local line
+	local linecount=$(cat $uscommitsfile | wc -l)
+	local numwid=${#linecount}
+	local cols=$((tcols - 2 - $numwid))
+	local selectedcommit
+
+	while read line; do
+		line=$(printf " %${#linecount}d %s" $counter "$line")
+		echo "${line:0:cols}"
+		let counter++
+	done < $uscommitsfile
+
+	while :; do
+	getuser "Enter a line number or cut and paste a commit hash here: " \
+		selectedcommit
+
+	# No way the line count is gonna be as large as the minimum 7 digit
+	# commit hash, so if the user entered a number less than the linecount,
+	# s/he's selecting a line.
+	# If the user enters a number greater than the linecount, but less than
+	# the minimum 7 digit size of a commit hash, then tell them to try again.
+	# Else, it's a commit hash.
+	# If we can't find the commit hash in the uscommitsfile, then tell them
+	# to try agian.
+	#
+	if [ $selectedcommit -le $linecount ]; then
+		uscmtstartline=$selectedcommit
+		break
+	elif [ ${#selectedcommit} -ge 7 ]; then
+		lookup_hash $selectedcommit uscmtstartline
+		[ $? -eq 0 ] || continue
+		break
+	else
+		echo "$selectedcommit is not in $uscommitsfile"
+		break
+	fi
+	done
+	echo "uscmtstartline: $uscmtstartline"
 }
 
 #===  FUNCTION  ================================================================
@@ -458,6 +545,54 @@ validate_last_upstream_hash() {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  startfrom
+#   DESCRIPTION:  Show the upstream commit we will be starting from
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile
+#                 uscmtstartline
+#       RETURNS:  none
+#===============================================================================
+startfrom() {
+	[ -f $uscommitsfile ] || return 1
+
+	local linecount=$(cat $uscommitsfile | wc -l)
+	local startcmt="$(ui_readline $uscmtstartline $uscommitsfile)"
+	local lastupcmt=$(echo $lastuplog | cut -d' ' -f1)
+	local eofstr="$lastupcmt is last of $uscommitsfile"
+	local prstr
+
+	[ $uscmtstartline -gt $linecount ] \
+			&& prstr="$eofstr" || prstr="${startcmt:0:40}"
+
+	local startfrom_str=$(
+cat <<EOF
+
+    Starting cherrypick from    : $OFF$prstr$BLD
+EOF
+)
+	echo -e "$startfrom_str"
+	return 0
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  show_selcmt
+#   DESCRIPTION:  Show option to select a commit from the upstream commits file.
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile
+#       RETURNS:  none
+#===============================================================================
+show_selcmt() {
+	local selcmt_str=$(
+cat <<EOF
+
+ S  Select a commit hash from   : $OFF$uscommitsfile$BLD
+EOF
+)
+	[ -f $uscommitsfile ] || return 1
+	echo -e "$selcmt_str"
+	return 0
+}
+#===  FUNCTION  ================================================================
 #          NAME:  show_last
 #   DESCRIPTION:  Show the Last Upstream Commit Picked, if it is valid
 #    PARAMETERS:  none
@@ -506,7 +641,7 @@ cat <<EOF
 $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
     Most recent tag             : $OFF$lasttag$BLD
-    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(show_last)
+    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(startfrom)
  b  Current git branch		: $OFF$(get_gitbranch)$BLD
  p  Current subject prefix	: $OFF$subjectprefix$BLD
  w  Working directory		: $OFF$workdir$BLD
@@ -515,14 +650,14 @@ $attr_bold
 
     $attr_under\0Options            $attr_OFF$attr_bold
  a  Automate commits		: $OFF$b_autocommit$BLD
- c  Create a patchset		: $OFF$b_create_patchset$BLD
+ c  Create a patchset		: $OFF$b_create_patchset$BLD$(show_selcmt)
 
     $attr_under\0Control            $attr_OFF$attr_bold
  i  Init to defaults
  C  Clean working directory
  q  Quit this script
  x  Exit to a shell
- h  Help$(show_cont)
+ h  Help
  r  Run gitcherrypick
 $attr_OFF
 EOF
@@ -538,7 +673,7 @@ EOF
 #       	  continue looping.
 #===============================================================================
 function menu_parser {
-	validate_last_upstream_hash
+	# validate_last_upstream_hash
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
@@ -551,6 +686,8 @@ function menu_parser {
 		w )	prj_set_directory "working" $prj_workdir workdir quiet
 			;;
 		s )	get_uscommitsfile
+			;;
+		S )	get_startcommit
 			;;
 		d )	get_dscommitsfile
 			;;
@@ -639,7 +776,6 @@ resolve_conflicts() {
 		[ $retval -eq 3 ] && b_shellcommit_abort=true
 		str_cmtmsg="$str_conflicts"
 
-
 		getyn "\nDone fixing conflicts?" yn
 		$yn && break
 	done
@@ -690,7 +826,7 @@ function abort_gitcherrypick() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  process_commit
+#          NAME:  cherrypick
 #   DESCRIPTION:  Given a commit, process it using the global variables
 #    PARAMETERS:  $1 - commit
 #       GLOBALS:  b_shellcommit
@@ -704,9 +840,9 @@ function abort_gitcherrypick() {
 #		  str_conflicts
 #		  str_abort
 #		  lastuplog
-#       RETURNS:  git cherry-pick status
+#       RETURNS:  non-zero if something went wrong
 #===============================================================================
-process_commit() {
+cherrypick() {
 
 	local commit=$1
 	local conflicts=false
@@ -720,7 +856,13 @@ process_commit() {
 	b_shellcommit_abort=false
 
 	echo "picking commit: $commit"
-	git cherry-pick "$commit"
+	gitstat=$(git cherry-pick "$commit")
+
+	# If cherry-pick returns with 128, the commit was invalid or
+	# ambiguous.
+	#
+	[ $gitstat -eq 128 ] && return $gitstat
+
 	gitstat=$(git status --porcelain)
 
 	[ -z "$gitstat" ] || {
@@ -736,7 +878,7 @@ process_commit() {
 	$conflicts && resolve_conflicts || str_cmtmsg="$str_noconflicts"
 
 	# If user typed "exit 1" when exiting the spawned conflict shell,
-	# then s/he wants to discard the current commit and move on to 
+	# then s/he wants to discard the current commit and move on to
 	# the next one.
 	#
 	if $b_shellcommit_discard; then
@@ -785,7 +927,7 @@ process_commit() {
 	echo -e "$str_cmtmsg" >> $cmtmsgfile
 	echo -e "\n" >> $cmtmsgfile
 
-	# Append the oroginal commit message.
+	# Append the original commit message.
 	#
 	git log -n1 "$commit" >> $cmtmsgfile
 
@@ -997,7 +1139,7 @@ while true; do
 		getuser "$str_cpprompt" commit
 	fi
 
-	[ "$commit" ] && process_commit $commit
+	[ "$commit" ] && cherrypick $commit
 	[ $? -eq 0 ] || { echo "Commit $commit is bogus."; break; }
 	let index++
 
