@@ -57,6 +57,7 @@ declare str_cmtmsg
 declare workdir
 declare lasthashvalid=false
 declare lastuplog=""
+declare lastuphash
 declare uscmtstartline=1
 
 declare prj_entries=0
@@ -385,6 +386,24 @@ function get_dscommitsfile {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  pr_nohash_msg
+#   DESCRIPTION:  Find the given hash in the commits file
+#    PARAMETERS:  $1 - hash
+#       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
+#       RETURNS:  none
+#===============================================================================
+pr_nohash_msg () {
+	local hash="$1"
+	local nohash_msg=$(
+cat <<EOF
+  Can't find $BLD$hash$OFF as a commit or line number in $BLD$uscommitsfile$OFF"
+  Try again or type '$BLD\0q$OFF' to return to main menu.
+EOF
+)
+	echo -e "$nohash_msg"
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  lookup_hash
 #   DESCRIPTION:  Find the given hash in the commits file
 #    PARAMETERS:  $1 - hash
@@ -395,22 +414,24 @@ function get_dscommitsfile {
 #===============================================================================
 lookup_hash() {
 	local hash=$1
-	local counter=1
+	local counter
 	local linecount=$(cat $uscommitsfile | wc -l)
 	local line
 
-	while read line; do
-		line=$(echo $line | cut -d' ' -f1)
-		[ "$hash" = "$line" ] && break
-		let counter++
-	done < $uscommitsfile
+	[ -f $uscommitsfile ] || return 1
 
-	if [ $counter -gt $linecount ]; then
-		echo "Can't find $has in $uscommitsfile. Try again."
-		return 1
-	fi
+	counter=$(grep -m1 -n "$hash" "$uscommitsfile" | cut -d':' -f1)
+	[ -z "$counter" ] && eval $2=1 && return 1
 
-	echo "counter: $counter"
+	# while read line; do
+	# 	line=$(echo $line | cut -d' ' -f1)
+	#	[ "$hash" = "$line" ] && break
+	#	let counter++
+	# done < $uscommitsfile
+
+	[ $counter -gt $linecount ] && return 1
+
+	# echo "counter: $counter"
 	eval $2=$counter
 	return 0
 }
@@ -432,39 +453,52 @@ get_startcommit() {
 	local numwid=${#linecount}
 	local cols=$((tcols - 2 - $numwid))
 	local selectedcommit
-
+	local hashprompt=$(
+cat <<EOF
+Enter a line number or commit hash here, or 'q' to return to main menu:
+EOF
+)
+	# Dump the contents of the uscommitsfile
+	#
 	while read line; do
 		line=$(printf " %${#linecount}d %s" $counter "$line")
 		echo "${line:0:cols}"
 		let counter++
 	done < $uscommitsfile
 
-	while :; do
-	getuser "Enter a line number or cut and paste a commit hash here: " \
-		selectedcommit
-
-	# No way the line count is gonna be as large as the minimum 7 digit
-	# commit hash, so if the user entered a number less than the linecount,
-	# s/he's selecting a line.
-	# If the user enters a number greater than the linecount, but less than
-	# the minimum 7 digit size of a commit hash, then tell them to try again.
-	# Else, it's a commit hash.
-	# If we can't find the commit hash in the uscommitsfile, then tell them
-	# to try agian.
+	# Loop asking for a commit or line number until one is found or the
+	# user enters "q" to quit looking.
 	#
-	if [ $selectedcommit -le $linecount ]; then
-		uscmtstartline=$selectedcommit
-		break
-	elif [ ${#selectedcommit} -ge 7 ]; then
-		lookup_hash $selectedcommit uscmtstartline
-		[ $? -eq 0 ] || continue
-		break
-	else
-		echo "$selectedcommit is not in $uscommitsfile"
-		break
-	fi
+	while :; do
+		getuser "$hashprompt " selectedcommit
+		[ "$selectedcommit" = "q" ] && return
+
+		# No way the line count is gonna be as large as the minimum 7
+		# digit commit hash, so if the user entered a number less than
+		# or equal to the linecount, s/he's selecting a line.
+		#
+		# If the user enters a number greater than the linecount, but
+		# less than the minimum 7 digit size of a commit hash, then
+		# tell them to try again.
+		#
+		# Else, it's a commit hash.
+		#
+		# If we can't find the submitted linenumber or commit hash in
+		# the uscommitsfile, then tell them to try agian.
+		#
+		if [ ${#selectedcommit} -le ${#linecount} ] \
+		&& [ $selectedcommit -le $linecount ]; then
+			uscmtstartline=$selectedcommit
+			break
+		elif [ ${#selectedcommit} -ge 7 ]; then
+			lookup_hash $selectedcommit uscmtstartline
+			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
+			break
+		else
+			pr_nohash_msg $selectedcommit
+			continue
+		fi
 	done
-	echo "uscmtstartline: $uscmtstartline"
 }
 
 #===  FUNCTION  ================================================================
@@ -484,7 +518,7 @@ cat <<EOF
 
   The most recently applied commit: ${lastuplog:0:40}
   is not part of the current set of upstream commmits to be processed as
-  listed in the file: $uscommitsfile
+  listed in the file: $BLD$uscommitsfile$OFF
   We will start cherrypicking with the first commit in that file.
 \0
 EOF
@@ -492,11 +526,10 @@ EOF
 	local lasthashempstr=$(
 cat <<EOF
   There was no recently applied commit found, so we will start cherrypicking
-  with the first commit in file: $uscommitsfile
+  with the first commit in file: $BLD$uscommitsfile$OFF
 \0
 EOF
 )
-	uscmtstartline=1
 	[ -z "$lastuplog" ] \
 		&& echo -e "$lasthashempstr" || echo -e "$lasthashinvstr"
 }
@@ -509,15 +542,10 @@ EOF
 #       GLOBALS:  uscommitsfile - the cherry-pick commits file containing the
 #                                 hashes of the commits to be backported.
 #                 lasthashvalid - boolean indicating last hash was valid
-#                 lasthashlog   - updated if lasthashvalid
-#                 uscmtstartline- the line in the commits file where processing
-#                                 should start (default is 1)
-#       RETURNS:  none
+#       RETURNS:  nonzero if the last stored hash is not valid
 #===============================================================================
 validate_last_upstream_hash() {
-	local lastuphash=$(prj_get_item $prj_lastupcmt)
 
-	uscmtstartline=1
 	lasthashvalid=true
 
 	# If we don't have a commits file, we are interactive, so show nothing
@@ -531,17 +559,40 @@ validate_last_upstream_hash() {
 	# If the commit stored in the project file is not in the commits file
 	# then show nothing.
 	#
+	grep -m1 -n "$lastuphash" "$uscommitsfile" >/dev/null 2>&1
+	[ $? -eq 0 ] || lasthashvalid=false
+
+	$lasthashvalid && lastuplog=$(git log -n1 --oneline $lastuphash)
+	$lasthashvalid && return 0 || return 1
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  use_last_upstream_hash
+#   DESCRIPTION:  Show the upstream commit we will be starting from
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile
+#                 uscmtstartline
+#                 lasthashlog
+#       RETURNS:  nonzero if last hash invalid
+#===============================================================================
+use_last_upstream_hash() {
+
+	# At this point, validate_last_upstream_hash will have been called,
+	# so that if it is valid, it will show in the main menu.
+	#
+	$lasthashvalid || { warn_lasthashinv; uscmtstartline=1; return 1; }
+
+	# If the commit stored in the project file is not in the commits file
+	# then lasthashvalid=false and uscmtstartline=1
+	#
 	uscmtstartline=$(grep -m1 -n "$lastuphash" "$uscommitsfile" | cut -d':' -f1)
+	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
 
 	# The grep will return the line in uscommitsfile of the most recent
 	# successfully backported upstream commit. The one we want to start
 	# with is the commit after that.
 	#
 	let uscmtstartline++
-
-	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
-
-	$lasthashvalid && lastuplog=$(git log -n1 --oneline $lastuphash)
 }
 
 #===  FUNCTION  ================================================================
@@ -557,7 +608,6 @@ startfrom() {
 
 	local linecount=$(cat $uscommitsfile | wc -l)
 	local startcmt="$(ui_readline $uscmtstartline $uscommitsfile)"
-	local lastupcmt=$(echo $lastuplog | cut -d' ' -f1)
 	local eofstr="$lastupcmt is last of $uscommitsfile"
 	local prstr
 
@@ -641,7 +691,7 @@ cat <<EOF
 $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
     Most recent tag             : $OFF$lasttag$BLD
-    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(startfrom)
+    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(show_last)$(startfrom)
  b  Current git branch		: $OFF$(get_gitbranch)$BLD
  p  Current subject prefix	: $OFF$subjectprefix$BLD
  w  Working directory		: $OFF$workdir$BLD
@@ -657,7 +707,7 @@ $attr_bold
  C  Clean working directory
  q  Quit this script
  x  Exit to a shell
- h  Help
+ h  Help$(show_cont)
  r  Run gitcherrypick
 $attr_OFF
 EOF
@@ -673,7 +723,7 @@ EOF
 #       	  continue looping.
 #===============================================================================
 function menu_parser {
-	# validate_last_upstream_hash
+	validate_last_upstream_hash
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
 
@@ -707,11 +757,10 @@ function menu_parser {
 		x )	set_booleans
 			ui_sh_spawn
 			;;
-		'>' )	$lasthashvalid || warn_lasthashinv
+		'>' )	use_lastupstream_hash
 			return $rc_run
 			;;
 		r )	set_booleans
-			uscmtstartline=1
 			return $rc_run
 			;;
 	esac
@@ -732,12 +781,14 @@ function menu_parser {
 #       RETURNS:  stat, which is the value returned by the call to menu_parser
 #===============================================================================
 function menu_loop {
-	# get_booleans
+
+	local stat=0
+
 	workdir=$(prj_get_item $prj_workdir)
-	cmtmsgfile=""$workdir"commitmessage"
+	cmtmsgfile=""$workdir"gcpcommitmessage"
 	uscommitsfile=$(prj_get_item $prj_cpcommits)
 	dscommitsfile=$(prj_get_item $prj_bpcommits)
-	local stat=0
+	lastuphash=$(prj_get_item $prj_lastupcmt)
 
 	while $true; do
 		menu_parser
@@ -839,7 +890,6 @@ function abort_gitcherrypick() {
 #		  str_noconflicts
 #		  str_conflicts
 #		  str_abort
-#		  lastuplog
 #       RETURNS:  non-zero if something went wrong
 #===============================================================================
 cherrypick() {
@@ -1077,6 +1127,11 @@ b_other_uscommitsfile=false
 # before.
 #
 get_booleans
+
+# Initialize the start line to 1. It will be updated in the menu_loop()
+# if the user selects a different commit hash to start with.
+#
+uscmtstartline=1
 
 ##############################################
 # Main Program
