@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# gitforpat
+#
+
+declare -i argcount=2
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) commitspec
+
+  Generate a patch set from a commit expression.
+
+  directory  - directory that will contain the patch set
+  commitspec - a commit expression
+
+  The patch set will be created with the following git command.
+
+  git format-patch \\\
+
+	--no-renames \\\
+
+	--signoff \\\
+
+	--stat=80 \\\
+
+	--output-directory <directory> \\\
+
+	<commitspec>
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+directory="$1"
+commitspec="$2"
+
+git format-patch \
+	--no-renames \
+	--signoff \
+	--stat=80 \
+	--output-directory "$directory" \
+	"$commitspec"
+
