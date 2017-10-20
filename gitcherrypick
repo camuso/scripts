@@ -615,14 +615,14 @@ use_last_upstream_hash() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  startfrom
+#          NAME:  start_from
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  none
 #       GLOBALS:  uscommitsfile
 #                 uscmtstartline
 #       RETURNS:  none
 #===============================================================================
-startfrom() {
+start_from() {
 	local linecount
 	local startcmt
 	local eofstr
@@ -637,13 +637,13 @@ startfrom() {
 	[ $uscmtstartline -gt $linecount ] \
 			&& prstr="$eofstr" || prstr="${startcmt:0:40}"
 
-	local startfrom_str=$(
+	local start_from_str=$(
 cat <<EOF
 
     Starting cherrypick from    : $OFF$prstr$BLD
 EOF
 )
-	echo -e "$startfrom_str"
+	echo -e "$start_from_str"
 	return 0
 }
 
@@ -658,7 +658,7 @@ show_selcmt() {
 	local selcmt_str=$(
 cat <<EOF
 
- S  Select a commit hash from   : $OFF$uscommitsfile$BLD
+ S  Select a different commit to start cherrypick from$BLD
 EOF
 )
 	[[ -f $uscommitsfile ]] || return 1
@@ -700,6 +700,24 @@ EOF
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  show_dscmt
+#   DESCRIPTION:  Show the start commit for the downstream patch set
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+show_dscmt() {
+	local contstr=$(
+cat <<EOF
+
+    Starting from commit        : $
+EOF
+)
+	# echo -e "$contstr"
+	$lasthashvalid && echo -e "$contstr"
+
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  show_settings
 #   DESCRIPTION:  show the current settings and present the menu options
 #    PARAMETERS:  none
@@ -714,16 +732,17 @@ cat <<EOF
 $attr_bold
     $attr_under\0Environment        $attr_OFF$attr_bold
     Most recent tag             : $OFF$lasttag$BLD
-    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(show_last)$(startfrom)
- b  Current git branch		: $OFF$(get_gitbranch)$BLD
- p  Current subject prefix	: $OFF$subjectprefix$BLD
- w  Working directory		: $OFF$workdir$BLD
- s  Source commits file		: $OFF$uscommitsfile$BLD
- d  Destination commits file	: $OFF$dscommitsfile$BLD
+    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(show_last)$(start_from)
 
-    $attr_under\0Options            $attr_OFF$attr_bold
- a  Automate commits		: $OFF$b_autocommit$BLD
- c  Create a patchset		: $OFF$b_create_patchset$BLD$(show_selcmt)
+    $attr_under\0Environment Options$attr_OFF$BLD$(show_selcmt)
+ b  Current git branch          : $OFF$(get_gitbranch)$BLD
+ p  Current subject prefix      : $OFF$subjectprefix$BLD
+ w  Working directory           : $OFF$workdir$BLD
+ s  Source commits file         : $OFF$uscommitsfile$BLD
+
+    $attr_under\0Run Options        $attr_OFF$attr_bold
+ a  Automate commits            : $OFF$b_autocommit$BLD
+ c  Create a patchset           : $OFF$b_create_patchset$BLD
 
     $attr_under\0Control            $attr_OFF$attr_bold
  i  Init to defaults
@@ -929,16 +948,18 @@ cherrypick() {
 	b_shellcommit_abort=false
 
 	echo "picking commit: $commit"
-	gitstat=$(git cherry-pick "$commit")
+	git cherry-pick "$commit"
+	gitstat=$?
 
 	# If cherry-pick returns with 128, the commit was invalid or
 	# ambiguous.
 	#
 	[ $gitstat -eq 128 ] && return $gitstat
 
-	gitstat=$(git status --porcelain)
-
-	[ -z "$gitstat" ] || {
+	# If cherry-pick returns with nonzero other than 128, then a
+	# conflict is indicated.
+	#
+	[ $gitstat -eq 0 ] || {
 		echo "You have conflicts to fix."
 
 		if $b_autocommit; then
