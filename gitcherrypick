@@ -59,6 +59,7 @@ declare lasthashvalid=false
 declare lastuplog=""
 declare lastuphash
 declare uscmtstartline=1
+declare lasttagfile="/dev/shm/gcplasttag"
 
 declare prj_entries=0
 declare index=0
@@ -232,9 +233,10 @@ function set_gitbranch {
 	[ "$linenumber" == "x" ] && ui_sh_spawn
 	gitbranch="$(ui_readline $linenumber $workdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
-	git am --abort --quiet
+	git am --abort --quiet >/dev/null 2>&1
 	git checkout -f "$gitbranch" 2>&1
-	~/bin/gitlog1
+	git log --oneline -1
+	getlasttag
 }
 
 #===  FUNCTION  ================================================================
@@ -380,7 +382,7 @@ function get_dscommitsfile {
 		return 1
 	fi
 
-	[ ! -f $dscommitsfile ] && touch $dscommitsfile
+	[[ -f $dscommitsfile ]] || touch $dscommitsfile
 	prj_set_item $prj_bpcommits $dscommitsfile
 	return 0
 }
@@ -418,7 +420,7 @@ lookup_hash() {
 	local linecount=$(cat $uscommitsfile | wc -l)
 	local line
 
-	[ -f $uscommitsfile ] || return 1
+	[[ -f $uscommitsfile ]] || return 1
 
 	counter=$(grep -m1 -n "$hash" "$uscommitsfile" | cut -d':' -f1)
 	[ -z "$counter" ] && eval $2=1 && return 1
@@ -550,11 +552,11 @@ validate_last_upstream_hash() {
 
 	# If we don't have a commits file, we are interactive, so show nothing
 	#
-	[ -f $uscommitsfile ] || lasthashvalid=false
+	[[ -f $uscommitsfile ]] || lasthashvalid=false
 
 	# If there is no hash saved in the project file, then show nothing.
 	#
-	[ "$lastuphash" ] || lasthashvalid=false
+	[[ "$lastuphash" ]] || lasthashvalid=false
 
 	# If the commit stored in the project file is not in the commits file
 	# then show nothing.
@@ -564,6 +566,23 @@ validate_last_upstream_hash() {
 
 	$lasthashvalid && lastuplog=$(git log -n1 --oneline $lastuphash)
 	$lasthashvalid && return 0 || return 1
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  getlasttag
+#   DESCRIPTION:  Show dots while obtaining the latest git tag
+#    PARAMETERS:  none
+#       GLOBALS:  lasttagfile
+#       RETURNS:  none
+#===============================================================================
+getlasttag() {
+	local _mypid_
+	echo -ne "$OFF\0Getting last git tag.."
+	git describe --tags --abbrev=0 > $lasttagfile &
+	_mypid_=$!
+	ui_waitonproc $_mypid_ .1
+	echo
+	rmlasttag=true
 }
 
 #===  FUNCTION  ================================================================
@@ -604,12 +623,16 @@ use_last_upstream_hash() {
 #       RETURNS:  none
 #===============================================================================
 startfrom() {
-	[ -f $uscommitsfile ] || return 1
-
-	local linecount=$(cat $uscommitsfile | wc -l)
-	local startcmt="$(ui_readline $uscmtstartline $uscommitsfile)"
-	local eofstr="$lastupcmt is last of $uscommitsfile"
+	local linecount
+	local startcmt
+	local eofstr
 	local prstr
+
+	[[ -f $uscommitsfile ]] || return 1
+
+	linecount=$(cat $uscommitsfile | wc -l)
+	startcmt="$(ui_readline $uscmtstartline $uscommitsfile)"
+	eofstr="$lastupcmt is last of $uscommitsfile"
 
 	[ $uscmtstartline -gt $linecount ] \
 			&& prstr="$eofstr" || prstr="${startcmt:0:40}"
@@ -638,7 +661,7 @@ cat <<EOF
  S  Select a commit hash from   : $OFF$uscommitsfile$BLD
 EOF
 )
-	[ -f $uscommitsfile ] || return 1
+	[[ -f $uscommitsfile ]] || return 1
 	echo -e "$selcmt_str"
 	return 0
 }
@@ -684,7 +707,7 @@ EOF
 #===============================================================================
 function show_settings {
 	local subjectprefix="$(git config format.subjectprefix)"
-	local lasttag=$(git describe --tags --abbrev=0)
+	local lasttag=$(cat $lasttagfile)
 	local lastbrcmt=$(git log -n1 --oneline)
 	local settings=$(
 cat <<EOF
@@ -1099,8 +1122,8 @@ done
 # above for-loop and init the project file.
 #
 prj_entries=$index
-[ -d "$MYDATA" ] || mkdir $MYDATA
-[ -f "$MYPRJ" ] || touch $MYPRJ
+[[ -d "$MYDATA" ]] || mkdir $MYDATA
+[[ -f "$MYPRJ" ]] || touch $MYPRJ
 
 # Disable blank checking
 #
@@ -1139,12 +1162,13 @@ uscmtstartline=1
 
 # Present the ui and get the parameters for the cherry-picks.
 #
+getlasttag
 menu_loop
 
 # If user did not give us a uscommitsfile (cherry-pick commits file), then
 # set b_use_uscmtlog to false
 #
-[ -f $uscommitsfile ] && b_use_uscmtlog=true || b_use_uscmtlog=false
+[[ -f $uscommitsfile ]] && b_use_uscmtlog=true || b_use_uscmtlog=false
 
 if $b_use_uscmtlog; then
 	cpcommitscount=$(cat "$uscommitsfile" | wc -l)
