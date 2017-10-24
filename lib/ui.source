@@ -10,6 +10,10 @@
 # as local. You may otherwise experience behavior that is difficult to debug.
 #
 
+##############################
+# Global Variables and Consts
+##############################
+
 #
 # Text attributes
 #
@@ -25,6 +29,9 @@ OFF="$attr_OFF"
 # see http://www.tldp.org/LDP/abs/html/exitcodes.html
 #
 declare -i CTLC_EXIT=130
+
+declare -i tlines=$(tput lines)	# number of lines in the terminal
+declare -i tcols=$(tput cols)	# number of columns in the terminal
 
 #########################
 # Shell Routines
@@ -632,6 +639,28 @@ ui_isdigit() {
 #
 ui_strtok() {
 	IFS="$2" read -r -a $3 <<< "$1"
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  ui_trunc_string
+#   DESCRIPTION:  truncates the given string according to the number of columns
+#                 in the terminal less the "pad" parameter. If the pad parameter
+#                 wasn't passed or is zero, then the string will be truncated to
+#                 the number of columns in the terminal.
+#    PARAMETERS:  $1 - string to truncate
+#                 $2 - padding characters to subtract from terminal columns
+#       GLOBALS:  tcols - set at script load time by tcols=$(tput cols)
+#       RETURNS:  none
+#===============================================================================
+ui_trunc_string() {
+	local str="$1"
+	local pad=$2
+	local strlen
+
+	[ $# -lt 2 ] && pad=0
+
+	strlen=$((tcols - pad))
+	echo "${str:0:$strlen}"
 }
 
 ui_source_loaded=true
