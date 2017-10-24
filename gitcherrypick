@@ -42,11 +42,19 @@ declare exit_good=0	# Normal exit
 declare exit_abort=1	# Abort cherrypick and exit
 
 #########################################
+# Project Variables (sticky)
+#########################################
+declare prj_lastupcmt
+declare prj_workdir
+declare prj_cpcommits
+declare prj_bpcommits
+declare prj_b_autocommit
+declare prj_b_create_patchset
+
+#########################################
 # Global Variables
 #########################################
-tlines=$(tput lines)		# number of lines in the terminal
-tcols=$(tput cols)
-
+declare -i menupad=35
 declare b_shellcommit=false
 declare b_shellcommit_noauto=false
 declare b_shellcommit_abort=false
@@ -60,6 +68,10 @@ declare lastuplog=""
 declare lastuphash
 declare uscmtstartline=1
 declare lasttagfile="/dev/shm/gcplasttag"
+
+# downstream commit from which to start creating downstream patch set
+#
+declare dspshead
 
 declare prj_entries=0
 declare index=0
@@ -388,8 +400,52 @@ function get_dscommitsfile {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  get_downstream_head
+#   DESCRIPTION:  Gets the one line commit log of the downstream branch from
+#                 which to start the creation of a downstream patch set.
+#    PARAMETERS:  none
+#	GLOBALS:  dspshead - downstream patch set head for generating the
+#	                     downstream patchset.
+#	                     NOTE: The patchset starts with the commit AFTER the
+#	                     downstream patch head. That's the way git-format-
+#	                     patch works.
+#	          b_use_dscmtlog - boolean set true if the filename is not ""
+#	          prj_bpcommits  - offset into project file for dscommitsfile
+#       RETURNS:  zero
+#===============================================================================
+get_downstream_head() {
+	local stat
+	local hash
+	local cols=$((tcols - 9))
+	local cmtlog
+	local notfoundmsg="can't be found in this branch. Try again.\n"
+	local qstr="'$BLD\0q$OFF\0'"
+	local pstr=\
+"$OFF\0Enter hash to start patchset or $qstr to return to main menu : "
+
+	echo "NOTE: patch set starts at the commit following the one selected."
+
+	while :; do
+		getuser "$pstr" hash
+		[[ "$hash" == "q" ]] && return 1
+		cmtlog=$(git log --oneline -n1 $hash 2>/dev/null)
+		stat=$?
+
+		if [ $stat -ne 0 ]; then
+			echo -en "\nHash $BLD$hash$OFF "
+			echo -e $notfoundmsg
+			continue
+		fi
+		dspshead=$hash
+		break
+	done
+	return 0
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  pr_nohash_msg
-#   DESCRIPTION:  Find the given hash in the commits file
+#   DESCRIPTION:  Prints message indicating the hash can't be found in the file
+#                 containing the upstream commits.
 #    PARAMETERS:  $1 - hash
 #       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
 #       RETURNS:  none
@@ -627,6 +683,7 @@ start_from() {
 	local startcmt
 	local eofstr
 	local prstr
+	local cols=$((tcols - menupad))
 
 	[[ -f $uscommitsfile ]] || return 1
 
@@ -635,7 +692,7 @@ start_from() {
 	eofstr="$lastupcmt is last of $uscommitsfile"
 
 	[ $uscmtstartline -gt $linecount ] \
-			&& prstr="$eofstr" || prstr="${startcmt:0:40}"
+			&& prstr="$eofstr" || prstr="${startcmt:0:$cols}"
 
 	local start_from_str=$(
 cat <<EOF
@@ -672,10 +729,11 @@ EOF
 #       RETURNS:  none
 #===============================================================================
 show_last() {
+	local cols=$((tcols - menupad))
 	local laststr=$(
 cat <<EOF
 
-    Last Upstream Commit Picked : $OFF${lastuplog:0:40}$BLD
+    Last Upstream Commit Picked : $OFF${lastuplog:0:$cols}$BLD
 EOF
 )
 	$lasthashvalid && echo -e "$laststr"
@@ -706,15 +764,14 @@ EOF
 #       RETURNS:  none
 #===============================================================================
 show_dscmt() {
-	local contstr=$(
+	local cols=$((tcols - menupad))
+	local dscmtstr=$(
 cat <<EOF
 
-    Starting from commit        : $
+ D  : starts at downstream hash : $OFF${dspshead:0:$cols}$BLD
 EOF
 )
-	# echo -e "$contstr"
-	$lasthashvalid && echo -e "$contstr"
-
+	$b_create_patchset && echo -e "$dscmtstr"
 }
 
 #===  FUNCTION  ================================================================
@@ -738,18 +795,17 @@ $attr_bold
  b  Current git branch          : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix      : $OFF$subjectprefix$BLD
  w  Working directory           : $OFF$workdir$BLD
- s  Source commits file         : $OFF$uscommitsfile$BLD
+ u  File of Upstream Commits    : $OFF$uscommitsfile$BLD
 
     $attr_under\0Run Options        $attr_OFF$attr_bold
  a  Automate commits            : $OFF$b_autocommit$BLD
- c  Create a patchset           : $OFF$b_create_patchset$BLD
+ d  Create downstream patchset  : $OFF$b_create_patchset$BLD$(show_dscmt)
 
     $attr_under\0Control            $attr_OFF$attr_bold
  i  Init to defaults
- C  Clean working directory
  q  Quit this script
  x  Exit to a shell
- h  Help$(show_cont)
+ h  Help
  r  Run gitcherrypick
 $attr_OFF
 EOF
@@ -777,17 +833,13 @@ function menu_parser {
 			;;
 		w )	prj_set_directory "working" $prj_workdir workdir quiet
 			;;
-		s )	get_uscommitsfile
+		u )	get_uscommitsfile
 			;;
 		S )	get_startcommit
 			;;
-		d )	get_dscommitsfile
-			;;
 		a )	ui_toggle b_autocommit
 			;;
-		c )	ui_toggle b_create_patchset
-			;;
-		C )	rm -vf "$workdir"/*
+		d )	ui_toggle b_create_patchset
 			;;
 		i )	init_booleans
 			get_booleans
@@ -799,8 +851,7 @@ function menu_parser {
 		x )	set_booleans
 			ui_sh_spawn
 			;;
-		'>' )	use_lastupstream_hash
-			return $rc_run
+		D )	get_downstream_head
 			;;
 		r )	set_booleans
 			return $rc_run
@@ -1176,6 +1227,12 @@ get_booleans
 # if the user selects a different commit hash to start with.
 #
 uscmtstartline=1
+
+# Get the current head of the current branch as the starting point for
+# creating the downstream patch set and truncate to fit the number of
+# columns in the current terminal.
+#
+dspshead=$(git log --oneline -n1 -1)
 
 ##############################################
 # Main Program
