@@ -68,6 +68,7 @@ declare lastuplog=""
 declare lastuphash
 declare uscmtstartline=1
 declare lasttagfile="/dev/shm/gcplasttag"
+declare qstr="'$BLD\0q$OFF\0'"
 
 # downstream commit from which to start creating downstream patch set
 #
@@ -92,8 +93,9 @@ str_herald="\n"$attr_bold"gitcherrypick "$VERSION" - Automates cherrypicking"
 str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
-str_cpprompt="\nPress \"Enter\" to skip this step or q to abort this session.
-	Last upstream commit backported: "
+str_cpprompt="
+$OFF\0Press $BLD\0Enter$OFF to skip this step or $qstr to abort this session.
+	Upstream hash to cherrypick : "
 declare str_shellmsg
 declare str_extcmt_query
 declare str_extcmt_validate
@@ -146,10 +148,7 @@ Spawning a new shell so you can edit conflicts.
 
 str_abort="
 You have signaled that you want to abort the current cherry-pick and exit
-this script. Be sure that the state of your repo is what you want and that
-the session log files properly reflect what you have done up to this point.
-File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
-File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
+this script.
 
 Following is the most recent successfully completed cherrypick formatted as
 $BLD\0git log --oneline$OFF
@@ -200,6 +199,7 @@ function print_herald {
 #===============================================================================
 function exit_gitcherrypick {
 	set_booleans
+	echo "Exiting with status: $1"
 	exit $1
 }
 
@@ -409,8 +409,7 @@ function get_dscommitsfile {
 #	                     NOTE: The patchset starts with the commit AFTER the
 #	                     downstream patch head. That's the way git-format-
 #	                     patch works.
-#	          b_use_dscmtlog - boolean set true if the filename is not ""
-#	          prj_bpcommits  - offset into project file for dscommitsfile
+#       	  qstr - string containing a boldfaced 'q' for quit
 #       RETURNS:  zero
 #===============================================================================
 get_downstream_head() {
@@ -419,7 +418,6 @@ get_downstream_head() {
 	local cols=$((tcols - 9))
 	local cmtlog
 	local notfoundmsg="can't be found in this branch. Try again.\n"
-	local qstr="'$BLD\0q$OFF\0'"
 	local pstr=\
 "$OFF\0Enter hash to start patchset or $qstr to return to main menu : "
 
@@ -915,9 +913,9 @@ resolve_conflicts() {
 
 		bash
 		retval=$?
-		[ $retval -eq 1 ] && b_shellcommit_discard=true
-		[ $retval -eq 2 ] && b_shellcommit=true
-		[ $retval -eq 3 ] && b_shellcommit_abort=true
+		[ $retval -eq 1 ] && b_shellcommit_discard=true && return
+		[ $retval -eq 2 ] && b_shellcommit=true && return
+		[ $retval -eq 3 ] && b_shellcommit_abort=true && return
 		str_cmtmsg="$str_conflicts"
 
 		getyn "\nDone fixing conflicts?" yn
@@ -1254,13 +1252,6 @@ if $b_use_uscmtlog; then
 	echo "has $cpcommitscount commits to cherry-pick."
 fi
 
-# If the user provides a bpcommits file to contain the new commits
-# created by cherrypicking into the current git tree, then be sure the
-# file is empty.
-#
-echo "Resulting downstream commits:    "$dscommitsfile""
-$b_use_dscmtlog && cat /dev/null > "$dscommitsfile"
-
 # Init the strings containing dynamic runtime information.
 #
 init_dynstrings
@@ -1287,13 +1278,15 @@ while true; do
 			echo -e "\nProcessing: $commit"
 			commit="$(echo $commit | cut -d' ' -f1)"
 		else
-			echo -e "No more commits in "$attr_bold""$uscommitsfile""$attr_OFF""
+			echo -e "No more commits in $BLD$uscommitsfile$OFF"
 			commit=""
 			break
 		fi
 
 	else
 		getuser "$str_cpprompt" commit
+		[ "$commit" ] || break
+		[ "$commit" = "q" ] && exit_gitcherrypick 1
 	fi
 
 	[ "$commit" ] && cherrypick $commit
@@ -1305,6 +1298,31 @@ while true; do
 		$ans || break
 	fi
 done
+
+if $b_create_patchset; then
+	dshash=$(echo $dspshead | cut -d' ' -f1)
+	echo "create patchset from $dshash"
+
+	git format-patch \
+		--no-renames \
+		--signoff \
+		--stat=80 \
+		--output-directory "$workdir" \
+		$dshash
+	echo
+fi
+
+echo
+echo "Done."
+echo
+exit 0
+
+# If the user provides a bpcommits file to contain the new commits
+# created by cherrypicking into the current git tree, then be sure the
+# file is empty.
+#
+echo "Resulting downstream commits:    "$dscommitsfile""
+$b_use_dscmtlog && cat /dev/null > "$dscommitsfile"
 
 function check_commitsfile {
 	local commitsfile="$1"
@@ -1322,24 +1340,6 @@ function check_commitsfile {
 	[ $# -eq 2 ] && eval $2=$patchcount
 	return 0
 }
-
-bppatchcount=0
-if $b_create_patchset; then
-	echo
-	check_commitsfile $dscommitsfile bppatchcount
-
-	# After applying all the patches, the git pointer should be
-	# at the most recent commit, so no commit hash is necessary,
-	# only the number of commits to format.
-	#
-	git format-patch -$bppatchcount -o $workdir
-	echo
-fi
-
-echo
-echo "Done."
-echo
-exit 0
 
 # code below kept for historical reasons
 #
