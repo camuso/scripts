@@ -22,7 +22,7 @@ VERSION="4.0"
 declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
 declare MYMAN=$MYDIR/man
-declare MYDATA=$MYDIR/.data
+declare MYDATA=.data
 declare MYPRJ=$MYDATA/gitcherrypick.prj
 declare MYSHLVL=/dev/shm/gcpshlvl
 
