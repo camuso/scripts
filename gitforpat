@@ -13,7 +13,8 @@ $(basename $0) commitspec
   Generate a patch set from a commit expression.
 
   directory  - directory that will contain the patch set
-  commitspec - a commit expression
+  commitspec - any commit expression, which can also be preceeded by other
+               git-format-patch options.
 
   The patch set will be created with the following git command.
 
@@ -40,7 +41,8 @@ usage() {
 [ $# -eq  "$argcount" ] || usage 1
 
 directory="$1"
-commitspec="$2"
+shift
+commitspec="$@"
 
 git format-patch \
 	--no-renames \
