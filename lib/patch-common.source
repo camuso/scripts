@@ -46,8 +46,12 @@ declare boolindex=0
 declare b_found_first_bool=false
 declare infilecount=0
 declare gitbranch=$(git_getcurrentbranch)
-declare us_commits="us-commits.log"	# upstream commits log
-declare bp_commits="bp-commits.log"	# backport commits log
+
+declare us_commits_name="us-commits.log"	# upstream commits log filename
+declare bp_commits_name="bp-commits.log"	# backport commits log filename
+declare us_commits				# must be initialized in menu
+declare bp_commits				# : loop
+
 declare patchcount=0
 declare sesdir="../.session"
 declare sesfile="sessions.log"
@@ -305,13 +309,13 @@ function git_restore_head {
 function replace_patch {
 	local patnum
 	local commit
-	local patcnt=$(cat "$outdir/$us_commits" | wc -l)
+	local patcnt=$(cat "$us_commits" | wc -l)
 
 	getuser "Patch Number to replace: " patnum
 	getuser "Correct commit ID: " commit
-	ui_replaceline $patnum "$commit $patnum/$patcnt" "$outdir/$us_commits"
+	ui_replaceline $patnum "$commit $patnum/$patcnt" "$us_commits"
 	rm -f "$outdir"/*.patch
-	# git_file2patchset "$outdir/$us_commits" "$outdir"
+	# git_file2patchset "$us_commits" "$outdir"
 	git_commit2patch $patnum $commit $outdir
 }
 
@@ -360,7 +364,7 @@ function apply_patches {
 	local stat=0
 
 	[ $applymode -eq $applymode_off ] && return 0
-	echo "" > "$outdir/$bp_commits"
+	echo "" > "$bp_commits"
 
 	for patch in $(ls -1 "$indir"/*.patch | sort -V); do
 		let patchcount++
@@ -380,12 +384,12 @@ function apply_patches {
 
 
 		[ $applymode -ne $applymode_patch ] && {
-			printf "%3d " $patchcount >> "$outdir/$bp_commits"
-			git log --oneline -n1 >> "$outdir/$bp_commits"
+			printf "%3d " $patchcount >> "$bp_commits"
+			git log --oneline -n1 >> "$bp_commits"
 		}
 	done
 
-	[ $stat -eq 0 ] && cat "$outdir/$bp_commits" || tail -1 "$outdir/$bp_commits"
+	[ $stat -eq 0 ] && cat "$bp_commits" || tail -1 "$bp_commits"
 	return $stat
 }
 
@@ -541,3 +545,11 @@ check_patchvbranch() {
 
 	return 0
 }
+
+exec_patcmp() {
+	local xval="$1"
+	patbatcmpmgr -R $indir -U $outdir -o $mmfile "$xval"
+	patcmp -m $mmfile $indir $outdir $editor "$us_commits"
+	[ -f $mmfile ] && rm -f $mmfile
+}
+
