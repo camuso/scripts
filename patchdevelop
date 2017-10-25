@@ -208,6 +208,8 @@ function menu_loop {
 	#
 	check_dir $prj_indir "$indirstr" indir
 	check_dir $prj_outdir "$outdirstr" outdir
+	bp_commits="$indir/$bp_commits_name"
+	us_commits="$outdir/$us_commits_name"
 
 	# get the editor
 	#
@@ -231,13 +233,6 @@ function menu_loop {
 		[ $stat -eq $rc_run ] && break
 	done
 	return $stat
-}
-
-exec_patcmp() {
-	local xval="$1"
-	patbatcmpmgr -R $indir -U $outdir -o $mmfile "$xval"
-	patcmp -m $mmfile $indir $outdir $editor
-	[ -f $mmfile ] && rm -f $mmfile
 }
 
 #############################
@@ -342,14 +337,14 @@ while true; do
 	#
 	if $b_fmt_upstream; then
 		rm -vf "$outdir"/*.patch
-		echo "" > "$outdir/$us_commits"
+		echo "" > "$us_commits"
 		echo
-		git_comment2commitsfile $indir "$outdir/$us_commits" $b_40digit
+		git_comment2commitsfile $indir "$us_commits" $b_40digit
 		echo
-		cat "$outdir/$us_commits"
+		cat "$us_commits"
 		echo
 		exec_boolean b_fmt_upstream false \
-			"git_file2patchset ${outdir}/"$us_commits" ${outdir}"
+			"git_file2patchset "$us_commits" ${outdir}"
 	fi
 
 	if [ $cmpmode -ne $cmpmode_off ]; then
