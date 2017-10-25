@@ -12,17 +12,19 @@ declare -i code_special_exit=2
 declare -i code_parmcount_err=101
 declare -i code_filecount_neq=102
 
-declare mldir
-declare usdir
+declare mldir		# dir with patches downloaded from email
+declare usdir		# dir with upstream patches created from commits
+             		# : from the files in mldir
+declare -a usfiles	# array of the upstream patch file names
+
 declare editor
 declare zstr=
 declare b_zstr=false
 
-declare -i uscount
-declare -i mlcount
-
-declare -i index=0
-declare -i maxindex
+declare -i mlcount	# count of patch files downloaded from mail
+declare -i uscount	# count of patch files in upstream directory
+declare -i index=0	# running 0-based index of the current patch
+declare -i maxindex	# highest attainable index (mlcount - 1)
 
 declare b_runmismatch=false
 declare b_nomismatch=true
@@ -123,6 +125,8 @@ backup() {
 #	mmindex -  the current mismatch index, if we are in mismatch mode
 #
 backup_wrapper() {
+	echo "backup_wrapper: index: $index patnum: $patnum"
+
 	if $b_runmismatch; then
 		backup $mmindex $b_backup mmindex
 		index=${mismatch_array[$mmindex]}
@@ -193,6 +197,9 @@ get_patch_number() {
 	local stat
 	local saved_mmindex=$mmindex
 	local saved_index=$index
+	local b_limitvio=false
+	local minstr="$OFF < 1, setting patch number to$BLD 1$OFF\n"
+	local maxstr="$OFF > $mlcount, setting patch number to $BLD$mlcount$OFF\n"
 
 	echo -e "$BLD""Type 'q' to quit and pick up where you left off $OFF"
 	while true; do
@@ -204,17 +211,20 @@ get_patch_number() {
 			continue
 		fi
 
-		index=$((patnum - 1))
-
-		if [ $index -lt 0 ] || [ $index -ge $mlcount ]; then
-			echo -e "$BLD"
-			echo -e "Patch number$OFF $patnum"$BLD" is not in this set"
-			echo -e "$OFF"
-
-			continue
-		else
-			break
+		if [ $patnum -lt 1 ]; then
+			echo -e "\n$BLD$patnum$minstr"
+			patnum=1
 		fi
+
+		if [ $patnum -gt $mlcount ]; then
+			echo -e "\n$BLD$patnum$maxstr"
+			patnum=$mlcount
+		fi
+
+		index=$((patnum - 1))
+		echo "index: $index patnum: $patnum"
+
+		break
 
 		if b_runmismatch; then
 			if [ $(ui_inarray $index mismatch_array[@] mmindex) -ne 0 ];
@@ -243,32 +253,37 @@ get_patch_number() {
 # replace_commit
 #
 # globals
-#	b_backup - set when the previous patch pair was examined after
-#	           a call to backup.
-#	index	-  the current index
+#	b_backup  - set when the previous patch pair was examined after
+#	            a call to backup.
+#	index	  - the current index
+#	uscommits - passed as parameter 4 from caller
 #
 replace_commit() {
 	local patnum
 	local commit
 	local patcnt
-	local commitslog="$usdir/us-commits.log"
 	local pfx
 	local stat
 
 	b_backup=false
-	backup_wrapper
+
 	patnum=$((index + 1))
+	echo "index: $index patnum: $patnum"
+
+	([ $index -gt 1 ] && [ $patnum -lt $mlcount ]) &&  backup_wrapper
+
 	pfx=$(printf "%04d" $patnum)
 
-	if ! [ -f "$commitslog" ]; then
-		ui_getfilespec "Path/File containing the commits: " commitslog
-	fi
+	[ -f "$uscommits" ] || \
+		ui_getfilespec "File containing the upstream commits: " uscommits
 
-	patcnt=$(cat $commitslog | wc -l)
+	patcnt=$(cat $uscommits | wc -l)
+	echo "removing: index: $index patch: ${usfiles[$index]}"
 	rm -vf ${usfiles[$index]}
 	getuser "New commit ID: " commit
-	ui_replaceline $patnum "$commit $patnum/$patcnt" "$commitslog"
-	git format-patch -1 -k --start-number $patnum $commit -o $usdir
+	echo "replacing patch: $patnum with commit: $commit"
+	ui_replaceline $patnum "$commit $patnum/$patcnt" "$uscommits"
+	git format-patch -n1 -k --start-number $patnum $commit -o $usdir
 	stat=$?
 	echo $stat
 
@@ -391,7 +406,7 @@ trap control_c SIGINT
 
 # Herald
 #
-echo -e "\n$BLD\0patcmp 2.1 - Interactively compare pairs of patches"
+echo -e "\n$BLD\0patcmp 3.0 - Interactively compare pairs of patches"
 echo -e "\tType '$OFF\0h$BLD' for help\n"
 
 while getopts z:m:h OPTION; do
@@ -417,11 +432,14 @@ done
 # arguments.
 #
 shift $optcount
-[ $# -eq 3 ] || usage $code_parmcount_err
+[ $# -eq 4 ] || usage $code_parmcount_err
 
+# Get the input arguments
+#
 mldir=$1
 usdir=$2
 editor=$3
+uscommits=$4
 uscount=$(ls -1 "$usdir"/*.patch | wc -l)
 mlcount=$(ls -1 "$mldir"/*.patch | wc -l)
 maxindex=$((mlcount - 1))
@@ -518,7 +536,7 @@ while :; do
 		echo -e "$OFF     ******\n"
 	fi
 
-	if $b_runmismatch; then
+	if ($b_runmismatch && [ $index -gt 0 ] && [ $index -lt $maxindex ]); then
 		[ $(ui_inarray $index mismatch_array[@]) -eq 0 ] \
 			&& index=${mismatch_array[$mmindex]} \
 			|| index=${mismatch_array[0]}
