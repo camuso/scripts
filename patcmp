@@ -30,8 +30,9 @@ declare b_runmismatch=false
 declare b_nomismatch=true
 declare mismatch_file
 declare -i first_mismatch
-declare -i last_mismatch
+declare -i current_mismatch
 declare -i mmindex
+declare -i currentmm
 declare -i mismatch_count
 declare -a mismatch_array
 declare mismatch_numbers=""
@@ -48,7 +49,7 @@ declare -i notify_no_change=2
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options] dir-1 dir-2
+$(basename $0) [options] dir-1 dir-2 commits-file
 
   Call a diff editor to compare the patch files in the two directories.
   The directories must have the same number of ".patch" files.
@@ -135,55 +136,6 @@ backup_wrapper() {
 	fi
 }
 
-# notify_mismatch_mode
-#
-# $1 - patch number
-# $2 - contains the user's selection upon return
-#
-# Returns:
-# 	0 - user chose a valid patch number and it's in $2
-# 	1 - user chose to disable mismatch mode
-# 	2 - user chose to quit trying to select a specific patch
-#
-notify_mismatch_mode() {
-	local i
-	local patnum=$1
-	local idx
-	local choice
-
-	echo -e "
-You selected patch number$BLD $patnum $OFF
-However, we are running in mismatch mode. That means you must select a
-patch number from the numbers in the following list, or you can disable
-mismatch mode and continue with the patch number you originally selected,
-or you can return to the Interactively Compare Patches menu.
-
-"
-	for i in ${mismatch_array[@]} ; do
-		idx=${mismatch_array[i]}
-		printf "%4d " $((idx + 1))
-	done
-	echo -e "$BLD""Select a number from the list or"
-	echo -e "m - to disable mismatch mode and use$OFF $patnum $BLD"
-	echo -e "q - quit and do something else $OFF"
-
-	while :;do
-		getuser "Your choice: " choice
-
-		[ "$choice" == "m" ] && return notify_disable_mismatch
-		[ "$choice" == "q" ] && return notify_no_change
-
-		if [[ $choice =~ ^-?[0-9]+$ ]]; then
-			patnum=$choice
-			idx=$((patnum - 1))
-			[ $(ui_inarray $idx mismatch_array[@] mmindex) -eq 0 ] \
-				|| continue
-		fi
-	done
-
-	eval $2=$idx
-}
-
 # get_patch_number
 #
 # globals:
@@ -202,7 +154,8 @@ get_patch_number() {
 	local maxstr="$OFF > $mlcount, setting patch number to $BLD$mlcount$OFF\n"
 
 	echo -e "$BLD""Type 'q' to quit and pick up where you left off $OFF"
-	while true; do
+
+	while :; do
 		getuser "Patch number: " patnum
 		[ "$patnum" == "q" ] && break
 
@@ -223,30 +176,7 @@ get_patch_number() {
 
 		index=$((patnum - 1))
 		echo "index: $index patnum: $patnum"
-
 		break
-
-		if b_runmismatch; then
-			if [ $(ui_inarray $index mismatch_array[@] mmindex) -ne 0 ];
-			then
-				notify_mismatch_mode $patnum retval
-				stat=$?
-			fi
-
-			case $stat in
-			    $notify_disable_mismatch )
-				ui_toggle b_runmismatch
-				index=$saved_index
-				mmindex=$saved_mmindex
-				break
-				;;
-			    $notify_no_change )
-				index=$saved_index
-				mmindex=$saved_mmindex
-				break
-				;;
-			esac
-		fi
 	done
 }
 
@@ -512,34 +442,34 @@ lasttag=$(cat /dev/shm/lasttag)
 while :; do
 
 	if [ $index -lt 0 ] || [ $index -gt $maxindex ]; then
-		echo -e "$BLD\0There is no patch number:$OFF $((index + 1))."
+		echo -e "There is no patch number:$BLD $((index + 1))$OFF."
 		if $b_runmismatch; then
 			mmindex=0
 			index=${mismatch_array[$mmindex]}
 		else
 			index=0
 		fi
-		echo -e "$BLD\0Starting with patch number:$OFF $((index + 1))\n"
+		echo -e "Starting with patch number:$BLD $((index + 1))$OFF\n"
 	fi
 
 	if [ $index -ge $maxindex ]; then
-		echo -e "     ******$BLD"
-		printf "Patch$OFF %04d$BLD is the last patch in the set.\n" \
+		echo -e "     ******"
+		printf "Patch$BLD %04d$OFF is the last patch in the set.\n" \
 			$((maxindex + 1))
-		echo -e "$OFF     ******\n"
+		echo -e "     ******\n"
 	fi
 
 	if $b_runmismatch && [ $index -eq $last_mismatch ]; then
-		echo -e "     ******$BLD"
-		printf "Patch$OFF %04d$BLD is the last mismatch in the set.\n" \
+		echo -e "     ******"
+		printf "Patch$BLD %04d$OFF is the last mismatch in the set.\n" \
 			$((last_mismatch + 1))
-		echo -e "$OFF     ******\n"
+		echo -e "     ******\n"
 	fi
 
 	if ($b_runmismatch && [ $index -gt 0 ] && [ $index -lt $maxindex ]); then
-		[ $(ui_inarray $index mismatch_array[@]) -eq 0 ] \
-			&& index=${mismatch_array[$mmindex]} \
-			|| index=${mismatch_array[0]}
+		ui_inarray $index mismatch_array[@]
+		[ $? -eq 0 ] && index=${mismatch_array[$mmindex]} \
+			     || index=${mismatch_array[0]}
 	fi
 
 	echo -e "\n$BLD\0Interactively Compare Patch Pairs"
@@ -629,9 +559,21 @@ while :; do
 	$editcmd "${mlfiles[$index]}" "${usfiles[$index]}"
 
 	if $b_runmismatch; then
+		# echo "mismatch_array: ${mismatch_array[@]}"
+		# echo "Current mmindex: $mmindex index: $index last mm: $last_mismatch"
+
+		# If the user selected a patch number whose index is not in the
+		# mismatch_array, then realign the index to the most recent
+		# patch number used from within the array.
+		#
+		ui_inarray $index mismatch_array[@] mmindex
+		[ $? -eq 0 ] || mmindex=$current_mismatch
+
+		echo "mmindex: $mmindex"
 		[ $index -lt $last_mismatch ] && let mmindex++
-		# index=${mismatch_array[$mmindex]}
-		echo "Forward mmindex: $mmindex index: $index"
+		index=${mismatch_array[$mmindex]}
+		current_mismatch=$mmindex
+		# echo "Forward mmindex: $mmindex index: $index"
 	else
 		[ $index -lt $maxindex ] && let index++
 		# echo "Forward index: $index maxindex: $maxindex"
