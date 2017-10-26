@@ -576,7 +576,8 @@ function ui_strindex {
 #
 # $1 value
 # $2 array, must be passed by reference, without leading '$'
-# $3 optional return value
+# $3 optional return value will contain the zero-based index of where the
+#    value parameter was found. Will be left unmolested if not found.
 #
 # Examples:
 #
@@ -584,7 +585,8 @@ function ui_strindex {
 #
 #   # The following will echo "found"
 #   #
-#   $(inarray 12 array[@]) && echo "found" || echo "not found"
+#   inarray 12 array[@]
+#   [ $? -eq 0 ] && echo "found" || echo "not found"
 #
 #   # The following will echo '2', because 12 is at index 2
 #   #
@@ -600,15 +602,16 @@ ui_inarray() {
 
 	for i in ${ary[@]}; do
 		if [ $i -eq $1 ]; then
+
+			# If there is a third argument, then give it the value
+			# of the current index, j.
+			#
 			[ $# -eq 3 ] && eval $3=$j
-			echo 0
 			return 0
 		fi
 		let j++
 	done
 
-	[ $# -eq 3 ] && eval $3=-1
-	echo 1
 	return 1
 }
 
