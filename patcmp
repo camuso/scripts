@@ -12,6 +12,8 @@ declare -i code_special_exit=2
 declare -i code_parmcount_err=101
 declare -i code_filecount_neq=102
 
+declare -i stat		# general purpose return status variable
+
 declare mldir		# dir with patches downloaded from email
 declare usdir		# dir with upstream patches created from commits
              		# : from the files in mldir
@@ -30,7 +32,7 @@ declare b_runmismatch=false
 declare b_nomismatch=true
 declare mismatch_file
 declare -i first_mismatch
-declare -i current_mismatch
+declare -i previndex
 declare -i mmindex
 declare -i currentmm
 declare -i mismatch_count
@@ -186,6 +188,7 @@ get_patch_number() {
 #	b_backup  - set when the previous patch pair was examined after
 #	            a call to backup.
 #	index	  - the current index
+#	previndex - index of the most recently viewed patch pair.
 #	uscommits - passed as parameter 4 from caller
 #
 replace_commit() {
@@ -197,25 +200,35 @@ replace_commit() {
 
 	b_backup=false
 
-	patnum=$((index + 1))
-	echo "index: $index patnum: $patnum"
+	# Only run backup if we're not at the limits of the index range.
+	# If we're at the last patch (maxindex), then don't backup, because
+	# the index did not get incremented, since we are at the highest
+	# possible value already.
+	# The previndex variable is used for replacing the penultimate patch.
+	# The problem is that the index advances to the maxindex after viewing
+	# the penultimate patch. If we test for index, then we will replace
+	# the ultimate patch, not the penultimate. The previndex variable
+	# tracks the most recently viewed, so we know we can backup to that
+	# if it was not the ultimate patch in the set.
+	#
+	([ $index -gt 0 ] && [ $previndex -lt $maxindex ]) && backup_wrapper
 
-	([ $index -gt 1 ] && [ $patnum -lt $mlcount ]) &&  backup_wrapper
+	patnum=$((index + 1))
+	# echo "index: $index patnum: $patnum"
 
 	pfx=$(printf "%04d" $patnum)
 
 	[ -f "$uscommits" ] || \
 		ui_getfilespec "File containing the upstream commits: " uscommits
 
-	patcnt=$(cat $uscommits | wc -l)
 	echo "removing: index: $index patch: ${usfiles[$index]}"
 	rm -vf ${usfiles[$index]}
 	getuser "New commit ID: " commit
 	echo "replacing patch: $patnum with commit: $commit"
 	ui_replaceline $patnum "$commit $patnum/$patcnt" "$uscommits"
-	git format-patch -n1 -k --start-number $patnum $commit -o $usdir
+	git format-patch --no-renames -1 -k --start-number $patnum $commit -o $usdir
 	stat=$?
-	echo $stat
+	# echo $stat
 
 	# If we could not format the patch, then create an empty
 	# patch with the bad commit id in it.
@@ -435,6 +448,8 @@ $b_runmismatch || index=0
 [ -f /dev/shm/lasttag ] && b_rmlasttag=true || getlasttag
 lasttag=$(cat /dev/shm/lasttag)
 
+previndex=0
+
 #############################################
 # Main program Loop
 ############################################
@@ -558,21 +573,24 @@ while :; do
 
 	$editcmd "${mlfiles[$index]}" "${usfiles[$index]}"
 
-	if $b_runmismatch; then
-		# echo "mismatch_array: ${mismatch_array[@]}"
-		# echo "Current mmindex: $mmindex index: $index last mm: $last_mismatch"
+	previndex=$index
 
-		# If the user selected a patch number whose index is not in the
-		# mismatch_array, then realign the index to the most recent
-		# patch number used from within the array.
+	if $b_runmismatch; then
+
+		# If we find the index of the just-viewed patch in the
+		# mismatch_array and the mmindex is less than the number of
+		# elements in the mismatch_array, increment the mmindex.
 		#
 		ui_inarray $index mismatch_array[@] mmindex
-		[ $? -eq 0 ] || mmindex=$current_mismatch
+		stat=$?
 
-		echo "mmindex: $mmindex"
-		[ $index -lt $last_mismatch ] && let mmindex++
+		([ $stat -eq 0 ] && [ $mmindex -lt $((mismatch_count - 1)) ]) &&
+			let mmindex++
+
+		# Set the index into the commit log files to the element
+		# indexed by mmindex in the mismatch_array
+		#
 		index=${mismatch_array[$mmindex]}
-		current_mismatch=$mmindex
 		# echo "Forward mmindex: $mmindex index: $index"
 	else
 		[ $index -lt $maxindex ] && let index++
