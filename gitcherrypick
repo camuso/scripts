@@ -31,7 +31,6 @@ declare MYSHLVL=/dev/shm/gcpshlvl
 #######################################
 source $MYLIB/ui.source
 source $MYLIB/project.source
-source $MYLIB/gitutilities.source
 
 ########################################
 # Function Return Codes
@@ -434,7 +433,7 @@ get_downstream_head() {
 			echo -e $notfoundmsg
 			continue
 		fi
-		dspshead=$hash
+		dspshead=$(git log --oneline -n1 $hash)
 		break
 	done
 	return 0
