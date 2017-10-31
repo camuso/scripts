@@ -197,9 +197,23 @@ function getuser {
 	eval $2=$var
 }
 
+# getch()
+#
+# Returns character in $1, no echo
+#
+function getchar {
+	local char
+	read -n1 char
+
+	# In order to receive special characters, like '>', pass quotes
+	# to eval by escaping them on the command line.
+	#
+	[ $# -gt 0 ] && eval $1=\"$char\"
+}
+
 # getchar()
 #
-# Returns character in $1
+# Returns character in $1 followed by echo
 #
 function getchar {
 	local char
