@@ -43,12 +43,14 @@ declare exit_abort=1	# Abort cherrypick and exit
 #########################################
 # Project Variables (sticky)
 #########################################
-declare prj_lastupcmt
-declare prj_workdir
-declare prj_cpcommits
-declare prj_bpcommits
-declare prj_b_autocommit
-declare prj_b_create_patchset
+declare prj_dsorighead		# original git head of current session
+declare prj_lastupcmt		# most recently applied upstream commit
+declare prj_workdir		# scratch directory for the session
+declare prj_cpcommits		# file containing list of upstream commits
+declare prj_bpcommits		# file to receive list of downstream commits
+declare prj_b_autocommit	# automate commits
+declare prj_b_create_patchset	# create a patchset at end of session
+declare prj_b_ses_inprogress	# session in progress
 
 #########################################
 # Global Variables
@@ -57,6 +59,7 @@ declare -i menupad=35
 declare b_shellcommit=false
 declare b_shellcommit_noauto=false
 declare b_shellcommit_abort=false
+declare b_single=false
 declare conflicts=false
 declare commit=""
 declare cmtmsgfile
@@ -72,6 +75,7 @@ declare qstr="'$BLD\0q$OFF\0'"
 # downstream commit from which to start creating downstream patch set
 #
 declare dspshead
+declare dsorighead
 
 declare prj_entries=0
 declare index=0
@@ -84,6 +88,7 @@ declare uscommitsfile=""	# File of upstream commits to cherry-pick
 declare dscommitsfile=""	# File of resulting downstream commits
 declare b_use_uscmtlog=false
 declare b_use_dscmtlog=false
+declare b_ses_inprogress
 
 ########################################
 # Strings
@@ -499,6 +504,7 @@ lookup_hash() {
 #                 uscmtstartline- starting line for uscommitsfile
 #                 tlines        - number of lines in the terminal window
 #                 tcols         - number of columns in the terminal window
+#                 qstr          - string with a boldfaced 'q'
 #       RETURNS:  none
 #===============================================================================
 get_startcommit() {
@@ -510,7 +516,7 @@ get_startcommit() {
 	local selectedcommit
 	local hashprompt=$(
 cat <<EOF
-Enter a line number or commit hash here, or 'q' to return to main menu:
+Enter a line number or commit hash here, or $qstr to return to main menu:
 EOF
 )
 	# Dump the contents of the uscommitsfile
@@ -694,7 +700,7 @@ start_from() {
 	local start_from_str=$(
 cat <<EOF
 
-    Starting cherrypick from    : $OFF$prstr$BLD
+    Next commit to cherrypick   : $OFF$prstr$BLD
 EOF
 )
 	echo -e "$start_from_str"
@@ -712,7 +718,7 @@ show_selcmt() {
 	local selcmt_str=$(
 cat <<EOF
 
- S  Select a different commit to start cherrypick from$BLD
+S  Select a different commit for next cherrypick$BLD
 EOF
 )
 	[[ -f $uscommitsfile ]] || return 1
@@ -730,7 +736,7 @@ show_last() {
 	local laststr=$(
 cat <<EOF
 
-    Last Upstream Commit Picked : $OFF${lastuplog:0:$cols}$BLD
+Most Recent Applied Commit  : $OFF${lastuplog:0:$cols}$BLD
 EOF
 )
 	$lasthashvalid && echo -e "$laststr"
@@ -784,25 +790,30 @@ function show_settings {
 	local settings=$(
 cat <<EOF
 $attr_bold
-    $attr_under\0Environment        $attr_OFF$attr_bold
-    Most recent tag             : $OFF$lasttag$BLD
-    Current Head                : $OFF${lastbrcmt:0:40}$BLD$(show_last)$(start_from)
+    $UND\0Upstream Environment     $OFF$BLD
+ u  File of Upstream Commits    : $OFF$uscommitsfile$BLD
+$(show_last)\
+$(start_from)\
+$(show_selcmt)
 
-    $attr_under\0Environment Options$attr_OFF$BLD$(show_selcmt)
+    $UND\0Downstream Environment   $OFF$BLD
+    Most recent tag             : $OFF$lasttag$BLD
+    Current Head                : $OFF${lastbrcmt:0:40}$BLD
  b  Current git branch          : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix      : $OFF$subjectprefix$BLD
  w  Working directory           : $OFF$workdir$BLD
- u  File of Upstream Commits    : $OFF$uscommitsfile$BLD
 
-    $attr_under\0Run Options        $attr_OFF$attr_bold
+    $UND\0Run Options              $OFF$BLD
  a  Automate commits            : $OFF$b_autocommit$BLD
- d  Create downstream patchset  : $OFF$b_create_patchset$BLD$(show_dscmt)
+ d  Create downstream patchset  : $OFF$b_create_patchset$BLD\
+$(show_dscmt)
 
-    $attr_under\0Control            $attr_OFF$attr_bold
+    $UND\0Control                  $OFF$BLD
  i  Init to defaults
  q  Quit this script
  x  Exit to a shell
  h  Help
+ p  Pop 'n' commits
  r  Run gitcherrypick
 $attr_OFF
 EOF
@@ -1133,6 +1144,13 @@ if ! [ -d .git ]; then
 fi
 
 ###########################################
+# Command Line Options
+###########################################
+
+
+
+
+###########################################
 # Parameter Initialization
 ###########################################
 
@@ -1146,12 +1164,14 @@ fi
 # Add new non-boolean parameters to the top of the list.
 #
 for offset in \
+prj_dsorighead \
 prj_lastupcmt \
 prj_workdir \
 prj_cpcommits \
 prj_bpcommits \
 prj_b_autocommit \
 prj_b_create_patchset \
+prj_b_session_in_progress \
 ; do
 	# The prj_set_item() function uses 1-based line numbers for indexing
 	# into the project file. We inited the index variable to zero, so
