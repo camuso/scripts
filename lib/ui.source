@@ -306,7 +306,7 @@ function ui_getfilespec {
 
 	while ! $found; do
 		getuser "$prompt" filespec
-		[ "$filespec" ] || { retval=1; break; }
+		[ "$filespec" ] || { return 1; break; }
 		[ -f "$filespec" ] && found=true && retval=0
 	done
 	eval $2=$filespec
