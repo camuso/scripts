@@ -5,7 +5,7 @@
 # Provide some automation for cherrypicking.
 #
 
-VERSION="4.1"
+VERSION="5.0"
 
 #######################################
 # Default file locations
@@ -24,6 +24,7 @@ declare MYLIB=$MYDIR/lib
 declare MYMAN=$MYDIR/man
 declare MYDATA=.data
 declare MYPRJ=$MYDATA/gitcherrypick.prj
+declare MYHLP=$MYMAN/gitcherrypick.txt
 declare MYSHLVL=/dev/shm/gcpshlvl
 
 #######################################
@@ -39,9 +40,10 @@ declare rc_continue=0	# Continue for another pass
 declare rc_run=1	# Run gitcherrypick
 declare exit_good=0	# Normal exit
 declare exit_abort=1	# Abort cherrypick and exit
+declare stat
 
 #########################################
-# Project Variables (sticky)
+# Project Variable offsets into prj file
 #########################################
 declare prj_dsorighead		# original git head of current session
 declare prj_lastupcmt		# most recently applied upstream commit
@@ -52,6 +54,22 @@ declare prj_b_autocommit	# automate commits
 declare prj_b_create_patchset	# create a patchset at end of session
 declare prj_b_ses_inprogress	# session in progress
 
+declare prj_entries=0	# number of entries in the project data file
+
+#########################################
+# Project Variables
+#########################################
+declare dsorighead		# original downstread head at new session
+declare lastuphash		# most recently applied upstream commit hash
+declare workdir			# scratch directory for the session
+declare uscommitsfile		# File of upstream commits to cherry-pick
+declare dscommitsfile		# File of resulting downstream commits
+declare b_autocommit		# Enable autocommit when true
+declare b_create_patchset	# Enable patchset creation when true
+declare b_ses_inprogress	# session in progress
+
+dscommitsfile="/dev/shm/gcpdscommits"
+
 #########################################
 # Global Variables
 #########################################
@@ -59,41 +77,36 @@ declare -i menupad=35
 declare b_shellcommit=false
 declare b_shellcommit_noauto=false
 declare b_shellcommit_abort=false
-declare b_single=false
 declare conflicts=false
 declare commit=""
 declare cmtmsgfile
 declare str_cmtmsg
-declare workdir
 declare lasthashvalid=false
 declare lastuplog=""
-declare lastuphash
 declare uscmtstartline=1
 declare lasttagfile="/dev/shm/gcplasttag"
 declare qstr="'$BLD\0q$OFF\0'"
 
+declare b_new=false		# new session
+declare b_continue=false	# continue session
+declare b_single=false		# only perform single cherrypick, no menu
+
 # downstream commit from which to start creating downstream patch set
 #
-declare dspshead
-declare dsorighead
+declare dspshead	# downstream commit to start patchset
 
-declare prj_entries=0
-declare index=0
-declare boolcount=0
-declare boolindex=0
+declare index=0		# general purpose index counter
+declare boolcount=0	# number of boolean project data items
+declare boolindex=0	# start of boolean data items in project data file
 declare b_found_first_bool=false
 declare gitbranch
 declare ui_bools=""
-declare uscommitsfile=""	# File of upstream commits to cherry-pick
-declare dscommitsfile=""	# File of resulting downstream commits
-declare b_use_uscmtlog=false
 declare b_use_dscmtlog=false
-declare b_ses_inprogress
 
 ########################################
 # Strings
 ########################################
-str_herald="\n"$attr_bold"gitcherrypick "$VERSION" - Automates cherrypicking"
+str_herald="\n"$BLD$UND"gitcherrypick "$VERSION" - Automates cherrypicking$OFF\n"
 str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
@@ -645,6 +658,20 @@ getlasttag() {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  init_newsession
+#   DESCRIPTION:  initialize a new session
+#       GLOBALS:
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+init_newsession() {
+	init_booleans
+	get_booleans
+	prj_set_directory "working" $prj_workdir workdir quiet
+	get_uscommitsfile
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  use_last_upstream_hash
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  none
@@ -718,7 +745,7 @@ show_selcmt() {
 	local selcmt_str=$(
 cat <<EOF
 
-S  Select a different commit for next cherrypick$BLD
+ S  Select a different commit for next cherrypick$BLD
 EOF
 )
 	[[ -f $uscommitsfile ]] || return 1
@@ -736,7 +763,7 @@ show_last() {
 	local laststr=$(
 cat <<EOF
 
-Most Recent Applied Commit  : $OFF${lastuplog:0:$cols}$BLD
+    Most Recent Applied Commit  : $OFF${lastuplog:0:$cols}$BLD
 EOF
 )
 	$lasthashvalid && echo -e "$laststr"
@@ -777,7 +804,7 @@ EOF
 	$b_create_patchset && echo -e "$dscmtstr"
 }
 
-#===  FUNCTION  ================================================================
+#===  FUNCTION  ===============================================================
 #          NAME:  show_settings
 #   DESCRIPTION:  show the current settings and present the menu options
 #    PARAMETERS:  none
@@ -791,7 +818,7 @@ function show_settings {
 cat <<EOF
 $attr_bold
     $UND\0Upstream Environment     $OFF$BLD
- u  File of Upstream Commits    : $OFF$uscommitsfile$BLD
+ u  File of Upstream Commits    : $OFF$uscommitsfile$BLD\
 $(show_last)\
 $(start_from)\
 $(show_selcmt)
@@ -809,7 +836,7 @@ $(show_selcmt)
 $(show_dscmt)
 
     $UND\0Control                  $OFF$BLD
- i  Init to defaults
+ N  Start a New Session
  q  Quit this script
  x  Exit to a shell
  h  Help
@@ -849,10 +876,9 @@ function menu_parser {
 			;;
 		d )	ui_toggle b_create_patchset
 			;;
-		i )	init_booleans
-			get_booleans
+		N )	init_newsession
 			;;
-		h )	less $MYMAN/gitcherrypick.txt
+		h )	less $MYHLP
 			;;
 		q )	exit_gitcherrypick $exit_good
 			;;
@@ -1021,6 +1047,8 @@ cherrypick() {
 	[ $gitstat -eq 0 ] || {
 		echo "You have conflicts to fix."
 
+		$b_single && return $gitstat
+
 		if $b_autocommit; then
 			conflicts=true
 		else
@@ -1147,8 +1175,69 @@ fi
 # Command Line Options
 ###########################################
 
+declare infostr="Type \"$(basename $0) -h\" for more info."
+declare invoptstr="\nInvalid option.\n$infostr"
+declare needcmtstr="\nMust supply commit hash with -s | --single\n$infostr"
+declare longopts="new,continue,single:,help"
+declare shortopts="ncs:h"
 
+# If there are no options, then assume --continue the previous session.
+#
+if [ $# -eq 0 ]; then
+	b_continue=true
+else
+	opts=$(getopt --options $shortopts --long $longopts --name "$0" -- "$@")
+	eval set -- "$opts"
 
+	while :; do
+	    case "$1" in
+		-n | "--new" 	)
+			b_new=true
+			shift
+			;;
+		-c | "--continue" )
+			b_continue=true
+			shift
+			;;
+		-s | "--single" )
+			b_single=true
+			commit=$2
+			[ "$commit" ] || { echo -e "$needcmtstr"; exit 1; }
+			shift 2
+			;;
+		-h | "--help" 	)
+			less $MYHLP
+			exit 0
+			;;
+		-- )	shift
+			break
+			;;
+		* )	echo -e "$invoptstr"
+			exit 1
+			;;
+	    esac
+	done
+fi
+
+###########################################
+# Act on options
+###########################################
+if $b_single; then
+	cherrypick $commit
+	exit $?
+fi
+
+# Check options
+#
+if ($b_new && $b_continue); then
+	echo "--new and --continue are mutually exclusive options."
+	exit 1
+fi
+
+if ($b_continue && ! $b_ses_inprogress); then
+	echo -e "\nNo session in progress.\n"\
+	"Select the \"$BLD\0N$OFF\" menu item to start a new session\n"
+fi
 
 ###########################################
 # Parameter Initialization
@@ -1217,11 +1306,12 @@ prj_entries=$index
 # Disable blank checking
 #
 prj_init_prjfile "$MYPRJ" $prj_entries disable_blank_check
+stat=$?
 
 # If the above call to prj_init_prjfile returns nonzero, it means that a
 # new project file has been created and its values must be initialized.
 #
-if [ $? -ne 0 ]; then
+if [ $stat -ne 0 ]; then
 	echo
 	echo "A new project file has been created."
 	echo "We will need to know where your work directory will be. "
@@ -1289,33 +1379,20 @@ while true; do
 
 	commit=""
 
-	if $b_use_uscmtlog; then
-
-		if [ $index -le $cpcommitscount ]; then
-			commit="$(ui_readline $index $uscommitsfile)"
-			[ "${commit:0:1}" == "#" ] && let index++ && continue
-			echo -e "\nProcessing: $commit"
-			commit="$(echo $commit | cut -d' ' -f1)"
-		else
-			echo -e "No more commits in $BLD$uscommitsfile$OFF"
-			commit=""
-			break
-		fi
-
+	if [ $index -le $cpcommitscount ]; then
+		commit="$(ui_readline $index $uscommitsfile)"
+		[ "${commit:0:1}" == "#" ] && let index++ && continue
+		echo -e "\nProcessing: $commit"
+		commit="$(echo $commit | cut -d' ' -f1)"
 	else
-		getuser "$str_cpprompt" commit
-		[ "$commit" ] || break
-		[ "$commit" = "q" ] && exit_gitcherrypick 1
+		echo -e "No more commits in $BLD$uscommitsfile$OFF"
+		commit=""
+		break
 	fi
 
 	[ "$commit" ] && cherrypick $commit
 	[ $? -eq 0 ] || { echo "Commit $commit is bogus."; break; }
 	let index++
-
-	if ! $b_use_uscmtlog; then
-		getyn "Cherry-pick another commit?" ans
-		$ans || break
-	fi
 done
 
 if $b_create_patchset; then
