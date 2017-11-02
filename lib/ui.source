@@ -321,6 +321,7 @@ function ui_getfilespec {
 #	2 if the string exists as a directory
 #
 function ui_chkdir {
+	[ "$1" ]    || return 3
 	[ -d "$1" ] && return 2
 	[ -f "$1" ] && return 1
 	return 0
@@ -328,12 +329,16 @@ function ui_chkdir {
 
 # ui_getnewdir prompt name
 #
+# $1 - prompt
+# $2 - will contain the new directory name
+#
 # Prompts the user for a name to create a new directory and passes
 # it back to the caller in the "name" argument.
 # If the name already exists as a file, prompts for a new name.
 # If the name already exists as a directory, asks if user wants to
 # use that directory, warning that all its contents may be altered.
 #
+
 function ui_getnewdir {
 	local prompt="$1"
 	local newdir
@@ -342,19 +347,20 @@ function ui_getnewdir {
 
 	while true; do
 		getuser "$prompt" newdir
+
 		ui_chkdir "$newdir"
 		local stat=$?
 
-		[ $stat -eq 1 ] && \
-			echo "\""$newdir"\" already exists as a file."
-
-		if [ $stat -eq 2 ]; then
-			eval $2="$newdir"
+		case $stat in
+		1 )	echo "\""$newdir"\" already exists as a file."
+			;;
+		2 ) 	eval $2="$newdir"
 			return $stat
-		fi
-
-		if [ $stat -eq 0 ]; then
-			echo "\""$newdir"\" does not exist."
+			;;
+		3 )	echo "No directory selected."
+			return $stat
+			;;
+		0 )	echo "\""$newdir"\" does not exist."
 			getyn "Want to create "$newdir" now?" ans
 			if $ans; then
 				mkdir -p "$newdir"
@@ -368,7 +374,8 @@ function ui_getnewdir {
 			fi
 			eval $2="$newdir"
 			return $stat
-		fi
+			;;
+		esac
 	done
 }
 
