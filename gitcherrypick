@@ -59,7 +59,7 @@ declare prj_entries=0	# number of entries in the project data file
 #########################################
 # Project Variables
 #########################################
-declare dsorighead		# original downstread head at new session
+declare dsorighead		# original downstream head at new session
 declare lastuphash		# most recently applied upstream commit hash
 declare workdir			# scratch directory for the session
 declare uscommitsfile		# File of upstream commits to cherry-pick
@@ -222,7 +222,7 @@ function exit_gitcherrypick {
 
 #===  FUNCTION  ================================================================
 #          NAME:  get_gitbranch
-#   DESCRIPTION:  Get the current git branch
+#   DESCRIPTION:  Echos the name of the current git branch
 #    PARAMETERS:  None
 #       RETURNS:  None
 #===============================================================================
@@ -232,13 +232,18 @@ function get_gitbranch {
 
 #===  FUNCTION  ================================================================
 #          NAME:  set_gitbranch
-#   DESCRIPTION:  Set the branch of the git tree
-#    PARAMETERS:  Implicit global parameter workdir
-#       RETURNS:  None
+#   DESCRIPTION:  Set the branch of the git tree. Presents the user with a list
+#                 of numbered git branches from which to choose.
+#    PARAMETERS:  None
+#       GLOBALS:  workdir
+#                 gitbranch
+#       RETURNS:  0 if new branch selected, 1 if user aborted selection
 #===============================================================================
 function set_gitbranch {
 	local index=1
 	local linenumber
+	local line
+	local branchlist
 
 	git branch > $workdir/branchlist
 	echo -e "$attr_bold"
@@ -255,17 +260,33 @@ function set_gitbranch {
 	echo -e  "\tgit checkout -f     # Discard any changes"
 	echo -e
 	echo -en "$attr_bold"
-	echo -en "Enter the number corresponding to the branch you want: "
+	echo -en "Enter the number corresponding to the branch you want or $qstr to leave as is: "
 	echo -en "$attr_OFF"
 	read  linenumber
-	[ "$linenumber" == "q" ] && exit_patchreview 1
-	[ "$linenumber" == "x" ] && ui_sh_spawn
+	[ "$linenumber" == "q" ] && return
 	gitbranch="$(ui_readline $linenumber $workdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git am --abort --quiet >/dev/null 2>&1
 	git checkout -f "$gitbranch" 2>&1
 	git log --oneline -1
 	getlasttag
+	return 0
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  git_set_subjectprefix
+#   DESCRIPTION:  Set the subject prefix in .git/config
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+git_set_subjectprefix() {
+	local newpfx="$(git config format.subjectprefix)"
+
+	echo -e \
+"Just press $BLD\0ENTER$OFF to leave the current subject prefix unchanged."
+	getuser "New subject prefix: " newpfx
+	[ "$newpfx" ] || return
+	git config format.subjectprefix "$newpfx"
 }
 
 #===  FUNCTION  ================================================================
@@ -370,15 +391,15 @@ function set_booleans {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_uscommitsfile
-#   DESCRIPTION:  Gets the name of the file that contains the commits to
+#          NAME:  set_uscommitsfile
+#   DESCRIPTION:  Sets the name of the file that contains the commits to
 #                 be cherrypicked.
 #    PARAMETERS:  none
 #       GLOBALS:  uscommitsfile - file containing the commits to be cherrypicked
 #       	  prj_cpcommits - offset into project file for uscommitsfile
 #       RETURNS:  status of call to ui_getfilespec()
 #===============================================================================
-function get_uscommitsfile {
+function set_uscommitsfile {
 	local stat
 	ui_getfilespec "File of the upstream commits to be cherry-picked: " \
 		uscommitsfile
@@ -388,8 +409,8 @@ function get_uscommitsfile {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_dscommitsfile
-#   DESCRIPTION:  Gets the name of the file that will contain the new commits
+#          NAME:  set_dscommitsfile
+#   DESCRIPTION:  Sets the name of the file that will contain the new commits
 #                 resulting from those that were cherry-picked.
 #    PARAMETERS:  none
 #	GLOBALS:  dscommitsfile - file containing the new commits resulting from
@@ -398,7 +419,7 @@ function get_uscommitsfile {
 #	          prj_bpcommits  - offset into project file for dscommitsfile
 #       RETURNS:  1 if no dscommitsfile, else 0
 #===============================================================================
-function get_dscommitsfile {
+function set_dscommitsfile {
 	getuser "File for resulting downstream commits from the cherry-pick: " \
 		dscommitsfile
 
@@ -417,26 +438,26 @@ function get_dscommitsfile {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_downstream_head
-#   DESCRIPTION:  Gets the one line commit log of the downstream branch from
-#                 which to start the creation of a downstream patch set.
+#          NAME:  set_downstream_patchset_head
+#   DESCRIPTION:  Sets commit of the downstream branch from which to start the
+#                 creation of a downstream patch set.
 #    PARAMETERS:  none
-#	GLOBALS:  dspshead - downstream patch set head for generating the
-#	                     downstream patchset.
+#	GLOBALS:  dspshead - Hash of downstream patch set head for generating
+#	                     the downstream patchset.
 #	                     NOTE: The patchset starts with the commit AFTER the
 #	                     downstream patch head. That's the way git-format-
 #	                     patch works.
 #       	  qstr - string containing a boldfaced 'q' for quit
 #       RETURNS:  zero
 #===============================================================================
-get_downstream_head() {
+set_downstream_patchset_head() {
 	local stat
 	local hash
 	local cols=$((tcols - 9))
 	local cmtlog
 	local notfoundmsg="can't be found in this branch. Try again.\n"
 	local pstr=\
-"$OFF\0Enter hash to start patchset or $qstr to return to main menu : "
+"$OFF\0Enter hash for start of patchset or $qstr to return to main menu : "
 
 	echo "NOTE: patch set starts at the commit following the one selected."
 
@@ -510,7 +531,7 @@ lookup_hash() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_startcmt
+#          NAME:  set_next_cherrypick
 #   DESCRIPTION:  Select the starting commit from the uscommitsfile.
 #    PARAMETERS:  none
 #       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
@@ -520,18 +541,23 @@ lookup_hash() {
 #                 qstr          - string with a boldfaced 'q'
 #       RETURNS:  none
 #===============================================================================
-get_startcommit() {
+set_next_cherrypick() {
 	local counter=1
 	local line
 	local linecount=$(cat $uscommitsfile | wc -l)
 	local numwid=${#linecount}
 	local cols=$((tcols - 2 - $numwid))
 	local selectedcommit
+	local q="$OFF\0'$BLD\0q$OFF\0'$BLD"
 	local hashprompt=$(
 cat <<EOF
-Enter a line number or commit hash here, or $qstr to return to main menu:
+Enter a line number or commit hash here, or $q to return to main menu:
 EOF
 )
+	# Give us a spacer line.
+	#
+	echo
+
 	# Dump the contents of the uscommitsfile
 	#
 	while read line; do
@@ -666,9 +692,10 @@ getlasttag() {
 #===============================================================================
 init_newsession() {
 	init_booleans
-	get_booleans
 	prj_set_directory "working" $prj_workdir workdir quiet
-	get_uscommitsfile
+	set_uscommitsfile
+	set_gitbranch
+	get_booleans
 }
 
 #===  FUNCTION  ================================================================
@@ -701,14 +728,14 @@ use_last_upstream_hash() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  start_from
+#          NAME:  show_next_cherrypick
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  none
 #       GLOBALS:  uscommitsfile
 #                 uscmtstartline
 #       RETURNS:  none
 #===============================================================================
-start_from() {
+show_next_cherrypick() {
 	local linecount
 	local startcmt
 	local eofstr
@@ -724,24 +751,24 @@ start_from() {
 	[ $uscmtstartline -gt $linecount ] \
 			&& prstr="$eofstr" || prstr="${startcmt:0:$cols}"
 
-	local start_from_str=$(
+	local show_next_cherrypick_str=$(
 cat <<EOF
 
-    Next commit to cherrypick   : $OFF$prstr$BLD
+ c  Next commit to cherrypick   : $OFF$prstr$BLD
 EOF
 )
-	echo -e "$start_from_str"
+	echo -e "$show_next_cherrypick_str"
 	return 0
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  show_selcmt
+#          NAME:  show_select_next_cherrypick
 #   DESCRIPTION:  Show option to select a commit from the upstream commits file.
 #    PARAMETERS:  none
 #       GLOBALS:  uscommitsfile
 #       RETURNS:  none
 #===============================================================================
-show_selcmt() {
+show_select_next_cherrypick() {
 	local selcmt_str=$(
 cat <<EOF
 
@@ -753,12 +780,12 @@ EOF
 	return 0
 }
 #===  FUNCTION  ================================================================
-#          NAME:  show_last
+#          NAME:  show_most_recent_cherrypick
 #   DESCRIPTION:  Show the Last Upstream Commit Picked, if it is valid
 #    PARAMETERS:  none
 #       RETURNS:  none
 #===============================================================================
-show_last() {
+show_most_recent_cherrypick() {
 	local cols=$((tcols - menupad))
 	local laststr=$(
 cat <<EOF
@@ -788,17 +815,16 @@ EOF
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  show_dscmt
+#          NAME:  show_downstream_patchset_head
 #   DESCRIPTION:  Show the start commit for the downstream patch set
 #    PARAMETERS:  none
 #       RETURNS:  none
 #===============================================================================
-show_dscmt() {
+show_downstream_patchset_head() {
 	local cols=$((tcols - menupad))
 	local dscmtstr=$(
 cat <<EOF
-
- D  : starts at downstream hash : $OFF${dspshead:0:$cols}$BLD
+ D  : from downstream commit    : $OFF${dspshead:0:$cols}$BLD
 EOF
 )
 	$b_create_patchset && echo -e "$dscmtstr"
@@ -808,9 +834,12 @@ EOF
 #          NAME:  show_settings
 #   DESCRIPTION:  show the current settings and present the menu options
 #    PARAMETERS:  none
+#       GLOBALS:  tcols - number of columns in the current terminal
+#                 menupad - number of to the dynamic menu items
 #       RETURNS:  none
 #===============================================================================
 function show_settings {
+	local cols=$((tcols - menupad))
 	local subjectprefix="$(git config format.subjectprefix)"
 	local lasttag=$(cat $lasttagfile)
 	local lastbrcmt=$(git log -n1 --oneline)
@@ -819,29 +848,22 @@ cat <<EOF
 $attr_bold
     $UND\0Upstream Environment     $OFF$BLD
  u  File of Upstream Commits    : $OFF$uscommitsfile$BLD\
-$(show_last)\
-$(start_from)\
-$(show_selcmt)
+$(show_most_recent_cherrypick)\
+$(show_next_cherrypick)
 
     $UND\0Downstream Environment   $OFF$BLD
     Most recent tag             : $OFF$lasttag$BLD
-    Current Head                : $OFF${lastbrcmt:0:40}$BLD
+    Current Head                : $OFF${lastbrcmt:0:cols}$BLD
  b  Current git branch          : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix      : $OFF$subjectprefix$BLD
  w  Working directory           : $OFF$workdir$BLD
 
-    $UND\0Run Options              $OFF$BLD
- a  Automate commits            : $OFF$b_autocommit$BLD
- d  Create downstream patchset  : $OFF$b_create_patchset$BLD\
-$(show_dscmt)
-
     $UND\0Control                  $OFF$BLD
  N  Start a New Session
- q  Quit this script
- x  Exit to a shell
- h  Help
  p  Pop 'n' commits
  r  Run gitcherrypick
+ q  Quit this script
+ h  Help
 $attr_OFF
 EOF
 )
@@ -864,29 +886,29 @@ function menu_parser {
 
 		b )	set_gitbranch
 			;;
-		p )	git_getsubjectprefix
+		p )	git_set_subjectprefix
 			;;
 		w )	prj_set_directory "working" $prj_workdir workdir quiet
 			;;
-		u )	get_uscommitsfile
+		u )	set_uscommitsfile
 			;;
-		S )	get_startcommit
+		c )	set_next_cherrypick
 			;;
-		a )	ui_toggle b_autocommit
-			;;
-		d )	ui_toggle b_create_patchset
-			;;
+#		a )	ui_toggle b_autocommit
+#			;;
+#		d )	ui_toggle b_create_patchset
+#			;;
 		N )	init_newsession
 			;;
 		h )	less $MYHLP
 			;;
 		q )	exit_gitcherrypick $exit_good
 			;;
-		x )	set_booleans
-			ui_sh_spawn
-			;;
-		D )	get_downstream_head
-			;;
+#		x )	set_booleans
+#			ui_sh_spawn
+#			;;
+#		D )	set_downstream_patchset_head
+#			;;
 		r )	set_booleans
 			return $rc_run
 			;;
