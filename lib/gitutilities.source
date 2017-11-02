@@ -107,7 +107,19 @@ function git_file2patchset {
 	return 0
 }
 
-# git_subjectprefix - determine the subject prefix stored in .git/config
+# git_setsubjectprefix - set the subject prefix in .git/config
+#
+git_setsubjectprefix() {
+	local newpfx="$(git config format.subjectprefix)"
+
+	echo -e \
+"Just press $BLD\0ENTER$OFF to leave the current subject prefix unchanged."
+	getuser "New subject prefix: " newpfx
+	[ "$newpfx" ] || return
+	git config format.subjectprefix "$newpfx"
+}
+
+# git_getsubjectprefix - determine the subject prefix stored in .git/config
 #
 # $1 - query, ask user if he wants to change the prefix
 #
