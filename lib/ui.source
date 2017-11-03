@@ -302,13 +302,14 @@ function ui_getfilespec {
 	local found=false
 	local retval=0
 
-	echo -e "$BLD\0Valid filename or empty string to exit.$OFF"
+	echo -e "$BLD\0Please enter a valid filename or empty string to exit.$OFF"
 
-	while ! $found; do
+	while :; do
 		getuser "$prompt" filespec
 		[ "$filespec" ] || { return 1; break; }
-		[ -f "$filespec" ] && found=true && retval=0
+		[ -f "$filespec" ] && { retval=0; break; }
 	done
+
 	eval $2=$filespec
 	return $retval
 }
