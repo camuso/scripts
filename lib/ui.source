@@ -593,7 +593,7 @@ function ui_strindex {
 # ui_inarray()
 #
 # Looks for an integer in an integer array
-# Echoes and returns 0 if found, 1  if not.
+# Returns 0 if found, 1  if not.
 # Optionally returns the index of the item in the array or -1 if not found.
 #
 # $1 value
