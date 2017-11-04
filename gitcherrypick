@@ -41,20 +41,22 @@ declare rc_continue=0	# Continue for another pass
 declare rc_run=1	# Run gitcherrypick
 declare exit_good=0	# Normal exit
 declare exit_abort=1	# Abort cherrypick and exit
-declare stat
 
 #########################################
 # Project Variable offsets into prj file
 #########################################
+declare prj_uscmtstartline	# current starting line in the commit file
 declare prj_dsorighead		# original git head of current session
-declare prj_lastupcmt		# most recently applied upstream commit
+declare prj_lastuphash		# most recently applied upstream commit
 declare prj_workdir		# scratch directory for the session
 declare prj_uscommits		# file containing list of upstream commits
 declare prj_dscommits		# file to receive list of downstream commits
-declare prj_b_autocommit	# automate commits
 declare prj_b_session_active	# session in progress
+declare prj_b_nomore		# no more commits to process in uscommitsfile
+declare prj_b_conflict		# last attempt generated a conflict
 
 declare prj_entries=0	# number of entries in the project data file
+declare boolindex=0	# start of boolean data items in project data file
 
 #########################################
 # Project Variables
@@ -66,6 +68,8 @@ declare uscommitsfile		# File of upstream commits to cherry-pick
 declare dscommitsfile		# File of resulting downstream commits
 declare b_autocommit		# Enable autocommit when true
 declare b_session_active	# session in progress
+declare b_nomore		# no more commits to process in uscommitsfile
+declare b_conflict		# last attempt generated a conflict
 
 dscommitsfile="/dev/shm/gcpdscommits"
 
@@ -90,14 +94,7 @@ declare b_new=false		# new session
 declare b_continue=false	# continue session
 declare b_single=false		# only perform single cherrypick, no menu
 
-# downstream commit from which to start creating downstream patch set
-#
-declare dspshead	# downstream commit to start patchset
-
 declare index=0		# general purpose index counter
-declare boolcount=0	# number of boolean project data items
-declare boolindex=0	# start of boolean data items in project data file
-declare b_found_first_bool=false
 declare gitbranch
 declare ui_bools=""
 declare b_use_dscmtlog=false
@@ -451,47 +448,6 @@ function set_dscommitsfile {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  set_downstream_patchset_head
-#   DESCRIPTION:  Sets commit of the downstream branch from which to start the
-#                 creation of a downstream patch set.
-#    PARAMETERS:  none
-#	GLOBALS:  dspshead - Hash of downstream patch set head for generating
-#	                     the downstream patchset.
-#	                     NOTE: The patchset starts with the commit AFTER the
-#	                     downstream patch head. That's the way git-format-
-#	                     patch works.
-#       	  qstr - string containing a boldfaced 'q' for quit
-#       RETURNS:  zero
-#===============================================================================
-set_downstream_patchset_head() {
-	local stat
-	local hash
-	local cols=$((tcols - 9))
-	local cmtlog
-	local notfoundmsg="can't be found in this branch. Try again.\n"
-	local pstr=\
-"$OFF\0Enter hash for start of patchset or $qstr to return to main menu : "
-
-	echo "NOTE: patch set starts at the commit following the one selected."
-
-	while :; do
-		getuser "$pstr" hash
-		[[ "$hash" == "q" ]] && return 1
-		cmtlog=$(git log --oneline -n1 $hash 2>/dev/null)
-		stat=$?
-
-		if [ $stat -ne 0 ]; then
-			echo -en "\nHash $BLD$hash$OFF "
-			echo -e $notfoundmsg
-			continue
-		fi
-		dspshead=$(git log --oneline -n1 $hash)
-		break
-	done
-	return 0
-}
-
-#===  FUNCTION  ================================================================
 #          NAME:  pr_nohash_msg
 #   DESCRIPTION:  Prints message indicating the hash can't be found in the file
 #                 containing the upstream commits.
@@ -503,7 +459,8 @@ pr_nohash_msg () {
 	local hash="$1"
 	local nohash_msg=$(
 cat <<EOF
-  Can't find $BLD$hash$OFF as a commit or line number in $BLD$uscommitsfile$OFF"
+  Can't find $BLD$hash$OFF as a commit or valid line number in $BLD$uscommitsfile$OFF
+  Lines having a '$BLD\0#$OFF' as their first character are not listed or considered.
   Try again or type '$BLD\0q$OFF' to return to main menu.
 EOF
 )
@@ -527,18 +484,10 @@ lookup_hash() {
 
 	[[ -f $uscommitsfile ]] || return 1
 
-	counter=$(grep -m1 -n "$hash" "$uscommitsfile" | cut -d':' -f1)
-	[ -z "$counter" ] && eval $2=1 && return 1
+	counter=$(grep -m1 -n ^$hash "$uscommitsfile" | cut -d':' -f1)
 
-	# while read line; do
-	# 	line=$(echo $line | cut -d' ' -f1)
-	#	[ "$hash" = "$line" ] && break
-	#	let counter++
-	# done < $uscommitsfile
+	[ -z "$counter" ] && return 1
 
-	[ $counter -gt $linecount ] && return 1
-
-	# echo "counter: $counter"
 	eval $2=$counter
 	return 0
 }
@@ -555,8 +504,11 @@ lookup_hash() {
 #       RETURNS:  none
 #===============================================================================
 set_next_cherrypick() {
-	local counter=1
+	local counter=0
 	local line
+	local linary
+	local idx=0
+	local stat
 	local linecount=$(cat $uscommitsfile | wc -l)
 	local numwid=${#linecount}
 	local cols=$((tcols - 2 - $numwid))
@@ -567,16 +519,17 @@ cat <<EOF
 Enter a line number or commit hash here, or $q to return to main menu:
 EOF
 )
-	# Give us a spacer line.
-	#
-	echo
+	echo -e "\n$BLD\0NOTE:$OFF Skipping lines with a leading '$BLD\0#$OFF'.\n"
 
 	# Dump the contents of the uscommitsfile
 	#
 	while read line; do
-		line=$(printf " %${#linecount}d %s" $counter "$line")
-		echo "${line:0:cols}"
 		let counter++
+		[ "${line:0:1}" = "#" ] && continue
+		line=$(printf " %${numwid}d %s" $counter "$line")
+		echo "${line:0:cols}"
+		linary[$idx]=$counter
+		let idx++
 	done < $uscommitsfile
 
 	# Loop asking for a commit or line number until one is found or the
@@ -586,30 +539,24 @@ EOF
 		getuser "$hashprompt " selectedcommit
 		[ "$selectedcommit" = "q" ] && return
 
-		# No way the line count is gonna be as large as the minimum 7
-		# digit commit hash, so if the user entered a number less than
-		# or equal to the linecount, s/he's selecting a line.
+		# If the user enters a number 7 digits or more, then it's a
+		# commit hash.
 		#
-		# If the user enters a number greater than the linecount, but
-		# less than the minimum 7 digit size of a commit hash, then
-		# tell them to try again.
-		#
-		# Else, it's a commit hash.
+		# Else, see if its one of the valid line numbers captured in
+		# the linary in the "read line" loop above.
 		#
 		# If we can't find the submitted linenumber or commit hash in
-		# the uscommitsfile, then tell them to try agian.
+		# the uscommitsfile, then tell them to try again.
 		#
-		if [ ${#selectedcommit} -le ${#linecount} ] \
-		&& [ $selectedcommit -le $linecount ]; then
-			uscmtstartline=$selectedcommit
-			break
-		elif [ ${#selectedcommit} -ge 7 ]; then
+		if [ ${#selectedcommit} -ge 7 ]; then
 			lookup_hash $selectedcommit uscmtstartline
 			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
 			break
 		else
-			pr_nohash_msg $selectedcommit
-			continue
+			ui_inarray $selectedcommit linary[@]
+			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
+			uscmtstartline=$selectedcommit
+			break
 		fi
 	done
 }
@@ -741,11 +688,38 @@ use_last_upstream_hash() {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  get_next_cherrypick
+#   DESCRIPTION:  Gets the next commit in the commits file that doesn't have a
+#                 leading hash.
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile
+#                 uscmtstartline
+#       RETURNS:  1 if there are no more cherries to pick, else 0
+#===============================================================================
+get_next_cherrypick() {
+	local idx
+	local line
+	local count=$(cat $uscommitsfile | wc -l)
+	local hashed=false
+
+	for ((idx=(uscmtstartline + 1); i <= count; ++idx)); do
+		line="$(ui_readline $idx $uscommitsfile)"
+		[ "${line:0:1}" = "#" ] || { hashed=false; break; }
+		hashed=true;
+	done
+
+	([ $hashed=true ] || [ $idx -gt $count ]) && { b_done=true; return 1; }
+	$uscmtstartline=$idx
+	return 0
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  show_next_cherrypick
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  $1 - if contains "status", then it's a status only call
 #       GLOBALS:  uscommitsfile
 #                 uscmtstartline
+#                 b_nomore
 #       RETURNS:  none
 #===============================================================================
 show_next_cherrypick() {
@@ -757,15 +731,13 @@ show_next_cherrypick() {
 
 	[[ -f $uscommitsfile ]] || return 1
 
-	linecount=$(cat $uscommitsfile | wc -l)
 	startcmt="$(ui_readline $uscmtstartline $uscommitsfile)"
-	eofstr="$lastupcmt is last of $uscommitsfile"
+	eofstr="$lastupcmt was last commit in $uscommitsfile"
 
 	[ "$1" ] && statstr="    Next commit to cherrypick    :" \
 	         || statstr=" c  Next commit to cherrypick    :"
 
-	[ $uscmtstartline -gt $linecount ] \
-			&& prstr="$eofstr" || prstr="${startcmt:0:$cols}"
+	[ $b_nomore ] && prstr="$eofstr" || prstr="${startcmt:0:$cols}"
 
 	local show_next_cherrypick_str=$(
 cat <<EOF
@@ -830,22 +802,6 @@ EOF
 
 }
 
-#===  FUNCTION  ================================================================
-#          NAME:  show_downstream_patchset_head
-#   DESCRIPTION:  Show the start commit for the downstream patch set
-#    PARAMETERS:  none
-#       RETURNS:  none
-#===============================================================================
-show_downstream_patchset_head() {
-	local cols=$((tcols - menupad))
-	local dscmtstr=$(
-cat <<EOF
- D  : from downstream commit     : $OFF${dspshead:0:$cols}$BLD
-EOF
-)
-	$b_create_patchset && echo -e "$dscmtstr"
-}
-
 #===  FUNCTION  ===============================================================
 #          NAME:  show_status
 #   DESCRIPTION:  show the current status
@@ -869,7 +825,7 @@ show_status() {
 
 	init_prj_file
 	[ $? -eq 0 ] || {
-		echo -e "The roject file is inconsistant.\n$newstr"
+		echo -e "The project file is inconsistant.\n$newstr"
 		return 1
 	}
 
@@ -883,7 +839,7 @@ cat <<EOF
 $BLD
     File of upstream commits     : $OFF$uscommitsfile$BLD\
 $(show_most_recent_cherrypick)\
-$(show_next_cherrypick stat)
+$(show_next_cherrypick getstat)
     Current downstream branch    : $OFF$(get_gitbranch)$BLD
     Current downstream head      : $OFF${lastbrcmt:0:cols}$BLD
 \0
@@ -998,7 +954,7 @@ function menu_loop {
 	cmtmsgfile=""$workdir"gcpcommitmessage"
 	uscommitsfile=$(prj_get_item $prj_uscommits)
 	dscommitsfile=$(prj_get_item $prj_dscommits)
-	lastuphash=$(prj_get_item $prj_lastupcmt)
+	lastuphash=$(prj_get_item $prj_lastuphash)
 
 	while $true; do
 		menu_parser
@@ -1088,35 +1044,25 @@ function abort_gitcherrypick() {
 
 #===  FUNCTION  ================================================================
 #          NAME:  cherrypick
-#   DESCRIPTION:  Given a commit, process it using the global variables
-#    PARAMETERS:  $1 - commit
-#       GLOBALS:  b_shellcommit
-#		  b_shellcommit_discard
-#		  b_autocommit_abort
-#		  cmtmsgfile
-#		  str_cmtmsg
-#		  str_shellmsg
-#		  str_extcmt_query
-#		  str_noconflicts
-#		  str_conflicts
-#		  str_abort
+#   DESCRIPTION:  Given a commit, try to cherry pick it
+#    PARAMETERS:  $1 - uphash
+#       GLOBALS:  cmtmsgfile
+#                 commit
+#                 tcols
+#                 prj_lastuphash
+#                 b_conflict
+#                 prj_b_conflict
 #       RETURNS:  non-zero if something went wrong
 #===============================================================================
 cherrypick() {
 
-	local commit=$1
-	local conflicts=false
-	local spawnshell
-	local description
-	local callstat
+	local uphash=$1
 	local gitstat
+	local wcols=$((tcols - 14))
 
-	b_shellcommit_discard=false
-	b_shellcommit=false
-	b_shellcommit_abort=false
-
-	echo "picking commit: $commit"
-	git cherry-pick "$commit"
+	prj_set_item $prj_lastuphash $uphash
+	echo -e "\nProcessing : ${commit:0:$wcols}"
+	git cherry-pick "$uphash"
 	gitstat=$?
 
 	# If cherry-pick returns with 128, the commit was invalid or
@@ -1129,46 +1075,36 @@ cherrypick() {
 	#
 	[ $gitstat -eq 0 ] || {
 		echo "You have conflicts to fix."
-
-		$b_single && return $gitstat
-
-		if $b_autocommit; then
-			conflicts=true
-		else
-			getyn "Do you want to fix them now?" conflicts
-		fi
+		b_conflict=true
+		prj_set_item $prj_b_conflict $b_conflict
+		return $gitstat
 	}
 
-	$conflicts && resolve_conflicts || str_cmtmsg="$str_noconflicts"
+	return 0;
+}
 
-	# If user typed "exit 1" when exiting the spawned conflict shell,
-	# then s/he wants to discard the current commit and move on to
-	# the next one.
-	#
-	if $b_shellcommit_discard; then
-		echo -e "Discarding commit: $BLD$commit$OFF"
-		git cherry-pick --abort
-		return 0
-	fi
+#===  FUNCTION  ================================================================
+#          NAME:  stage_commit
+#   DESCRIPTION:  Given a commit, process it using the global variables
+#    PARAMETERS:  none
+#       GLOBALS:  b_conflict
+#		  cmtmsgfile
+#		  str_cmtmsg
+#		  str_shellmsg
+#		  str_noconflicts
+#		  str_conflicts
+#		  str_abort
+#       RETURNS:  none
+#===============================================================================
+stage_commit() {
 
-	# If user typed "exit 2" when exiting the external shell, s/he is
-	# signaling that s/he used a different upstream commit.
-	#
-	if $b_shellcommit; then
-		echo -e "$str_extcmt_query"
-		getuser "$str_cpprompt" commit
-	fi
+	local description
+	local uphash
 
-	# If user typed "exit 3" when exiting the external shell, s/he is
-	# signaling that s/he wants to exit this script and leave the repo
-	# with the last
-	#
-	if $b_shellcommit_abort; then
-		echo -e "Commit: $BLD$commit$OFF will not be applied."
-		abort_gitcherrypick $exit_abort
-	fi
+	uphash=$(prj_get_item $prj_lastuphash)
+	b_conflict=$(prj_get_item $prj_b_conflict)
 
-	git commit -aC "$commit"
+	git commit -aC "$uphash"
 
 	# Create the new commit message in a file consisting of ..
 	#	The user of this script as author of the patch
@@ -1179,7 +1115,7 @@ cherrypick() {
 	#	Signed-off-by: line
 	#
 	echo -e "\n" > $cmtmsgfile
-	description=$(git log -n1 "$commit" | head -5 | tail -1)
+	description=$(git log -n1 "$uphash" | head -5 | tail -1)
 
 	# Trim leading whitespace from description line and append
 	# it to the commit message. Also append the standard commit
@@ -1193,7 +1129,7 @@ cherrypick() {
 
 	# Append the original commit message.
 	#
-	git log -n1 "$commit" >> $cmtmsgfile
+	git log -n1 "$uphash" >> $cmtmsgfile
 
 	# Amend the commit messsage with you as author, using the
 	# commit message file we built in the previous few lines,
@@ -1204,15 +1140,88 @@ cherrypick() {
 	# If there are conflicts, give the user the option to edit
 	# the commit log.
 	#
-	($conflicts || (! $b_autocommit)) && edit_commit
+	$b_conflict && edit_commit
 
 	# Write the new commit into the backport commits file.
 	#
 	git log -n1 --oneline >> "$dscommitsfile"
 
-	prj_set_item $prj_lastupcmt $commit
+	$b_conflict=false
+	prj_set_item $prj_b_conflict $b_conflict
+}
 
-	return 0
+#===  FUNCTION  ================================================================
+#          NAME:  count_prj_items
+#   DESCRIPTION:  Count the items in the project file and find the index to the
+#                 booleans
+#    PARAMETERS:  none
+#       GLOBALS:  All the stick project variables and their indexes
+#                 prj_entries
+#                 boolindex
+#       RETURNS:  none
+#===============================================================================
+count_prj_items() {
+	local boolcount=0
+	local b_found_first_bool=false
+	local index
+
+	# Init ui items
+	# -------------
+	# This loop enumerates and counts the items that will be stored in the
+	# project file. It also declares the boolean names whose values are stored
+	# in the project file and assigns values to them.
+	#
+	# Add new booleans to the end of the list.
+	# Add new non-boolean parameters to the top of the list.
+	#
+	for offset in \
+	prj_uscmtstartline \
+	prj_dsorighead \
+	prj_lastuphash \
+	prj_workdir \
+	prj_uscommits \
+	prj_dscommits \
+	prj_b_session_active \
+	prj_b_nomore \
+	; do
+		# The prj_set_item() function uses 1-based line numbers for indexing
+		# into the project file. We inited the index variable to zero, so
+		# lets start the loop by incrementing the index variable.
+		#
+		let index++
+
+		# Assign the the value of the current loop counter (index) to the
+		# prj file index variable referenced by the offset parameter defined
+		# at the top of the for loop.
+		#
+		let $offset=$index
+
+		if [ "${offset:3:3}" == "_b_" ]; then
+
+			# The name of the boolean variable is the same as the project
+			# file index variable, but with the leading "prj_" removed.
+			#
+			boolname="$(echo ${offset} | cut -d'_' -f2-)"
+			declare $boolname
+
+			# Create a string that contains all the names of the program's
+			# booleans.
+			#
+			ui_bools=""$ui_bools" "$boolname" " # basically a strcat()
+
+			[ "${!boolname}" == " " ] && eval $boolname=false
+			let boolcount++
+			if ! $b_found_first_bool; then
+				boolindex=$index
+				b_found_first_bool=true
+			fi
+		fi
+	done
+
+	# Initialize the prj_entries with the number of ui parameters counted in the
+	# above for-loop and init the project file.
+	#
+	prj_entries=$index
 }
 
 #===  FUNCTION  ================================================================
@@ -1228,108 +1237,60 @@ cherrypick() {
 #===============================================================================
 init_prj_file() {
 
-# Init ui items
-# -------------
-# This loop enumerates and counts the items that will be stored in the
-# project file. It also declares the boolean names whose values are stored
-# in the project file and assigns values to them.
-#
-# Add new booleans to the end of the list.
-# Add new non-boolean parameters to the top of the list.
-#
-for offset in \
-prj_dsorighead \
-prj_lastupcmt \
-prj_workdir \
-prj_uscommits \
-prj_dscommits \
-prj_b_autocommit \
-prj_b_session_active \
-; do
-	# The prj_set_item() function uses 1-based line numbers for indexing
-	# into the project file. We inited the index variable to zero, so
-	# lets start the loop by incrementing the index variable.
+	local stat
+
+	count_prj_items
+
+	[[ -d "$MYDATA" ]] || mkdir $MYDATA
+	[[ -f "$MYPRJ" ]] || touch $MYPRJ
+
+	# Disable blank checking when calling prj_init_prjfile
 	#
-	let index++
+	prj_init_prjfile "$MYPRJ" $prj_entries disable_blank_check
+	stat=$?
 
-	# Assign the the value of the current loop counter (index) to the
-	# prj file index variable referenced by the offset parameter defined
-	# at the top of the for loop.
+	# If the above call to prj_init_prjfile returns nonzero, it means that a
+	# new project file has been created and its values must be initialized.
 	#
-	let $offset=$index
+	if [ $stat -ne 0 ]; then
 
-	if [ "${offset:3:3}" == "_b_" ]; then
-
-		# The name of the boolean variable is the same as the project
-		# file index variable, but with the leading "prj_" removed.
+		# If this is a status call, then return with the status now.
 		#
-		boolname="$(echo ${offset} | cut -d'_' -f2-)"
-		declare $boolname
+		[ "$1" ] && return $stat
 
-		# Create a string that contains all the names of the program's
-		# booleans.
-		#
-		ui_bools=""$ui_bools" "$boolname" " # basically a strcat()
-
-		[ "${!boolname}" == " " ] && eval $boolname=false
-		let boolcount++
-		if ! $b_found_first_bool; then
-			boolindex=$index
-			b_found_first_bool=true
-		fi
+		echo
+		echo "A new project file has been created."
+		echo "We will need to know where your work directory will be. "
+		prj_set_directory "Work" $prj_workdir outdir quiet
+		init_booleans
 	fi
-done
 
-# Initialize the prj_entries with the number of ui parameters counted in the
-# above for-loop and init the project file.
-#
-prj_entries=$index
-[[ -d "$MYDATA" ]] || mkdir $MYDATA
-[[ -f "$MYPRJ" ]] || touch $MYPRJ
-
-# Disable blank checking
-#
-prj_init_prjfile "$MYPRJ" $prj_entries disable_blank_check
-stat=$?
-
-# If the above call to prj_init_prjfile returns nonzero, it means that a
-# new project file has been created and its values must be initialized.
-#
-if [ $stat -ne 0 ]; then
-
-	# If this is a status call, then return with the status now.
+	# If there is no uscommitsfile (cherry-pick commits file) saved, then
+	# go set it now.
 	#
-	[ "$1" ] && return $stat
+	uscommitsfile=$(prj_get_item $prj_uscommits)
+	[[ -f $uscommitsfile ]] || set_uscommitsfile
 
-	echo
-	echo "A new project file has been created."
-	echo "We will need to know where your work directory will be. "
-	prj_set_directory "Work" $prj_workdir outdir quiet
-	init_booleans
-fi
+	# Retrieve the saved boolean values, or defaults if they've not been saved
+	# before.
+	#
+	get_booleans
+}
 
-# If there is no uscommitsfile (cherry-pick commits file) saved, then
-# go set it now.
-#
-uscommitsfile=$(prj_get_item $prj_uscommits)
-[[ -f $uscommitsfile ]] || set_uscommitsfile
+#===  FUNCTION  ================================================================
+#          NAME:  init_new_project
+#   DESCRIPTION:  Clear the sticky values in the project file and set the start
+#                 the cherrypicking from the first commit in the file.
+#    PARAMETERS:  none
+#       GLOBALS:  uscmtstartline
+#       RETURNS:  none
+#===============================================================================
+init_new_project() {
 
-# Initialize the start line to 1. It will be updated in the menu_loop()
-# if the user selects a different commit hash to start with.
-#
-uscmtstartline=1
-
-# Initialize booleans that are not presented in the ui.
-#
-b_shellcommit=false
-b_default_uscommitsfile=true
-b_other_uscommitsfile=false
-
-# Retrieve the saved boolean values, or defaults if they've not been saved
-# before.
-#
-get_booleans
-
+	b_done=false
+	set_uscommitsfile
+	uscmtstartline=0
+	get_next_cherrypick
 }
 
 #############################
@@ -1402,6 +1363,10 @@ else
 			less $MYHLP
 			exit 0
 			;;
+		"--version" )
+			print_herald
+			exit 0
+			;;
 		-- )	shift
 			break
 			;;
@@ -1440,12 +1405,6 @@ fi
 #
 init_prj_file
 
-# Get the current head of the current branch as the starting point for
-# creating the downstream patch set and truncate to fit the number of
-# columns in the current terminal.
-#
-dspshead=$(git log --oneline -n1 -1)
-
 ##############################################
 # Main Program
 ##############################################
@@ -1459,45 +1418,24 @@ print_herald
 getlasttag
 menu_loop
 
-
-if $b_use_uscmtlog; then
-	cpcommitscount=$(cat "$uscommitsfile" | wc -l)
-	echo -n "Upstream commits file: $uscommitsfile "
-	echo "has $cpcommitscount commits to cherry-pick."
-fi
-
 # Init the strings containing dynamic runtime information.
 #
 init_dynstrings
 
-# Export the shmsg function for used in spawned shells.
-#
-export str_shellmsg
-typeset -fx  shmsg
+while :; do
 
-# Set the starting index to the line in the uscommitsfile we want to
-# start cherry-picking.
-#
-index=$uscmtstartline
+	commit="$(ui_readline $uscmtstartline $uscommitsfile)"
+	uphash="$(echo $commit | cut -d' ' -f1)"
+	get_next_cherrypick $uphash
+	gcp=$?
 
-while true; do
-
-	commit=""
-
-	if [ $index -le $cpcommitscount ]; then
-		commit="$(ui_readline $index $uscommitsfile)"
-		[ "${commit:0:1}" == "#" ] && let index++ && continue
-		echo -e "\nProcessing: $commit"
-		commit="$(echo $commit | cut -d' ' -f1)"
-	else
+	if [ $gcp -ne 0 ];then
 		echo -e "No more commits in $BLD$uscommitsfile$OFF"
-		commit=""
 		break
 	fi
 
-	[ "$commit" ] && cherrypick $commit
-	[ $? -eq 0 ] || { echo "Commit $commit is bogus."; break; }
-	let index++
+	[ "$uphash" ] && cherrypick $uphash
+	[ $? -eq 0 ] || { echo "Commit $uphash is bogus."; break; }
 done
 
 echo
@@ -1505,8 +1443,15 @@ echo "Done."
 echo
 exit 0
 
+###############################################################################
 # code below kept for historical reasons
 #
+
+# Export the shmsg function for used in spawned shells.
+#
+export str_shellmsg
+typeset -fx  shmsg
+
 if $b_create_patchset; then
 	dshash=$(echo $dspshead | cut -d' ' -f1)
 	echo "create patchset from $dshash"
@@ -1571,3 +1516,62 @@ if [ $bppatchcount -gt 0 ] && [ $uscommitsfile ]; then
 		git_file2patchset $uscommitsfile $workdir
 	fi
 fi
+
+#===  FUNCTION  ================================================================
+#          NAME:  show_downstream_patchset_head
+#   DESCRIPTION:  Show the start commit for the downstream patch set
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+show_downstream_patchset_head() {
+	local cols=$((tcols - menupad))
+	local dscmtstr=$(
+cat <<EOF
+ D  : from downstream commit     : $OFF${dspshead:0:$cols}$BLD
+EOF
+)
+	$b_create_patchset && echo -e "$dscmtstr"
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  set_downstream_patchset_head
+#   DESCRIPTION:  Sets commit of the downstream branch from which to start the
+#                 creation of a downstream patch set.
+#    PARAMETERS:  none
+#	GLOBALS:  dspshead - Hash of downstream patch set head for generating
+#	                     the downstream patchset.
+#	                     NOTE: The patchset starts with the commit AFTER the
+#	                     downstream patch head. That's the way git-format-
+#	                     patch works.
+#       	  qstr - string containing a boldfaced 'q' for quit
+#       RETURNS:  zero
+#===============================================================================
+set_downstream_patchset_head() {
+	local stat
+	local hash
+	local cols=$((tcols - 9))
+	local cmtlog
+	local notfoundmsg="can't be found in this branch. Try again.\n"
+	local pstr=\
+"$OFF\0Enter hash for start of patchset or $qstr to return to main menu : "
+
+	echo "NOTE: patch set starts at the commit following the one selected."
+
+	while :; do
+		getuser "$pstr" hash
+		[[ "$hash" == "q" ]] && return 1
+		cmtlog=$(git log --oneline -n1 $hash 2>/dev/null)
+		stat=$?
+
+		if [ $stat -ne 0 ]; then
+			echo -en "\nHash $BLD$hash$OFF "
+			echo -e $notfoundmsg
+			continue
+		fi
+		dspshead=$(git log --oneline -n1 $hash)
+		break
+	done
+	return 0
+}
+
+
