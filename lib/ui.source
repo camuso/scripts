@@ -33,6 +33,8 @@ declare -i CTLC_EXIT=130
 declare -i tlines=$(tput lines)	# number of lines in the terminal
 declare -i tcols=$(tput cols)	# number of columns in the terminal
 
+declare qstr="'$BLD\0q$OFF\0'"
+
 #########################
 # Shell Routines
 #########################
@@ -301,13 +303,16 @@ function ui_getfilespec {
 	local filespec
 	local found=false
 	local retval=0
+	local msgretry="Invalid file name."
 
-	echo -e "$BLD\0Please enter a valid filename or empty string to exit.$OFF"
+	msgretry="$msgretry Try again or type $qstr to quit trying: "
 
 	while :; do
 		getuser "$prompt" filespec
-		[ "$filespec" ] || { return 1; break; }
-		[ -f "$filespec" ] && { retval=0; break; }
+		[ "$filespec" ] || echo -e "$msgretry"
+		[ "$filespec" = "q" ] && return 1
+		[ -f "$filespec" ] && break
+		echo $filespec
 	done
 
 	eval $2=$filespec
