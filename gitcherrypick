@@ -88,7 +88,6 @@ declare lasthashvalid=false
 declare lastuplog=""
 declare uscmtstartline=1
 declare lasttagfile="/dev/shm/gcplasttag"
-declare qstr="'$BLD\0q$OFF\0'"
 
 declare b_new=false		# new session
 declare b_continue=false	# continue session
@@ -406,13 +405,39 @@ function set_booleans {
 function set_uscommitsfile {
 	local stat
 	local prstr="File containing the upstream commits to be cherry-picked: "
+	local commitsfilemsg=$(
+cat <<EOF
+You can create a file containing the upstream commits to be cherry-picked
+using the following command.
 
-	while :; do
-		ui_getfilespec "$prstr" uscommitsfile
-		stat=$?
-		[ "$uscommitsfile" ] && break
-		echo "No file name given. Please try again."
-	done
+  git log --oneline --reverse <commit-expression> [-- path] > <commits-file>
+
+  Example:
+
+  git log --oneline --reverse v4.12..HEAD -- drivers/usb/host > usb-commits.log
+\0
+EOF
+)
+	local exitmsg=$(
+cat <<EOF
+
+You pressed $qstr without providing a file containing the upstream commits
+to be cherry-picked, so we must exit.
+\0
+EOF
+)
+	ui_getfilespec "$prstr" uscommitsfile
+	stat=$?
+
+	if [ $stat -ne 0 ]; then
+		if [ "$uscommitsfile" ]; then
+			echo -e "\nKeeping: $uscommitsfile"
+		else
+			echo -e "$exitmsg"
+			echo -e "$commitsfilemsg"
+			exit 0
+		fi
+	fi
 
 	prj_set_item $prj_uscommits $uscommitsfile
 	return $stat
