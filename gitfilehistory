@@ -27,6 +27,6 @@ usage() {
 	exit $1
 }
 
-[ $# -eq  "$argcount" ] || usage 1
+[ $# -eq  "$argcount" ] || usage 0
 
 git log --date=short --follow --pretty=format:"%<(8)%h %<(32,mtrunc)%ae %ad  %s" $1
