@@ -109,8 +109,8 @@ function prj_set_item {
 
 # prj_set_directory - sets the directory for project files
 #
-# $1 - string containing name or type of the directory
-# $2 - offset into the prjfile where this directory's pathname is stored.
+# $1 - string containing name or prompt for the directory
+# $2 - offset into the prjfile where this directory's path is stored.
 # $3 - returns pathname of directory that contains project files
 # $4 - optional argument to disable querying if equal to "quiet"
 #
@@ -140,14 +140,14 @@ function prj_set_directory {
 
 	if ! $b_quiet ; then
 		if [ -d "$dir" ]; then
-			echo -e "Current "$name" directory: "$attr_bold""$dir""$attr_OFF""
+			echo -e "Current $name directory: $BLD$dir$OFF"
 			getyn "Change this directory?" b_chdir
 		fi
 
 		if $b_chdir; then
 			b_newdir=true
 		else
-			echo -e "You have chosen to re-use "$attr_bold""$dir""$attr_OFF""
+			echo -e "You have chosen to re-use $BLD$dir$OFF"
 			echo "Contents of the directory may be altered."
 			b_newdir=false
 		fi
@@ -155,8 +155,10 @@ function prj_set_directory {
 
 	if $b_newdir; then
 		ui_getnewdir "New $name directory: " dir
-		# echo -e "New "$prompt" directory is "$attr_bold""$dir""$attr_OFF""
-		$b_quiet && b_yes=true || getyn "Remember this "$name" directory?" b_yes
+		[ "$dir" ] || return
+
+		# echo -e "New "$prompt" directory is $BLD$dir$OFF"
+		$b_quiet && b_yes=true || getyn "Remember this $name directory?" b_yes
 		$b_yes && ui_replaceline $offset "$dir" "$prjfile"
 		[ -d "$dir" ] ||  mkdir -p "$dir"
 	fi

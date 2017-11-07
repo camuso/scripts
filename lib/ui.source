@@ -34,6 +34,7 @@ declare -i tlines=$(tput lines)	# number of lines in the terminal
 declare -i tcols=$(tput cols)	# number of columns in the terminal
 
 declare qstr="'$BLD\0q$OFF\0'"
+declare msgretry="$msgretry Try again or type $qstr to quit trying: "
 
 #########################
 # Shell Routines
@@ -303,13 +304,11 @@ function ui_getfilespec {
 	local filespec
 	local found=false
 	local retval=0
-	local msgretry="Invalid file name."
-
-	msgretry="$msgretry Try again or type $qstr to quit trying: "
+	local msginvfilnam="Invalid file name. $msgretry"
 
 	while :; do
 		getuser "$prompt" filespec
-		[ "$filespec" ] || echo -e "$msgretry"
+		[ "$filespec" ] || echo -e "$msginvfilnam"
 		[ "$filespec" = "q" ] && return 1
 		[ -f "$filespec" ] && break
 		echo $filespec
@@ -322,14 +321,17 @@ function ui_getfilespec {
 # ui_chkdir "$string"
 # where string is a string representation of a directory
 # returns
-#	0 if directory does not exist
-#	1 if the string exists as a file
-#	2 if the string exists as a directory
+#	0 if the string exists as a valid directory
+#	1 if directory does not exist
+#	2 if the string exists as a file
+#	3 if the string is "q" for "quit trying"
+#	4 if the string was empty
 #
 function ui_chkdir {
-	[ "$1" ]    || return 3
-	[ -d "$1" ] && return 2
-	[ -f "$1" ] && return 1
+	[ "$1" ]      || return 4
+	[ "$1" = "q" ] && return 3
+	[ -d "$1" ]   && return 2
+	[ -f "$1" ]   && return 1
 	return 0
 }
 
@@ -358,15 +360,17 @@ function ui_getnewdir {
 		local stat=$?
 
 		case $stat in
-		1 )	echo "\""$newdir"\" already exists as a file."
+		1 )	echo -e "\"$newdir\" already exists as a file. $msgretry"
 			;;
-		2 ) 	eval $2="$newdir"
+		2   ) 	eval $2="$newdir"	# valid existing directory
 			return $stat
 			;;
-		3 )	echo "No directory selected."
-			return $stat
+		3 )	# echo "ui_getnewdir: newdir: $newdir"
+			return $stat	# user wants to quit trying
 			;;
-		0 )	echo "\""$newdir"\" does not exist."
+		4 )	echo -e "No directory selected. $msgretry"
+			;;
+		0 )	echo "\"$newdir\" does not exist."
 			getyn "Want to create "$newdir" now?" ans
 			if $ans; then
 				mkdir -p "$newdir"
@@ -383,6 +387,7 @@ function ui_getnewdir {
 			;;
 		esac
 	done
+
 }
 
 function ui_testdir {
