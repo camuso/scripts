@@ -161,7 +161,7 @@ Spawning a new shell so you can edit conflicts.
 	exit this shell. The cherry-pick will be aborted, no commit message
 	will be created, and the state of the repo will return to that of
 	the last successfull commit.
-
+	# valid existing directory
 	Type $BLD\0shmsg$OFF at the command prompt of the new shell to
 	see this message again.
 "
@@ -392,6 +392,32 @@ function set_booleans {
 	done
 	return 0
 }
+
+#===  FUNCTION  ================================================================
+#          NAME:  set_working_directory
+#   DESCRIPTION:  Set the working directory for the script's output.
+#    PARAMETERS:  none
+#       GLOBALS:  workdir
+#       RETURNS:  none
+#===============================================================================
+set_working_directory() {
+	local msgnodir=$(
+cat <<EOF
+You have not chosen a work directory, so we must exit.
+\0
+EOF
+)
+
+	prj_set_directory "working" $prj_workdir workdir quiet
+	[ "$workdir" ] && return
+
+	# We got here because no valid working directory was set. Only thing
+	# we can do at this point is exit.
+	#
+	echo -e "$msgnodir"
+	exit 0
+}
+
 
 #===  FUNCTION  ================================================================
 #          NAME:  set_uscommitsfile
@@ -669,21 +695,6 @@ getlasttag() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  init_newsession
-#   DESCRIPTION:  initialize a new session
-#       GLOBALS:
-#    PARAMETERS:  none
-#       RETURNS:  none
-#===============================================================================
-init_newsession() {
-	init_booleans
-	prj_set_directory "working" $prj_workdir workdir quiet
-	set_uscommitsfile
-	set_gitbranch
-	get_booleans
-}
-
-#===  FUNCTION  ================================================================
 #          NAME:  use_last_upstream_hash
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  none
@@ -872,6 +883,7 @@ EOF
 )
 	$b_session_active && echo -e "$statstr"
 }
+
 #===  FUNCTION  ===============================================================
 #          NAME:  show_settings
 #   DESCRIPTION:  show the current settings and present the menu options
@@ -1303,17 +1315,19 @@ init_prj_file() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  init_new_project
-#   DESCRIPTION:  Clear the sticky values in the project file and set the start
-#                 the cherrypicking from the first commit in the file.
+#          NAME:  init_newsession
+#   DESCRIPTION:  initialize a new session
+#       GLOBALS:
 #    PARAMETERS:  none
-#       GLOBALS:  uscmtstartline
 #       RETURNS:  none
 #===============================================================================
-init_new_project() {
-
+init_newsession() {
 	b_done=false
+	init_booleans
+	set_working_directory
 	set_uscommitsfile
+	set_gitbranch
+	get_booleans
 	uscmtstartline=0
 	get_next_cherrypick
 }
@@ -1429,6 +1443,7 @@ fi
 # Init the sticky project variables
 #
 init_prj_file
+$b_new && init_newsession
 
 ##############################################
 # Main Program
