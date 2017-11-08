@@ -61,15 +61,17 @@ declare boolindex=0	# start of boolean data items in project data file
 #########################################
 # Project Variables
 #########################################
+declare uscmtstartline		# Line in uscommitsfile to start cherrypick
 declare dsorighead		# original downstream head at new session
 declare lastuphash		# most recently applied upstream commit hash
 declare workdir			# scratch directory for the session
 declare uscommitsfile		# File of upstream commits to cherry-pick
 declare dscommitsfile		# File of resulting downstream commits
-declare b_autocommit		# Enable autocommit when true
 declare b_session_active	# session in progress
 declare b_nomore		# no more commits to process in uscommitsfile
 declare b_conflict		# last attempt generated a conflict
+
+declare b_autocommit		# Enable autocommit when true
 
 dscommitsfile="/dev/shm/gcpdscommits"
 
@@ -86,7 +88,6 @@ declare cmtmsgfile
 declare str_cmtmsg
 declare lasthashvalid=false
 declare lastuplog=""
-declare uscmtstartline=1
 declare lasttagfile="/dev/shm/gcplasttag"
 
 declare b_new=false		# new session
@@ -218,8 +219,7 @@ function print_herald {
 #       RETURNS:  None
 #===============================================================================
 function exit_gitcherrypick {
-	set_booleans
-	echo "Exiting with status: $1"
+	save_session
 	exit $1
 }
 
@@ -339,13 +339,15 @@ function exec_boolean {
 function init_booleans {
 	b_nomore=false
 	b_conflict=false
+	b_session_active=true
 
 	prj_set_item $prj_b_nomore $b_nomore
 	prj_set_item $prj_b_conflict $b_conflict
+	prj_set_item $prj_b_session_active $b_session_active
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  get_booleans
+#          NAME:  read_booleans
 #   DESCRIPTION:  Read the values of the program flow control booleans from the
 #   		  project file. If the value has not been initialized, then init
 #   		  to false.
@@ -355,13 +357,7 @@ function init_booleans {
 #    	  CALLS:  prj_get_emptyline
 #       RETURNS:  0
 #===============================================================================
-# get_booleans
-#
-# Read the values of the program flow control booleans from the
-# project file. If the value has not been initialized, then init
-# to false.
-#
-function get_booleans {
+function read_booleans {
 	local index=$boolindex
 	local val
 	local emptyline="$(prj_get_emptyline)"
@@ -376,7 +372,7 @@ function get_booleans {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  set_booleans
+#          NAME:  save_booleans
 #   DESCRIPTION:  Write the current values of the program flow booleans into
 #   		  the project file.
 #    PARAMETERS:  none
@@ -384,7 +380,7 @@ function get_booleans {
 #    		  boolindex
 #       RETURNS:  0
 #===============================================================================
-function set_booleans {
+function save_booleans {
 	local index=$boolindex
 	for bool in $ui_bools; do
 		prj_set_item $index ${!bool}
@@ -401,12 +397,20 @@ function set_booleans {
 #       RETURNS:  none
 #===============================================================================
 set_working_directory() {
+	local dirname="working"
 	local msgnodir=$(
 cat <<EOF
 You have not chosen a work directory, so we must exit.
 \0
 EOF
 )
+	local currentdir=$(
+cat <<EOF
+$OFF\0The current working directory is $BLD$workdir$OFF.
+Press $qstr at the prompt to use this directory
+EOF
+)
+	[ "$workdir" ] && echo -e "$currentdir"
 	prj_set_directory "working" $prj_workdir workdir quiet
 	[ "$workdir" ] && return
 
@@ -429,7 +433,12 @@ EOF
 #===============================================================================
 function set_uscommitsfile {
 	local stat
-	local prstr="File containing the upstream commits to be cherry-picked: "
+	local prstr=$(
+cat <<EOF
+
+Set the file containing the upstream commits to be cherry-picked
+EOF
+)
 	local commitsfilemsg=$(
 cat <<EOF
 You can create a file containing the upstream commits to be cherry-picked
@@ -451,12 +460,19 @@ to be cherry-picked, so we must exit.
 \0
 EOF
 )
-	ui_getfilespec "$prstr" uscommitsfile
+	local currentfile=$(
+cat <<EOF
+$OFF\0The current file is $BLD$uscommitsfile$OFF.
+Press $qstr at the prompt to use this file
+EOF
+)
+	[ "$uscommitsfile" ] && prstr="$prstr\n$currentfile"
+	ui_getfilespec "$prstr : " uscommitsfile
 	stat=$?
 
 	if [ $stat -ne 0 ]; then
 		if [ "$uscommitsfile" ]; then
-			echo -e "\nKeeping: $uscommitsfile"
+			echo -e "Keeping: $BLD$uscommitsfile$OFF"
 		else
 			echo -e "$exitmsg"
 			echo -e "$commitsfilemsg"
@@ -898,6 +914,7 @@ function show_settings {
 	local subjectprefix="$(git config format.subjectprefix)"
 	local lasttag=$(cat $lasttagfile)
 	local lastbrcmt=$(git log -n1 --oneline)
+	local orighead=$(git log --oneline -n1 $dsorighead)
 	local settings=$(
 cat <<EOF
 $attr_bold
@@ -908,6 +925,7 @@ $(show_next_cherrypick)
 
     $UND\0Downstream Environment   $OFF$BLD
     Most recent tag              : $OFF$lasttag$BLD
+    Original Head                : $OFF${orighead:0:cols}$BLD
     Current Head                 : $OFF${lastbrcmt:0:cols}$BLD
  b  Current git branch           : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix       : $OFF$subjectprefix$BLD
@@ -988,11 +1006,7 @@ function menu_loop {
 
 	local stat=0
 
-	workdir=$(prj_get_item $prj_workdir)
 	cmtmsgfile=""$workdir"gcpcommitmessage"
-	uscommitsfile=$(prj_get_item $prj_uscommits)
-	dscommitsfile=$(prj_get_item $prj_dscommits)
-	lastuphash=$(prj_get_item $prj_lastuphash)
 
 	while $true; do
 		menu_parser
@@ -1072,11 +1086,11 @@ function abort_gitcherrypick() {
 	local exitcode=$1
 	local lastdnlog=$(git log --oneline -n1)
 
-	echo -en "$str_abort"
-	echo -e "Upstream  : $BLD${lastuplog:0:60}$OFF"
-	echo -e "Downstream: $BLD${lastdnlog:0:60}$OFF\n"
+	# echo -en "$str_abort"
+	# echo -e "Upstream  : $BLD${lastuplog:0:60}$OFF"
+	# echo -e "Downstream: $BLD${lastdnlog:0:60}$OFF\n"
 	git cherry-pick --abort >/dev/null 2>&1
-	echo -e "\tExiting ..."
+	# echo -e "\tExiting ..."
 	exit_gitcherrypick $exitcode
 }
 
@@ -1263,8 +1277,9 @@ count_prj_items() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  init_prj_file
-#   DESCRIPTION:  Initialize the project file with a call to prj_init_file
+#          NAME:  check_prj_file
+#   DESCRIPTION:  Check the project file status
+#                 If the size changed, then recreate the project file.
 #    PARAMETERS:  $1 statcall, if this is a status call
 #       GLOBALS:  str_abort
 #                 uscommitsfile
@@ -1273,8 +1288,7 @@ count_prj_items() {
 #                 All the sticky project variables
 #       RETURNS:  none
 #===============================================================================
-init_prj_file() {
-
+check_prj_file() {
 	local stat
 
 	count_prj_items
@@ -1301,34 +1315,95 @@ init_prj_file() {
 		echo "We will need to know where your work directory will be. "
 		prj_set_directory "Work" $prj_workdir outdir quiet
 	fi
+}
 
-	# If there is no uscommitsfile (cherry-pick commits file) saved, then
-	# go set it now.
-	#
+#===  FUNCTION  ================================================================
+#          NAME:  save_session
+#   DESCRIPTION:  Save session's project variables to the project file.
+#    PARAMETERS:  $1 statcall, if this is a status call
+#       GLOBALS:  str_abort
+#                 uscommitsfile
+#                 dscommitsfile
+#                 uscmtstartline
+#                 All the sticky project variables
+#       RETURNS:  none
+#===============================================================================
+save_session() {
+	save_booleans
+	prj_set_item $prj_uscmtstartline $uscmtstartline
+	prj_set_item $prj_dsorighead $dsorighead
+	prj_set_item $prj_lastuphash $lastuphash
+	prj_set_item $prj_workdir    $workdir
+	prj_set_item $prj_uscommits  $uscommitsfile
+	prj_set_item $prj_dscommits  $dscommitsfile
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  read_session
+#   DESCRIPTION:  Read the variables stored in the project file
+#                 Some project variables are updated elsewhere, and only need
+#                 to be retrieved at init time and saved at exit time.
+#    PARAMETERS:  none, but lots of side effects
+#       GLOBALS:  workdir
+#                 cmtmsgfile
+#                 uscommitsfile
+#                 dscommitsfile
+#                 prj_workdir
+#                 prj_uscommits
+#                 prj_dscommits
+#       RETURNS:  stat, which is the value returned by the call to menu_parser
+#===============================================================================
+read_session() {
+	uscmtstartline=$(prj_get_item $prj_uscmtstartline)
+	dsorighead=$(prj_get_item $prj_dsorighead)
+	lastuphash=$(prj_get_item $prj_lastuphash)
+	workdir=$(prj_get_item $prj_workdir)
 	uscommitsfile=$(prj_get_item $prj_uscommits)
-	[[ -f $uscommitsfile ]] || set_uscommitsfile
+	dscommitsfile=$(prj_get_item $prj_dscommits)
+}
 
-	# Retrieve the saved boolean values, or defaults if they've not been saved
-	# before.
-	#
-	get_booleans
+
+#===  FUNCTION  ================================================================
+#          NAME:  init_session
+#   DESCRIPTION:  Init the continuing session from the saved project variables
+#    PARAMETERS:  $1 statcall, if this is a status call
+#       GLOBALS:  All sesson variables are affected
+#       RETURNS:  none
+#===============================================================================
+init_session() {
+	check_prj_file
+	read_session
+
+	[[ -d $workdir ]] || set_working_directory
+	[[ -f $uscommitsfile ]] || set_uscommitsfile
+	[[ -f $dscommitsfile ]] || set_dscommitsfile
+
+	read_booleans
 }
 
 #===  FUNCTION  ================================================================
 #          NAME:  init_newsession
 #   DESCRIPTION:  initialize a new session
-#       GLOBALS:
+#       GLOBALS:  All session variables are affected
 #    PARAMETERS:  none
 #       RETURNS:  none
 #===============================================================================
 init_newsession() {
+	# echo -e "\n$UND\0init_newsession$OFF"
+
+	check_prj_file
+
+	dsorighead=$(git log --oneline -1 | cut -d' ' -f1)
+	prj_set_item $prj_dsorighead $dsorighead
+
 	init_booleans
+	read_session
 	set_working_directory
 	set_uscommitsfile
 	set_gitbranch
 	uscmtstartline=0
 	get_next_cherrypick
-	get_booleans
+	read_booleans
 }
 
 #############################
@@ -1441,8 +1516,7 @@ fi
 
 # Init the sticky project variables
 #
-init_prj_file
-$b_new && init_newsession
+$b_new && init_newsession || init_session
 
 ##############################################
 # Main Program
