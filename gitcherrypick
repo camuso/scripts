@@ -337,6 +337,9 @@ function exec_boolean {
 #       RETURNS:  0
 #===============================================================================
 function init_booleans {
+
+	# echo -e "$UND\0init_booleans$OFF"
+
 	b_nomore=false
 	b_conflict=false
 	b_session_active=true
@@ -410,6 +413,9 @@ $OFF\0The current working directory is $BLD$workdir$OFF.
 Press $qstr at the prompt to use this directory
 EOF
 )
+	# echo -e "$UND\0set_working_directory$OFF"
+
+	echo -e "The working directory is used for scratch by this script."
 	[ "$workdir" ] && echo -e "$currentdir"
 	prj_set_directory "working" $prj_workdir workdir quiet
 	[ "$workdir" ] && return
@@ -466,6 +472,8 @@ $OFF\0The current file is $BLD$uscommitsfile$OFF.
 Press $qstr at the prompt to use this file
 EOF
 )
+	# echo -e "$UND\0set_uscommitsfile$OFF"
+
 	[ "$uscommitsfile" ] && prstr="$prstr\n$currentfile"
 	ui_getfilespec "$prstr : " uscommitsfile
 	stat=$?
@@ -751,15 +759,22 @@ get_next_cherrypick() {
 	local idx
 	local line
 	local count=$(cat $uscommitsfile | wc -l)
-	local hashed=false
+
+	# echo -e "$UND\0get_next_cherrypick$OFF start line: $uscmtstartline"
 
 	for ((idx=(uscmtstartline + 1); i <= count; ++idx)); do
 		line="$(ui_readline $idx $uscommitsfile)"
-		[ "${line:0:1}" = "#" ] || { hashed=false; break; }
-		hashed=true;
+		[ "${line:0:1}" = "#" ] || break
 	done
 
-	($hashed || [ $idx -gt $count ]) && { b_nomore=true; return 1; }
+	echo "idx: $idx"
+
+	if [ $idx -gt $count ]; then
+		echo "setting b_nomore true"
+		b_nomore=true
+		return 1
+	fi
+
 	uscmtstartline=$idx
 	prj_set_item $prj_uscmtstartline $uscmtstartline
 
@@ -867,20 +882,28 @@ show_status() {
 	local cols=$((tcols - menupad))
 	local subjectprefix="$(git config format.subjectprefix)"
 	local lasttag=$(cat $lasttagfile)
-	local lastbrcmt=$(git log -n1 --oneline)
+	local lastbrcmt
+	local orighead=
 	local newstr="Please type $BLD$MYNAME --new$OFF to start.\n"
 	local statstr
+
+	# echo -e "$UND\0show_status$OFF"
 
 	[ -f $MYPRJ ] || {
 		echo -e "There is no project file.\n$newstr"
 		return 1
 	}
 
-	init_prj_file
+	read_session "statcall"
+
 	[ $? -eq 0 ] || {
 		echo -e "The project file is inconsistant.\n$newstr"
 		return 1
 	}
+
+
+	lastbrcmt=$(git log -n1 --oneline)
+	orighead=$(git log --oneline -n1)
 
 	[ "$uscommitsfile" ] || {
 		echo -e "There is no file of commits to cherrypick.\n$newstr"
@@ -1217,6 +1240,7 @@ count_prj_items() {
 	local b_found_first_bool=false
 	local index
 
+	# echo -e "$UND\0count_prj_items$OFF"
 	# Init ui items
 	# -------------
 	# This loop enumerates and counts the items that will be stored in the
@@ -1235,6 +1259,7 @@ count_prj_items() {
 	prj_dscommits \
 	prj_b_session_active \
 	prj_b_nomore \
+	prj_b_conflict \
 	; do
 		# The prj_set_item() function uses 1-based line numbers for indexing
 		# into the project file. We inited the index variable to zero, so
@@ -1280,17 +1305,18 @@ count_prj_items() {
 #          NAME:  check_prj_file
 #   DESCRIPTION:  Check the project file status
 #                 If the size changed, then recreate the project file.
-#    PARAMETERS:  $1 statcall, if this is a status call
+#    PARAMETERS:  $1 - non empty string indicates a status call
 #       GLOBALS:  str_abort
 #                 uscommitsfile
 #                 dscommitsfile
 #                 uscmtstartline
 #                 All the sticky project variables
-#       RETURNS:  none
+#       RETURNS:  status from call to prj_init_prjfile
 #===============================================================================
 check_prj_file() {
 	local stat
 
+	# echo -e "$UND\0check_prj_file$OFF"
 	count_prj_items
 
 	[[ -d "$MYDATA" ]] || mkdir $MYDATA
@@ -1312,9 +1338,9 @@ check_prj_file() {
 
 		echo
 		echo "A new project file has been created."
-		echo "We will need to know where your work directory will be. "
-		prj_set_directory "Work" $prj_workdir outdir quiet
 	fi
+
+	return $stat
 }
 
 #===  FUNCTION  ================================================================
@@ -1329,6 +1355,9 @@ check_prj_file() {
 #       RETURNS:  none
 #===============================================================================
 save_session() {
+
+	# echo -e "$UND\0save_session$OFF"
+
 	save_booleans
 	prj_set_item $prj_uscmtstartline $uscmtstartline
 	prj_set_item $prj_dsorighead $dsorighead
@@ -1343,7 +1372,7 @@ save_session() {
 #   DESCRIPTION:  Read the variables stored in the project file
 #                 Some project variables are updated elsewhere, and only need
 #                 to be retrieved at init time and saved at exit time.
-#    PARAMETERS:  none, but lots of side effects
+#    PARAMETERS:  $1 - if not empty indicates a status call
 #       GLOBALS:  workdir
 #                 cmtmsgfile
 #                 uscommitsfile
@@ -1354,12 +1383,22 @@ save_session() {
 #       RETURNS:  stat, which is the value returned by the call to menu_parser
 #===============================================================================
 read_session() {
+	local stat
+
+	# echo -e "$UND\0read_session$OFF"
+	check_prj_file "$1"
+	stat=$?
+
+	read_booleans
+
 	uscmtstartline=$(prj_get_item $prj_uscmtstartline)
 	dsorighead=$(prj_get_item $prj_dsorighead)
 	lastuphash=$(prj_get_item $prj_lastuphash)
 	workdir=$(prj_get_item $prj_workdir)
 	uscommitsfile=$(prj_get_item $prj_uscommits)
 	dscommitsfile=$(prj_get_item $prj_dscommits)
+
+	return $stat
 }
 
 
@@ -1371,7 +1410,8 @@ read_session() {
 #       RETURNS:  none
 #===============================================================================
 init_session() {
-	check_prj_file
+
+	# echo -e "$UND\0init_session$OFF"
 	read_session
 
 	[[ -d $workdir ]] || set_working_directory
@@ -1389,15 +1429,14 @@ init_session() {
 #       RETURNS:  none
 #===============================================================================
 init_newsession() {
-	# echo -e "\n$UND\0init_newsession$OFF"
+	echo -e "\n$UND\0init_newsession$OFF"
 
-	check_prj_file
+	read_session
 
 	dsorighead=$(git log --oneline -1 | cut -d' ' -f1)
 	prj_set_item $prj_dsorighead $dsorighead
 
 	init_booleans
-	read_session
 	set_working_directory
 	set_uscommitsfile
 	set_gitbranch
@@ -1456,10 +1495,12 @@ else
 		"--new" )
 			b_new=true
 			shift
+			break
 			;;
 		-c | "--continue" )
 			b_continue=true
 			shift
+			break
 			;;
 		-p | "--pick" )
 			b_single=true
@@ -1469,7 +1510,6 @@ else
 			;;
 		-s | "--status" )
 			show_status
-			shift 1
 			exit 0
 			;;
 		-h | "--help" 	)
@@ -1507,7 +1547,8 @@ fi
 
 if ($b_continue && ! $b_session_active); then
 	echo -e "\nNo session in progress.\n"\
-	"Select the \"$BLD\0N$OFF\" menu item to start a new session\n"
+	"Select the \"$BLD\0N$OFF\" menu item to start a new session\n"\
+	"or type $BLD$MYNAME$OFF --new\n"
 fi
 
 ###########################################
