@@ -329,7 +329,7 @@ function exec_boolean {
 
 #===  FUNCTION  ================================================================
 #          NAME:  init_booleans
-#   DESCRIPTION:  Initialize all booleans in the ui_bools list to "true"
+#   DESCRIPTION:  Initialize the booleans for a new session
 #    PARAMETERS:  Global symbols:
 #    			ui_bools
 #    			boolindex
@@ -337,11 +337,11 @@ function exec_boolean {
 #       RETURNS:  0
 #===============================================================================
 function init_booleans {
-	local index=$boolindex
-	for bool in $ui_bools; do
-		prj_set_item $index true
-		let index++
-	done
+	b_nomore=false
+	b_conflict=false
+
+	prj_set_item $prj_b_nomore $b_nomore
+	prj_set_item $prj_b_conflict $b_conflict
 }
 
 #===  FUNCTION  ================================================================
@@ -407,7 +407,6 @@ You have not chosen a work directory, so we must exit.
 \0
 EOF
 )
-
 	prj_set_directory "working" $prj_workdir workdir quiet
 	[ "$workdir" ] && return
 
@@ -744,8 +743,10 @@ get_next_cherrypick() {
 		hashed=true;
 	done
 
-	([ $hashed=true ] || [ $idx -gt $count ]) && { b_done=true; return 1; }
-	$uscmtstartline=$idx
+	($hashed || [ $idx -gt $count ]) && { b_nomore=true; return 1; }
+	uscmtstartline=$idx
+	prj_set_item $prj_uscmtstartline $uscmtstartline
+
 	return 0
 }
 
@@ -773,7 +774,7 @@ show_next_cherrypick() {
 	[ "$1" ] && statstr="    Next commit to cherrypick    :" \
 	         || statstr=" c  Next commit to cherrypick    :"
 
-	[ $b_nomore ] && prstr="$eofstr" || prstr="${startcmt:0:$cols}"
+	$b_nomore && prstr="$eofstr" || prstr="${startcmt:0:$cols}"
 
 	local show_next_cherrypick_str=$(
 cat <<EOF
@@ -1299,7 +1300,6 @@ init_prj_file() {
 		echo "A new project file has been created."
 		echo "We will need to know where your work directory will be. "
 		prj_set_directory "Work" $prj_workdir outdir quiet
-		init_booleans
 	fi
 
 	# If there is no uscommitsfile (cherry-pick commits file) saved, then
@@ -1322,14 +1322,13 @@ init_prj_file() {
 #       RETURNS:  none
 #===============================================================================
 init_newsession() {
-	b_done=false
 	init_booleans
 	set_working_directory
 	set_uscommitsfile
 	set_gitbranch
-	get_booleans
 	uscmtstartline=0
 	get_next_cherrypick
+	get_booleans
 }
 
 #############################
