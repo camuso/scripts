@@ -1,4 +1,4 @@
-gitcherrypick
+cherp
 -------------
 
 Type 'q' at any time to exit this help.
@@ -151,14 +151,14 @@ Session Capture:
 	To capture all input and output from this session, quit now and
 	restart with the following command.
 
-		gitcherrypick script.sh 3>&2>&1 | tee gitcherrypick.log
+		cherp script.sh 3>&2>&1 | tee cherp.log
 
 	You can also use "script" to capture your session. This will
 	capture all activity, including activity in spawned shells.
 
-		script -c gitcherrypick gitcherrypick.log
+		script -c cherp cherp.log
 
 	To enjoy enhanced input editing capabilities, use \"rlwrap\".
 
-		rlwrap gitcherrypick
+		rlwrap cherp
 
