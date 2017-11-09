@@ -45,14 +45,14 @@ declare exit_abort=1	# Abort cherrypick and exit
 #########################################
 # Project Variable offsets into prj file
 #########################################
-declare prj_uscmtstartline	# current starting line in the commit file
-declare prj_dsorighead		# original git head of current session
+declare prj_upcmtstartline	# current starting line in the commit file
+declare prj_dnorighead		# original git head of current session
 declare prj_lastuphash		# most recently applied upstream commit
 declare prj_workdir		# scratch directory for the session
-declare prj_uscommits		# file containing list of upstream commits
-declare prj_dscommits		# file to receive list of downstream commits
+declare prj_upcommits		# file containing list of upstream commits
+declare prj_dncommits		# file to receive list of downstream commits
 declare prj_b_session_active	# session in progress
-declare prj_b_nomore		# no more commits to process in uscommitsfile
+declare prj_b_nomore		# no more commits to process in upcommitsfile
 declare prj_b_conflict		# last attempt generated a conflict
 
 declare prj_entries=0	# number of entries in the project data file
@@ -61,19 +61,21 @@ declare boolindex=0	# start of boolean data items in project data file
 #########################################
 # Project Variables
 #########################################
-declare uscmtstartline		# Line in uscommitsfile to start cherrypick
-declare dsorighead		# original downstream head at new session
+declare upcmtstartline		# Line in upcommitsfile to start cherrypick
+declare dnorighead		# original downstream head at new session
 declare lastuphash		# most recently applied upstream commit hash
 declare workdir			# scratch directory for the session
-declare uscommitsfile		# File of upstream commits to cherry-pick
-declare dscommitsfile		# File of resulting downstream commits
+declare upcommitsfile		# File of upstream commits to cherry-pick
+declare dnappliedfile		# File of resulting downstream commits
+declare us
 declare b_session_active	# session in progress
-declare b_nomore		# no more commits to process in uscommitsfile
+declare b_nomore		# no more commits to process in upcommitsfile
 declare b_conflict		# last attempt generated a conflict
 
 declare b_autocommit		# Enable autocommit when true
 
-dscommitsdefault="gcpdscommits"
+dncommitsdefault="gcpdnapplied"
+upapplieddefault="gcpupapplied"
 
 #########################################
 # Global Variables
@@ -133,8 +135,8 @@ declare str_abort
 #       GLOBALS:  str_shellmsg
 #                 str_extcmt_query
 #                 str_extcmt_validate
-#                 uscommitsfile
-#                 dscommitsfile
+#                 upcommitsfile
+#                 dnappliedfile
 #       RETURNS:  None
 #===============================================================================
 init_dynstrings() {
@@ -155,8 +157,8 @@ Spawning a new shell so you can edit conflicts.
 	Type $BLD\0exit 2$OFF if you used a different upstream commit in this shell
 	session. You will be prompted for that upstream commit. Be sure to
 	manually update the following session logfiles accordingly.
-	File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
-	File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
+	File of upstream commits to cherrypick :$BLD $upcommitsfile$OFF
+	File of resulting Downstream commits   :$BLD $dnappliedfile$OFF
 
 	Type $BLD\0exit 3$OFF if you want to abort the gitcherrypick process when you
 	exit this shell. The cherry-pick will be aborted, no commit message
@@ -185,8 +187,8 @@ when you were executing in an external shell. Please enter that commit now."
 str_extcmt_validate="
 You signaled that you have completed the commits in an extermal shell and
 have updated the following commits files accordingly
-File of upstream commits to cherrypick :$BLD $uscommitsfile$OFF
-File of resulting Downstream commits   :$BLD $dscommitsfile$OFF
+File of upstream commits to cherrypick :$BLD $upcommitsfile$OFF
+File of resulting Downstream commits   :$BLD $dnappliedfile$OFF
 
 If you want to exit to a shell to take care of unfinished business, or to
 recheck your work, press \"x\" now, or any other key to continue. "
@@ -429,15 +431,15 @@ EOF
 
 
 #===  FUNCTION  ================================================================
-#          NAME:  set_uscommitsfile
+#          NAME:  set_upcommitsfile
 #   DESCRIPTION:  Sets the name of the file that contains the commits to
 #                 be cherrypicked.
 #    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile - file containing the commits to be cherrypicked
-#       	  prj_uscommits - offset into project file for uscommitsfile
+#       GLOBALS:  upcommitsfile - file containing the commits to be cherrypicked
+#       	  prj_upcommits - offset into project file for upcommitsfile
 #       RETURNS:  status of call to ui_getfilespec()
 #===============================================================================
-function set_uscommitsfile {
+function set_upcommitsfile {
 	local stat
 	local prstr=$(
 cat <<EOF
@@ -468,19 +470,19 @@ EOF
 )
 	local currentfile=$(
 cat <<EOF
-$OFF\0The current file is $BLD$uscommitsfile$OFF.
+$OFF\0The current file is $BLD$upcommitsfile$OFF.
 Press $qstr at the prompt to use this file
 EOF
 )
-	# echo -e "$UND\0set_uscommitsfile$OFF"
+	# echo -e "$UND\0set_upcommitsfile$OFF"
 
-	[ "$uscommitsfile" ] && prstr="$prstr.\n$currentfile"
-	ui_getfilespec "$prstr : " uscommitsfile
+	[ "$upcommitsfile" ] && prstr="$prstr.\n$currentfile"
+	ui_getfilespec "$prstr : " upcommitsfile
 	stat=$?
 
 	if [ $stat -ne 0 ]; then
-		if [ "$uscommitsfile" ]; then
-			echo -e "Keeping: $BLD$uscommitsfile$OFF"
+		if [ "$upcommitsfile" ]; then
+			echo -e "Keeping: $BLD$upcommitsfile$OFF"
 		else
 			echo -e "$exitmsg"
 			echo -e "$commitsfilemsg"
@@ -488,22 +490,22 @@ EOF
 		fi
 	fi
 
-	prj_set_item $prj_uscommits $uscommitsfile
+	prj_set_item $prj_upcommits $upcommitsfile
 	return $stat
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  set_dscommitsfile
+#          NAME:  set_dnappliedfile
 #   DESCRIPTION:  Sets the name of the file that will contain the new commits
 #                 resulting from those that were cherry-picked.
 #    PARAMETERS:  none
-#	GLOBALS:  dscommitsfile - file containing the new commits resulting from
+#	GLOBALS:  dnappliedfile - file containing the new commits resulting from
 #	                          those that were cherry-picked
 #	          b_use_dscmtlog - boolean set true if the filename is not ""
-#	          prj_dscommits  - offset into project file for dscommitsfile
-#       RETURNS:  1 if no dscommitsfile, else 0
+#	          prj_dncommits  - offset into project file for dnappliedfile
+#       RETURNS:  1 if no dnappliedfile, else 0
 #===============================================================================
-set_dscommitsfile() {
+set_dnappliedfile() {
 	local stat
 	local prstr=$(
 cat <<EOF
@@ -513,33 +515,33 @@ EOF
 )
 	local currentfile=$(
 cat <<EOF
-$OFF\0The current file is $BLD$dscommitsfile$OFF.
+$OFF\0The current file is $BLD$dnappliedfile$OFF.
 Press $qstr at the prompt to use this file
 EOF
 )
 	local defaultmsg=$(
 cat <<EOF
-Using the default file: $BLD$workdir/$dscommitsdefault$OFF
+Using the default file: $BLD$workdir/$dncommitsdefault$OFF
 EOF
 )
 
-	# echo -e "$UND\0set_dscommitsfile$OFF"
+	# echo -e "$UND\0set_dnappliedfile$OFF"
 
-	[ "$dscommitsfile" ] && prstr="$prstr.\n$currentfile"
-	ui_getfilespec "$prstr : " dscommitsfile
+	[ "$dnappliedfile" ] && prstr="$prstr.\n$currentfile"
+	ui_getfilespec "$prstr : " dnappliedfile
 	stat=$?
 
 	if [ $stat -ne 0 ]; then
-		if [ "$dscommitsfile" ]; then
-			echo -e "Keeping: $BLD$dscommitsfile$OFF"
+		if [ "$dnappliedfile" ]; then
+			echo -e "Keeping: $BLD$dnappliedfile$OFF"
 		else
-			dscommitsfile=$workdir/$dscommitsdefault
+			dnappliedfile=$workdir/$dncommitsdefault
 			echo -e "$defaultmsg"
 		fi
 	fi
 
-	> $dscommitsfile
-	prj_set_item $prj_dscommits $dscommitsfile
+	> $dnappliedfile
+	prj_set_item $prj_dncommits $dnappliedfile
 	return 0
 }
 
@@ -548,14 +550,14 @@ EOF
 #   DESCRIPTION:  Prints message indicating the hash can't be found in the file
 #                 containing the upstream commits.
 #    PARAMETERS:  $1 - hash
-#       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
+#       GLOBALS:  upcommitsfile - file of upstream commits to cherrypick
 #       RETURNS:  none
 #===============================================================================
 pr_nohash_msg () {
 	local hash="$1"
 	local nohash_msg=$(
 cat <<EOF
-  Can't find $BLD$hash$OFF as a commit or valid line number in $BLD$uscommitsfile$OFF
+  Can't find $BLD$hash$OFF as a commit or valid line number in $BLD$upcommitsfile$OFF
   Lines having a '$BLD\0#$OFF' as their first character are not listed or considered.
   Try again or type '$BLD\0q$OFF' to return to main menu.
 EOF
@@ -569,18 +571,18 @@ EOF
 #    PARAMETERS:  $1 - hash
 #                 $2 - will return the number of the line in the commits file
 #                      that has the hash.
-#       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
+#       GLOBALS:  upcommitsfile - file of upstream commits to cherrypick
 #       RETURNS:  nonzero if lookup fails
 #===============================================================================
 lookup_hash() {
 	local hash=$1
 	local counter
-	local linecount=$(cat $uscommitsfile | wc -l)
+	local linecount=$(cat $upcommitsfile | wc -l)
 	local line
 
-	[[ -f $uscommitsfile ]] || return 1
+	[[ -f $upcommitsfile ]] || return 1
 
-	counter=$(grep -m1 -n ^$hash "$uscommitsfile" | cut -d':' -f1)
+	counter=$(grep -m1 -n ^$hash "$upcommitsfile" | cut -d':' -f1)
 
 	[ -z "$counter" ] && return 1
 
@@ -590,10 +592,10 @@ lookup_hash() {
 
 #===  FUNCTION  ================================================================
 #          NAME:  set_next_cherrypick
-#   DESCRIPTION:  Select the starting commit from the uscommitsfile.
+#   DESCRIPTION:  Select the starting commit from the upcommitsfile.
 #    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile - file of upstream commits to cherrypick
-#                 uscmtstartline- starting line for uscommitsfile
+#       GLOBALS:  upcommitsfile - file of upstream commits to cherrypick
+#                 upcmtstartline- starting line for upcommitsfile
 #                 tlines        - number of lines in the terminal window
 #                 tcols         - number of columns in the terminal window
 #                 qstr          - string with a boldfaced 'q'
@@ -605,7 +607,7 @@ set_next_cherrypick() {
 	local linary
 	local idx=0
 	local stat
-	local linecount=$(cat $uscommitsfile | wc -l)
+	local linecount=$(cat $upcommitsfile | wc -l)
 	local numwid=${#linecount}
 	local cols=$((tcols - 2 - $numwid))
 	local selectedcommit
@@ -617,7 +619,7 @@ EOF
 )
 	echo -e "\n$BLD\0NOTE:$OFF Skipping lines with a leading '$BLD\0#$OFF'.\n"
 
-	# Dump the contents of the uscommitsfile
+	# Dump the contents of the upcommitsfile
 	#
 	while read line; do
 		let counter++
@@ -626,7 +628,7 @@ EOF
 		echo "${line:0:cols}"
 		linary[$idx]=$counter
 		let idx++
-	done < $uscommitsfile
+	done < $upcommitsfile
 
 	# Loop asking for a commit or line number until one is found or the
 	# user enters "q" to quit looking.
@@ -642,16 +644,16 @@ EOF
 		# the linary in the "read line" loop above.
 		#
 		# If we can't find the submitted linenumber or commit hash in
-		# the uscommitsfile, then tell them to try again.
+		# the upcommitsfile, then tell them to try again.
 		#
 		if [ ${#selectedcommit} -ge 7 ]; then
-			lookup_hash $selectedcommit uscmtstartline
+			lookup_hash $selectedcommit upcmtstartline
 			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
 			break
 		else
 			ui_inarray $selectedcommit linary[@]
 			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
-			uscmtstartline=$selectedcommit
+			upcmtstartline=$selectedcommit
 			break
 		fi
 	done
@@ -662,7 +664,7 @@ EOF
 #   DESCRIPTION:  validates whether the hash stored in the project file is
 #                 valid for this instance of gitcherrypick
 #    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile - the cherry-pick commits file containing the
+#       GLOBALS:  upcommitsfile - the cherry-pick commits file containing the
 #                                 hashes of the commits to be backported.
 #                 lasthashvalid - boolean indicating last hash was valid
 #       RETURNS:  nonzero if the last stored hash is not valid
@@ -673,7 +675,7 @@ validate_last_upstream_hash() {
 
 	# If we don't have a commits file, we are interactive, so show nothing
 	#
-	[[ -f $uscommitsfile ]] || lasthashvalid=false
+	[[ -f $upcommitsfile ]] || lasthashvalid=false
 
 	# If there is no hash saved in the project file, then show nothing.
 	#
@@ -682,7 +684,7 @@ validate_last_upstream_hash() {
 	# If the commit stored in the project file is not in the commits file
 	# then show nothing.
 	#
-	grep -m1 -n "$lastuphash" "$uscommitsfile" >/dev/null 2>&1
+	grep -m1 -n "$lastuphash" "$upcommitsfile" >/dev/null 2>&1
 	[ $? -eq 0 ] || lasthashvalid=false
 
 	$lasthashvalid && lastuplog=$(git log -n1 --oneline $lastuphash)
@@ -711,19 +713,19 @@ getlasttag() {
 #   DESCRIPTION:  Gets the next commit in the commits file that doesn't have a
 #                 leading hash.
 #    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile
-#                 uscmtstartline
+#       GLOBALS:  upcommitsfile
+#                 upcmtstartline
 #       RETURNS:  1 if there are no more cherries to pick, else 0
 #===============================================================================
 get_next_cherrypick() {
 	local idx
 	local line
-	local count=$(cat $uscommitsfile | wc -l)
+	local count=$(cat $upcommitsfile | wc -l)
 
-	# echo -e "$UND\0get_next_cherrypick$OFF start line: $uscmtstartline"
+	# echo -e "$UND\0get_next_cherrypick$OFF start line: $upcmtstartline"
 
-	for ((idx=(uscmtstartline + 1); i <= count; ++idx)); do
-		line="$(ui_readline $idx $uscommitsfile)"
+	for ((idx=(upcmtstartline + 1); i <= count; ++idx)); do
+		line="$(ui_readline $idx $upcommitsfile)"
 		[ "${line:0:1}" = "#" ] || break
 	done
 
@@ -733,8 +735,8 @@ get_next_cherrypick() {
 		return 1
 	fi
 
-	uscmtstartline=$idx
-	prj_set_item $prj_uscmtstartline $uscmtstartline
+	upcmtstartline=$idx
+	prj_set_item $prj_upcmtstartline $upcmtstartline
 
 	return 0
 }
@@ -743,8 +745,8 @@ get_next_cherrypick() {
 #          NAME:  show_next_cherrypick
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  $1 - if contains "status", then it's a status only call
-#       GLOBALS:  uscommitsfile
-#                 uscmtstartline
+#       GLOBALS:  upcommitsfile
+#                 upcmtstartline
 #                 b_nomore
 #       RETURNS:  none
 #===============================================================================
@@ -755,10 +757,10 @@ show_next_cherrypick() {
 	local prstr
 	local cols=$((tcols - menupad))
 
-	[[ -f $uscommitsfile ]] || return 1
+	[[ -f $upcommitsfile ]] || return 1
 
-	startcmt="$(ui_readline $uscmtstartline $uscommitsfile)"
-	eofstr="$lastupcmt was last commit in $uscommitsfile"
+	startcmt="$(ui_readline $upcmtstartline $upcommitsfile)"
+	eofstr="$lastupcmt was last commit in $upcommitsfile"
 
 	[ "$1" ] && statstr="    Next commit to cherrypick    :" \
 	         || statstr=" c  Next commit to cherrypick    :"
@@ -779,7 +781,7 @@ EOF
 #          NAME:  show_select_next_cherrypick
 #   DESCRIPTION:  Show option to select a commit from the upstream commits file.
 #    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile
+#       GLOBALS:  upcommitsfile
 #       RETURNS:  none
 #===============================================================================
 show_select_next_cherrypick() {
@@ -789,7 +791,7 @@ cat <<EOF
  S  Select a different commit for next cherrypick$BLD
 EOF
 )
-	[[ -f $uscommitsfile ]] || return 1
+	[[ -f $upcommitsfile ]] || return 1
 	echo -e "$selcmt_str"
 	return 0
 }
@@ -845,7 +847,7 @@ show_status() {
 	lastbrcmt=$(git log -n1 --oneline)
 	orighead=$(git log --oneline -n1)
 
-	[ "$uscommitsfile" ] || {
+	[ "$upcommitsfile" ] || {
 		echo -e "There is no file of commits to cherrypick.\n$newstr"
 		return 1
 	}
@@ -853,7 +855,7 @@ show_status() {
 	statstr=$(
 cat <<EOF
 $BLD
-    File of upstream commits     : $OFF$uscommitsfile$BLD\
+    File of upstream commits     : $OFF$upcommitsfile$BLD\
 $(show_most_recent_cherrypick)\
 $(show_next_cherrypick getstat)
     Current downstream branch    : $OFF$(get_gitbranch)$BLD
@@ -877,12 +879,12 @@ function show_settings {
 	local subjectprefix="$(git config format.subjectprefix)"
 	local lasttag=$(cat $lasttagfile)
 	local lastbrcmt=$(git log -n1 --oneline)
-	local orighead=$(git log --oneline -n1 $dsorighead)
+	local orighead=$(git log --oneline -n1 $dnorighead)
 	local settings=$(
 cat <<EOF
 $attr_bold
     $UND\0Upstream Environment     $OFF$BLD
- u  File of Upstream Commits     : $OFF$uscommitsfile$BLD\
+ u  File of Upstream Commits     : $OFF$upcommitsfile$BLD\
 $(show_most_recent_cherrypick)\
 $(show_next_cherrypick)
 
@@ -893,7 +895,7 @@ $(show_next_cherrypick)
  b  Current git branch           : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix       : $OFF$subjectprefix$BLD
  w  Working directory            : $OFF$workdir$BLD
- d  Log of downstream commits    : $OFF$dscommitsfile$BLD
+ d  Log of downstream commits    : $OFF$dnappliedfile$BLD
     $UND\0Control                  $OFF$BLD
  N  Start a New Session
  p  Pop 'n' commits
@@ -926,9 +928,9 @@ function menu_parser {
 			;;
 		w )	prj_set_directory "working" $prj_workdir workdir quiet
 			;;
-		u )	set_uscommitsfile
+		u )	set_upcommitsfile
 			;;
-		d )	set_dscommitsfile
+		d )	set_dnappliedfile
 			;;
 		c )	set_next_cherrypick
 			;;
@@ -951,11 +953,11 @@ function menu_parser {
 #    PARAMETERS:  none, but lots of side effects
 #       GLOBALS:  workdir
 #                 cmtmsgfile
-#                 uscommitsfile
-#                 dscommitsfile
+#                 upcommitsfile
+#                 dnappliedfile
 #                 prj_workdir
-#                 prj_uscommits
-#                 prj_dscommits
+#                 prj_upcommits
+#                 prj_dncommits
 #       RETURNS:  stat, which is the value returned by the call to menu_parser
 #===============================================================================
 function menu_loop {
@@ -1000,8 +1002,8 @@ edit_commit() {
 #   DESCRIPTION:  Exit the script in an orderly fashion.
 #    PARAMETERS:  $1 - exit code
 #       GLOBALS:  str_abort
-#                 uscommitsfile
-#                 dscommitsfile
+#                 upcommitsfile
+#                 dnappliedfile
 #                 lastuplog
 #       RETURNS:  none
 #===============================================================================
@@ -1018,14 +1020,14 @@ abort_gitcherrypick() {
 #   DESCRIPTION:  Exit the script in an orderly fashion.
 #    PARAMETERS:  $1 - exit code
 #       GLOBALS:  str_abort
-#                 uscommitsfile
-#                 dscommitsfile
+#                 upcommitsfile
+#                 dnappliedfile
 #                 lastuplog
 #       RETURNS:  none
 #===============================================================================
 reset_gitcherrypick() {
 	local cols=$((tcols - 16))
-	local orighead=$(git log --oneline -n1 $dsorighead)
+	local orighead=$(git log --oneline -n1 $dnorighead)
 	local exitcode=$2
 	local headmsg=$(
 cat <<EOF
@@ -1035,7 +1037,7 @@ Resetting to: ${orighead:0:cols}
 EOF
 )
 	git cherry-pick --abort >/dev/null 2>&1
-	git reset --hard $dsorighead
+	git reset --hard $dnorighead
 	exit_gitcherrypick $exitcode
 }
 
@@ -1141,7 +1143,7 @@ stage_commit() {
 
 	# Write the new commit into the backport commits file.
 	#
-	git log -n1 --oneline >> "$dscommitsfile"
+	git log -n1 --oneline >> "$dnappliedfile"
 
 	$b_conflict=false
 	prj_set_item $prj_b_conflict $b_conflict
@@ -1173,12 +1175,12 @@ count_prj_items() {
 	# Add new non-boolean parameters to the top of the list.
 	#
 	for offset in \
-	prj_uscmtstartline \
-	prj_dsorighead \
+	prj_upcmtstartline \
+	prj_dnorighead \
 	prj_lastuphash \
 	prj_workdir \
-	prj_uscommits \
-	prj_dscommits \
+	prj_upcommits \
+	prj_dncommits \
 	prj_b_session_active \
 	prj_b_nomore \
 	prj_b_conflict \
@@ -1229,9 +1231,9 @@ count_prj_items() {
 #                 If the size changed, then recreate the project file.
 #    PARAMETERS:  $1 - non empty string indicates a status call
 #       GLOBALS:  str_abort
-#                 uscommitsfile
-#                 dscommitsfile
-#                 uscmtstartline
+#                 upcommitsfile
+#                 dnappliedfile
+#                 upcmtstartline
 #                 All the sticky project variables
 #       RETURNS:  status from call to prj_init_prjfile
 #===============================================================================
@@ -1270,9 +1272,9 @@ check_prj_file() {
 #   DESCRIPTION:  Save session's project variables to the project file.
 #    PARAMETERS:  $1 statcall, if this is a status call
 #       GLOBALS:  str_abort
-#                 uscommitsfile
-#                 dscommitsfile
-#                 uscmtstartline
+#                 upcommitsfile
+#                 dnappliedfile
+#                 upcmtstartline
 #                 All the sticky project variables
 #       RETURNS:  none
 #===============================================================================
@@ -1281,12 +1283,12 @@ save_session() {
 	# echo -e "$UND\0save_session$OFF"
 
 	save_booleans
-	prj_set_item $prj_uscmtstartline $uscmtstartline
-	prj_set_item $prj_dsorighead $dsorighead
+	prj_set_item $prj_upcmtstartline $upcmtstartline
+	prj_set_item $prj_dnorighead $dnorighead
 	prj_set_item $prj_lastuphash $lastuphash
 	prj_set_item $prj_workdir    $workdir
-	prj_set_item $prj_uscommits  $uscommitsfile
-	prj_set_item $prj_dscommits  $dscommitsfile
+	prj_set_item $prj_upcommits  $upcommitsfile
+	prj_set_item $prj_dncommits  $dnappliedfile
 }
 
 #===  FUNCTION  ================================================================
@@ -1297,11 +1299,11 @@ save_session() {
 #    PARAMETERS:  $1 - if not empty indicates a status call
 #       GLOBALS:  workdir
 #                 cmtmsgfile
-#                 uscommitsfile
-#                 dscommitsfile
+#                 upcommitsfile
+#                 dnappliedfile
 #                 prj_workdir
-#                 prj_uscommits
-#                 prj_dscommits
+#                 prj_upcommits
+#                 prj_dncommits
 #       RETURNS:  stat, which is the value returned by the call to menu_parser
 #===============================================================================
 read_session() {
@@ -1313,12 +1315,12 @@ read_session() {
 
 	read_booleans
 
-	uscmtstartline=$(prj_get_item $prj_uscmtstartline)
-	dsorighead=$(prj_get_item $prj_dsorighead)
+	upcmtstartline=$(prj_get_item $prj_upcmtstartline)
+	dnorighead=$(prj_get_item $prj_dnorighead)
 	lastuphash=$(prj_get_item $prj_lastuphash)
 	workdir=$(prj_get_item $prj_workdir)
-	uscommitsfile=$(prj_get_item $prj_uscommits)
-	dscommitsfile=$(prj_get_item $prj_dscommits)
+	upcommitsfile=$(prj_get_item $prj_upcommits)
+	dnappliedfile=$(prj_get_item $prj_dncommits)
 
 	return $stat
 }
@@ -1337,8 +1339,8 @@ init_session() {
 	read_session
 
 	[[ -d $workdir ]] || set_working_directory
-	[[ -f $uscommitsfile ]] || set_uscommitsfile
-	[[ -f $dscommitsfile ]] || set_dscommitsfile
+	[[ -f $upcommitsfile ]] || set_upcommitsfile
+	[[ -f $dnappliedfile ]] || set_dnappliedfile
 
 	read_booleans
 }
@@ -1355,15 +1357,15 @@ init_newsession() {
 
 	read_session
 
-	dsorighead=$(git log --oneline -1 | cut -d' ' -f1)
-	prj_set_item $prj_dsorighead $dsorighead
+	dnorighead=$(git log --oneline -1 | cut -d' ' -f1)
+	prj_set_item $prj_dnorighead $dnorighead
 
 	init_booleans
 	set_working_directory
-	set_uscommitsfile
-	set_dscommitsfile
+	set_upcommitsfile
+	set_dnappliedfile
 	set_gitbranch
-	uscmtstartline=0
+	upcmtstartline=0
 	get_next_cherrypick
 	read_booleans
 }
@@ -1501,13 +1503,13 @@ init_dynstrings
 
 while :; do
 
-	commit="$(ui_readline $uscmtstartline $uscommitsfile)"
+	commit="$(ui_readline $upcmtstartline $upcommitsfile)"
 	uphash="$(echo $commit | cut -d' ' -f1)"
 	get_next_cherrypick $uphash
 	gcp=$?
 
 	if [ $gcp -ne 0 ];then
-		echo -e "No more commits in $BLD$uscommitsfile$OFF"
+		echo -e "No more commits in $BLD$upcommitsfile$OFF"
 		break
 	fi
 
@@ -1546,8 +1548,8 @@ fi
 # created by cherrypicking into the current git tree, then be sure the
 # file is empty.
 #
-echo "Resulting downstream commits:    "$dscommitsfile""
-$b_use_dscmtlog && cat /dev/null > "$dscommitsfile"
+echo "Resulting downstream commits:    "$dnappliedfile""
+$b_use_dscmtlog && cat /dev/null > "$dnappliedfile"
 
 function check_commitsfile {
 	local commitsfile="$1"
@@ -1578,19 +1580,19 @@ function check_commitsfile {
 		continue
 	fi
 
-if [ $bppatchcount -gt 0 ] && [ $uscommitsfile ]; then
+if [ $bppatchcount -gt 0 ] && [ $upcommitsfile ]; then
 	git log --reverse -n$bppatchcount | grep "    commit" \
-		| cut -d' ' -f6 > $uscommitsfile
+		| cut -d' ' -f6 > $upcommitsfile
 
 	echo
 	echo -e "\tFollowing are the commits you cherry-picked from upstream to"
 	echo -e "\tcreate the backported patch set."
 	echo
-	cat "$uscommitsfile"
+	cat "$upcommitsfile"
 
 	getyn "Create patches from cherry-picked commits?" yes
 	if $yes; then
-		git_file2patchset $uscommitsfile $workdir
+		git_file2patchset $upcommitsfile $workdir
 	fi
 fi
 
@@ -1706,8 +1708,8 @@ EOF
 #          NAME:  use_last_upstream_hash
 #   DESCRIPTION:  Show the upstream commit we will be starting from
 #    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile
-#                 uscmtstartline
+#       GLOBALS:  upcommitsfile
+#                 upcmtstartline
 #                 lasthashlog
 #       RETURNS:  nonzero if last hash invalid
 #===============================================================================
@@ -1716,19 +1718,19 @@ use_last_upstream_hash() {
 	# At this point, validate_last_upstream_hash will have been called,
 	# so that if it is valid, it will show in the main menu.
 	#
-	$lasthashvalid || { warn_lasthashinv; uscmtstartline=1; return 1; }
+	$lasthashvalid || { warn_lasthashinv; upcmtstartline=1; return 1; }
 
 	# If the commit stored in the project file is not in the commits file
-	# then lasthashvalid=false and uscmtstartline=1
+	# then lasthashvalid=false and upcmtstartline=1
 	#
-	uscmtstartline=$(grep -m1 -n "$lastuphash" "$uscommitsfile" | cut -d':' -f1)
-	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
+	upcmtstartline=$(grep -m1 -n "$lastuphash" "$upcommitsfile" | cut -d':' -f1)
+	[ -z "$upcmtstartline" ] && lasthashvalid=false && upcmtstartline=1
 
-	# The grep will return the line in uscommitsfile of the most recent
+	# The grep will return the line in upcommitsfile of the most recent
 	# successfully backported upstream commit. The one we want to start
 	# with is the commit after that.
 	#
-	let uscmtstartline++
+	let upcmtstartline++
 }
 
 #===  FUNCTION  ================================================================
@@ -1738,8 +1740,8 @@ use_last_upstream_hash() {
 #                 part of the current set of upstream hashes to cherrypick.
 #    PARAMETERS:  none
 #       GLOBALS:  lastuplog     - most recently applied commit
-#                 uscommitsfile - file of upstream commits to cherrypick
-#                 uscmtstartline- starting line for uscommitsfile
+#                 upcommitsfile - file of upstream commits to cherrypick
+#                 upcmtstartline- starting line for upcommitsfile
 #       RETURNS:  none
 #===============================================================================
 warn_lasthashinv() {
@@ -1748,7 +1750,7 @@ cat <<EOF
 
   The most recently applied commit: ${lastuplog:0:40}
   is not part of the current set of upstream commmits to be processed as
-  listed in the file: $BLD$uscommitsfile$OFF
+  listed in the file: $BLD$upcommitsfile$OFF
   We will start cherrypicking with the first commit in that file.
 \0
 EOF
@@ -1756,7 +1758,7 @@ EOF
 	local lasthashempstr=$(
 cat <<EOF
   There was no recently applied commit found, so we will start cherrypicking
-  with the first commit in file: $BLD$uscommitsfile$OFF
+  with the first commit in file: $BLD$upcommitsfile$OFF
 \0
 EOF
 )
