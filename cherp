@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# gitcherrypick
+# cherp
 #
 # Provide some automation for cherrypicking.
 #
@@ -23,8 +23,8 @@ declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
 declare MYMAN=$MYDIR/man
 declare MYDATA=.data
-declare MYPRJ=$MYDATA/gitcherrypick.prj
-declare MYHLP=$MYMAN/gitcherrypick.txt
+declare MYPRJ=$MYDATA/cherp.prj
+declare MYHLP=$MYMAN/cherp.txt
 declare MYSHLVL=/dev/shm/gcpshlvl
 declare MYNAME=$(basename $0)
 
@@ -38,7 +38,7 @@ source $MYLIB/project.source
 # Function Return Codes
 ########################################
 declare rc_continue=0	# Continue for another pass
-declare rc_run=1	# Run gitcherrypick
+declare rc_run=1	# Run cherp
 declare exit_good=0	# Normal exit
 declare exit_abort=1	# Abort cherrypick and exit
 declare exit_conflict=2	# Exit with a conflict
@@ -100,7 +100,7 @@ declare b_use_dscmtlog=false
 ########################################
 # Strings
 ########################################
-str_herald="\n"$BLD$UND"gitcherrypick "$VERSION" - Automates cherrypicking$OFF\n"
+str_herald="\n"$BLD$UND"cherp "$VERSION" - Automates git cherry-pick$OFF\n"
 str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
@@ -132,12 +132,12 @@ function print_herald {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  exit_gitcherrypick
+#          NAME:  exit_cherp
 #   DESCRIPTION:  exit this script
 #    PARAMETERS:  None
 #       RETURNS:  None
 #===============================================================================
-function exit_gitcherrypick {
+function exit_cherp {
 	save_session
 	exit $1
 }
@@ -579,7 +579,7 @@ EOF
 #===  FUNCTION  ================================================================
 #          NAME:  validate_last_upstream_hash
 #   DESCRIPTION:  validates whether the hash stored in the project file is
-#                 valid for this instance of gitcherrypick
+#                 valid for this instance of cherp
 #    PARAMETERS:  none
 #       GLOBALS:  upcommitsfile - the cherry-pick commits file containing the
 #                                 hashes of the commits to be backported.
@@ -844,7 +844,7 @@ $(show_next_cherrypick)
  N  Start a New Session
  p  Pop 'n' commits
  s  Show History
- r  Run gitcherrypick
+ r  Run cherp
  q  Quit this script
  h  Help
 $OFF
@@ -883,7 +883,7 @@ function menu_parser {
 			;;
 		h )	less $MYHLP
 			;;
-		q )	exit_gitcherrypick $exit_good
+		q )	exit_cherp $exit_good
 			;;
 		r )	set_booleans
 			run_me
@@ -940,20 +940,20 @@ edit_commit() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  abort_gitcherrypick
+#          NAME:  abort_cherp
 #   DESCRIPTION:  Exit the script in an orderly fashion.
 #    PARAMETERS:  $1 - exit code
 #       GLOBALS:  none
 #       RETURNS:  none
 #===============================================================================
-abort_gitcherrypick() {
+abort_cherp() {
 
 	git cherry-pick --abort >/dev/null 2>&1
-	exit_gitcherrypick $exit_abort
+	exit_cherp $exit_abort
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  reset_gitcherrypick
+#          NAME:  reset_cherp
 #   DESCRIPTION:  Exit the script in an orderly fashion.
 #    PARAMETERS:  $1 - exit code
 #       GLOBALS:  dnorighead
@@ -962,7 +962,7 @@ abort_gitcherrypick() {
 #                 lastuplog
 #       RETURNS:  none
 #===============================================================================
-reset_gitcherrypick() {
+reset_cherp() {
 	local cols=$((tcols - 16))
 	local orighead=$(git log --oneline -n1 $dnorighead)
 	local headmsg=$(
@@ -975,7 +975,7 @@ EOF
 	git cherry-pick --abort >/dev/null 2>&1
 	git reset --hard $dnorighead
 	upcmtstartline=1
-	exit_gitcherrypick $exit_reset
+	exit_cherp $exit_reset
 }
 
 #===  FUNCTION  ================================================================
@@ -999,7 +999,7 @@ cherrypick() {
 cat <<EOF
 
 $UND\0You have conflicts to fix.$OFF
-You can reenter gitcherrypick with the following switches to continue.
+You can reenter cherp with the following switches to continue.
 
 $BLD--commit$OFF   : if you have fixed the conflicts and want the script to stage
              the commit and create the commit log for you.
@@ -1027,7 +1027,7 @@ EOF
 	# If cherry-pick returns with 128, the commit was invalid or
 	# ambiguous.
 	#
-	[ $gitstat -eq 128 ] && exit_gitcherrypick $exit_bogus
+	[ $gitstat -eq 128 ] && exit_cherp $exit_bogus
 
 	# If cherry-pick returns with nonzero other than 128, then a
 	# conflict is indicated.
@@ -1036,7 +1036,7 @@ EOF
 		echo -e "$conflictsmsg"
 		b_conflict=true
 		prj_set_item $prj_b_conflict $b_conflict
-		exit_gitcherrypick $exit_conflict
+		exit_cherp $exit_conflict
 	}
 
 	return 0;
@@ -1357,7 +1357,7 @@ run_me() {
 ctrl_c() {
 	echo
 	validate_last_upstream_hash
-	abort_gitcherrypick $CTLC_EXIT         # defined in lib/ui.source
+	abort_cherp $CTLC_EXIT         # defined in lib/ui.source
 }
 
 # trap keyboard interrupt (control-c)
@@ -1484,5 +1484,5 @@ getlasttag
 menu_loop
 
 echo
-exit_gitcherrypick $exit_good
+exit_cherp $exit_good
 
