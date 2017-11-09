@@ -41,6 +41,9 @@ declare rc_continue=0	# Continue for another pass
 declare rc_run=1	# Run gitcherrypick
 declare exit_good=0	# Normal exit
 declare exit_abort=1	# Abort cherrypick and exit
+declare exit_conflict=2	# Exit with a conflict
+declare exit_reset=3	# Exit after resetting the world
+declare exit_bogus=4	# Exit because of bogus commit
 
 #########################################
 # Project Variable offsets into prj file
@@ -79,11 +82,6 @@ upapplieddefault="gcpupapplied"
 # Global Variables
 #########################################
 declare -i menupad=36
-declare b_shellcommit=false
-declare b_shellcommit_noauto=false
-declare b_shellcommit_abort=false
-declare conflicts=false
-declare commit=""
 declare cmtmsgfile
 declare str_cmtmsg
 declare lasthashvalid=false
@@ -106,9 +104,6 @@ str_herald="\n"$BLD$UND"gitcherrypick "$VERSION" - Automates cherrypicking$OFF\n
 str_noconflicts="Cherry-picked without conflicts from the following upstream commit."
 str_conflicts="Cherry-picked from the following upstream commit."
 str_cmtmsg="$str_conflicts"
-str_cpprompt="
-$OFF\0Press $BLD\0Enter$OFF to skip this step or $qstr to abort this session.
-	Upstream hash to cherrypick : "
 
 str_active_session="
 $OFF\0There is currently a session active.
@@ -891,7 +886,8 @@ function menu_parser {
 		q )	exit_gitcherrypick $exit_good
 			;;
 		r )	set_booleans
-			return $rc_run
+			run_me
+			# return $rc_run
 			;;
 	esac
 	return $rc_continue
@@ -912,11 +908,11 @@ function menu_loop {
 
 	cmtmsgfile=""$workdir"gcpcommitmessage"
 
-	while $true; do
+	while :; do
 		menu_parser
 		stat=$?
 		# echo "menu_parser_stat: $stat"
-		[ $stat -eq $rc_run ] && break
+		# [ $stat -eq $rc_run ] && break
 	done
 	return $stat
 }
@@ -951,10 +947,9 @@ edit_commit() {
 #       RETURNS:  none
 #===============================================================================
 abort_gitcherrypick() {
-	local exitcode=$1
 
 	git cherry-pick --abort >/dev/null 2>&1
-	exit_gitcherrypick $exitcode
+	exit_gitcherrypick $exit_abort
 }
 
 #===  FUNCTION  ================================================================
@@ -970,7 +965,6 @@ abort_gitcherrypick() {
 reset_gitcherrypick() {
 	local cols=$((tcols - 16))
 	local orighead=$(git log --oneline -n1 $dnorighead)
-	local exitcode=$2
 	local headmsg=$(
 cat <<EOF
 The git head is being reset to the original head of the branch when you started
@@ -981,7 +975,7 @@ EOF
 	git cherry-pick --abort >/dev/null 2>&1
 	git reset --hard $dnorighead
 	upcmtstartline=1
-	exit_gitcherrypick $exitcode
+	exit_gitcherrypick $exit_reset
 }
 
 #===  FUNCTION  ================================================================
@@ -1001,6 +995,29 @@ cherrypick() {
 	local uphash=$1
 	local gitstat
 	local wcols=$((tcols - 14))
+	local conflictmsg=$(
+cat <<EOF
+
+$UND\0You have conflicts to fix.$OFF
+You can reenter gitcherrypick with the following switches to continue.
+
+$BLD--commit$OFF   : if you have fixed the conflicts and want the script to stage
+             the commit and create the commit log for you.
+
+$BLD--continue$OFF : if you have fixed the conflicts and made the commit externally
+             and wish to continue with the next upstream commit in:
+             $BLD$upcommitsfile$OFF
+
+EOF
+)
+	local bogusmsg=$(
+cat <<EOF
+
+Upstream commit hash $BLD$uphash$OFF appears to be bogus.
+Make sure the hases in $BLD$upcommitsfile$OFF are all valid.
+
+EOF
+)
 
 	prj_set_item $prj_lastuphash $uphash
 	echo -e "\nProcessing : ${commit:0:$wcols}"
@@ -1010,16 +1027,16 @@ cherrypick() {
 	# If cherry-pick returns with 128, the commit was invalid or
 	# ambiguous.
 	#
-	[ $gitstat -eq 128 ] && return $gitstat
+	[ $gitstat -eq 128 ] && exit_gitcherrypick $exit_bogus
 
 	# If cherry-pick returns with nonzero other than 128, then a
 	# conflict is indicated.
 	#
 	[ $gitstat -eq 0 ] || {
-		echo "You have conflicts to fix."
+		echo -e "$conflictsmsg"
 		b_conflict=true
 		prj_set_item $prj_b_conflict $b_conflict
-		return $gitstat
+		exit_gitcherrypick $exit_conflict
 	}
 
 	return 0;
@@ -1302,6 +1319,35 @@ init_newsession() {
 	read_booleans
 }
 
+#===  FUNCTION  ================================================================
+#          NAME:  run_me
+#   DESCRIPTION:  Main program loop
+#       GLOBALS:  upcmtstartline
+#                 upcommitsfile
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+run_me() {
+	local commit
+	local uphash
+	local gcp
+
+	while :; do
+
+		commit="$(ui_readline $upcmtstartline $upcommitsfile)"
+		uphash="$(echo $commit | cut -d' ' -f1)"
+		get_next_cherrypick $uphash
+		gcp=$?
+
+		if [ $gcp -ne 0 ];then
+			echo -e "No more commits in $BLD$upcommitsfile$OFF"
+			break
+		fi
+
+		[ "$uphash" ] && cherrypick $uphash
+	done
+}
+
 #############################
 # Start of Script Execution
 #############################
@@ -1335,10 +1381,10 @@ fi
 declare infostr="Type \"$(basename $0) -h\" for more info."
 declare invoptstr="\nInvalid option.\n$infostr"
 declare needcmtstr="\nMust supply commit hash with -p | --pick\n$infostr"
-declare longopts="new,continue,status,history,pick:,help"
+declare longopts="new,continue,status,history,setup,pick:,help"
 declare shortopts="csp:h"
 
-# If there are no options, then assume --continue the previous session.
+# If there are no options, then assume --setup the previous session.
 #
 if [ $# -eq 0 ]; then
 	b_continue=true
@@ -1352,6 +1398,11 @@ else
 			b_new=true
 			shift
 			break
+			;;
+		"--setup" )
+			init_session
+			menu_loop
+			shift
 			;;
 		-c | "--continue" )
 			b_continue=true
@@ -1431,22 +1482,6 @@ print_herald
 #
 getlasttag
 menu_loop
-
-while :; do
-
-	commit="$(ui_readline $upcmtstartline $upcommitsfile)"
-	uphash="$(echo $commit | cut -d' ' -f1)"
-	get_next_cherrypick $uphash
-	gcp=$?
-
-	if [ $gcp -ne 0 ];then
-		echo -e "No more commits in $BLD$upcommitsfile$OFF"
-		break
-	fi
-
-	[ "$uphash" ] && cherrypick $uphash
-	[ $? -eq 0 ] || { echo "Commit $uphash is bogus."; break; }
-done
 
 echo
 exit_gitcherrypick $exit_good
