@@ -66,7 +66,6 @@ declare dnorighead		# original downstream head at new session
 declare lastuphash		# most recently applied upstream commit hash
 declare workdir			# scratch directory for the session
 declare upcommitsfile		# File of upstream commits to cherry-pick
-declare dnappliedfile		# File of resulting downstream commits
 declare us
 declare b_session_active	# session in progress
 declare b_nomore		# no more commits to process in upcommitsfile
@@ -74,7 +73,6 @@ declare b_conflict		# last attempt generated a conflict
 
 declare b_autocommit		# Enable autocommit when true
 
-dncommitsdefault="gcpdnapplied"
 upapplieddefault="gcpupapplied"
 
 #########################################
@@ -127,82 +125,6 @@ declare str_abort
 #########################################
 # Functions
 #########################################
-
-#===  FUNCTION  ================================================================
-#          NAME:  init_dynstrings
-#   DESCRIPTION:  Init strings containing dynamic runtime information
-#    PARAMETERS:  none
-#       GLOBALS:  str_shellmsg
-#                 str_extcmt_query
-#                 str_extcmt_validate
-#                 upcommitsfile
-#                 dnappliedfile
-#       RETURNS:  None
-#===============================================================================
-init_dynstrings() {
-str_shellmsg="
-Spawning a new shell so you can edit conflicts.
-	In each exit case below, except for the abort, a commit message
-	based on the upstream commit log for the commit will be created
-	automatically when you exit. You will be given the opportunity to
-	edit that commit log.
-
-	Type $BLD\0exit$OFF or $BLD\0ctrl-D$OFF to return here and pick up where
-	you left off. This exit strategy covers everything you could
-	do with the same commit/patch that brought you to this shell.
-
-	Type $BLD\0exit 1$OFF if you wish to discard this commit altogether and
-	move on to the next commit.
-
-	Type $BLD\0exit 2$OFF if you used a different upstream commit in this shell
-	session. You will be prompted for that upstream commit. Be sure to
-	manually update the following session logfiles accordingly.
-	File of upstream commits to cherrypick :$BLD $upcommitsfile$OFF
-	File of resulting Downstream commits   :$BLD $dnappliedfile$OFF
-
-	Type $BLD\0exit 3$OFF if you want to abort the gitcherrypick process when you
-	exit this shell. The cherry-pick will be aborted, no commit message
-	will be created, and the state of the repo will return to that of
-	the last successfull commit.
-	# valid existing directory
-	Type $BLD\0shmsg$OFF at the command prompt of the new shell to
-	see this message again.
-"
-
-str_abort="
-You have signaled that you want to abort the current cherry-pick and exit
-this script.
-
-Following is the most recent successfully completed cherrypick formatted as
-$BLD\0git log --oneline$OFF
-
-$BLD\0NOTE:$OFF While the commit hashes will be different, their summary lines should
-      be identical. If not, you must check your work after you exit.
-"
-
-str_extcmt_query="
-You signaled that you used one or more upstream commits other than $BLD$commit$OFF
-when you were executing in an external shell. Please enter that commit now."
-
-str_extcmt_validate="
-You signaled that you have completed the commits in an extermal shell and
-have updated the following commits files accordingly
-File of upstream commits to cherrypick :$BLD $upcommitsfile$OFF
-File of resulting Downstream commits   :$BLD $dnappliedfile$OFF
-
-If you want to exit to a shell to take care of unfinished business, or to
-recheck your work, press \"x\" now, or any other key to continue. "
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  shmsg
-#   DESCRIPTION:  Simply print the script's herald defined above
-#    PARAMETERS:  Implicit global, str_herald
-#       RETURNS:  None
-#===============================================================================
-shmsg() {
-	echo -e "$str_shellmsg"
-}
 
 #===  FUNCTION  ================================================================
 #          NAME:  print_herald
@@ -813,23 +735,17 @@ EOF
 }
 
 #===  FUNCTION  ===============================================================
-#          NAME:  show_status
-#   DESCRIPTION:  show the current status
+#          NAME:  init_cmdline_call
+#   DESCRIPTION:  show history of applied patches in downstream branch
 #    PARAMETERS:  none
 #       GLOBALS:  tcols - number of columns in the current terminal
 #                 menupad - number of to the dynamic menu items
 #       RETURNS:  none
 #===============================================================================
-show_status() {
-	local cols=$((tcols - menupad))
-	local subjectprefix="$(git config format.subjectprefix)"
-	local lasttag=$(cat $lasttagfile)
-	local lastbrcmt
-	local orighead=
+init_cmdline_call() {
 	local newstr="Please type $BLD$MYNAME --new$OFF to start.\n"
-	local statstr
 
-	# echo -e "$UND\0show_status$OFF"
+	# echo -e "$UND\0init_cmdline_call$OFF"
 
 	[ -f $MYPRJ ] || {
 		echo -e "There is no project file.\n$newstr"
@@ -842,10 +758,43 @@ show_status() {
 		echo -e "The project file is inconsistant.\n$newstr"
 		return 1
 	}
+}
 
+#===  FUNCTION  ===============================================================
+#          NAME:  show_history
+#   DESCRIPTION:  show history of applied patches in downstream branch
+#    PARAMETERS:  $1 - is "ext" if external call
+#       GLOBALS:  tcols - number of columns in the current terminal
+#                 menupad - number of to the dynamic menu items
+#       RETURNS:  none
+#===============================================================================
+show_history() {
+	[ "$1" ] && init_cmdline_call
+	git log --oneline $dnorighead..HEAD
+}
+
+#===  FUNCTION  ===============================================================
+#          NAME:  show_status
+#   DESCRIPTION:  show the current status
+#    PARAMETERS:  none
+#       GLOBALS:  tcols - number of columns in the current terminal
+#                 menupad - number of to the dynamic menu items
+#       RETURNS:  none
+#===============================================================================
+show_status() {
+	local cols=$((tcols - menupad))
+	local subjectprefix="$(git config format.subjectprefix)"
+	local lasttag=$(cat $lasttagfile)
+	local lastbrcmt=$(git log -n1 --oneline)
+	local orighead
+	local statstr
+
+	# echo -e "$UND\0show_status$OFF"
+
+	init_cmdline_call
 
 	lastbrcmt=$(git log -n1 --oneline)
-	orighead=$(git log --oneline -n1)
+	orighead=$(git log --oneline -n1 $dnorighead)
 
 	[ "$upcommitsfile" ] || {
 		echo -e "There is no file of commits to cherrypick.\n$newstr"
@@ -860,6 +809,7 @@ $(show_most_recent_cherrypick)\
 $(show_next_cherrypick getstat)
     Current downstream branch    : $OFF$(get_gitbranch)$BLD
     Current downstream head      : $OFF${lastbrcmt:0:cols}$BLD
+    Original downstream head     : $OFF${orighead:0:cols}
 \0
 EOF
 )
@@ -895,14 +845,14 @@ $(show_next_cherrypick)
  b  Current git branch           : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix       : $OFF$subjectprefix$BLD
  w  Working directory            : $OFF$workdir$BLD
- d  Log of downstream commits    : $OFF$dnappliedfile$BLD
     $UND\0Control                  $OFF$BLD
  N  Start a New Session
  p  Pop 'n' commits
+ s  Show History
  r  Run gitcherrypick
  q  Quit this script
  h  Help
-$attr_OFF
+$OFF
 EOF
 )
 	echo -e "$settings"
@@ -930,11 +880,11 @@ function menu_parser {
 			;;
 		u )	set_upcommitsfile
 			;;
-		d )	set_dnappliedfile
-			;;
 		c )	set_next_cherrypick
 			;;
 		N )	init_newsession
+			;;
+		s )	show_history
 			;;
 		h )	less $MYHLP
 			;;
@@ -954,10 +904,6 @@ function menu_parser {
 #       GLOBALS:  workdir
 #                 cmtmsgfile
 #                 upcommitsfile
-#                 dnappliedfile
-#                 prj_workdir
-#                 prj_upcommits
-#                 prj_dncommits
 #       RETURNS:  stat, which is the value returned by the call to menu_parser
 #===============================================================================
 function menu_loop {
@@ -1001,15 +947,11 @@ edit_commit() {
 #          NAME:  abort_gitcherrypick
 #   DESCRIPTION:  Exit the script in an orderly fashion.
 #    PARAMETERS:  $1 - exit code
-#       GLOBALS:  str_abort
-#                 upcommitsfile
-#                 dnappliedfile
-#                 lastuplog
+#       GLOBALS:  none
 #       RETURNS:  none
 #===============================================================================
 abort_gitcherrypick() {
 	local exitcode=$1
-	local lastdnlog=$(git log --oneline -n1)
 
 	git cherry-pick --abort >/dev/null 2>&1
 	exit_gitcherrypick $exitcode
@@ -1019,7 +961,7 @@ abort_gitcherrypick() {
 #          NAME:  reset_gitcherrypick
 #   DESCRIPTION:  Exit the script in an orderly fashion.
 #    PARAMETERS:  $1 - exit code
-#       GLOBALS:  str_abort
+#       GLOBALS:  dnorighead
 #                 upcommitsfile
 #                 dnappliedfile
 #                 lastuplog
@@ -1038,6 +980,7 @@ EOF
 )
 	git cherry-pick --abort >/dev/null 2>&1
 	git reset --hard $dnorighead
+	upcmtstartline=1
 	exit_gitcherrypick $exitcode
 }
 
@@ -1141,10 +1084,6 @@ stage_commit() {
 	#
 	$b_conflict && edit_commit
 
-	# Write the new commit into the backport commits file.
-	#
-	git log -n1 --oneline >> "$dnappliedfile"
-
 	$b_conflict=false
 	prj_set_item $prj_b_conflict $b_conflict
 }
@@ -1232,7 +1171,6 @@ count_prj_items() {
 #    PARAMETERS:  $1 - non empty string indicates a status call
 #       GLOBALS:  str_abort
 #                 upcommitsfile
-#                 dnappliedfile
 #                 upcmtstartline
 #                 All the sticky project variables
 #       RETURNS:  status from call to prj_init_prjfile
@@ -1273,7 +1211,6 @@ check_prj_file() {
 #    PARAMETERS:  $1 statcall, if this is a status call
 #       GLOBALS:  str_abort
 #                 upcommitsfile
-#                 dnappliedfile
 #                 upcmtstartline
 #                 All the sticky project variables
 #       RETURNS:  none
@@ -1288,7 +1225,6 @@ save_session() {
 	prj_set_item $prj_lastuphash $lastuphash
 	prj_set_item $prj_workdir    $workdir
 	prj_set_item $prj_upcommits  $upcommitsfile
-	prj_set_item $prj_dncommits  $dnappliedfile
 }
 
 #===  FUNCTION  ================================================================
@@ -1300,7 +1236,6 @@ save_session() {
 #       GLOBALS:  workdir
 #                 cmtmsgfile
 #                 upcommitsfile
-#                 dnappliedfile
 #                 prj_workdir
 #                 prj_upcommits
 #                 prj_dncommits
@@ -1320,7 +1255,6 @@ read_session() {
 	lastuphash=$(prj_get_item $prj_lastuphash)
 	workdir=$(prj_get_item $prj_workdir)
 	upcommitsfile=$(prj_get_item $prj_upcommits)
-	dnappliedfile=$(prj_get_item $prj_dncommits)
 
 	return $stat
 }
@@ -1340,7 +1274,6 @@ init_session() {
 
 	[[ -d $workdir ]] || set_working_directory
 	[[ -f $upcommitsfile ]] || set_upcommitsfile
-	[[ -f $dnappliedfile ]] || set_dnappliedfile
 
 	read_booleans
 }
@@ -1363,7 +1296,6 @@ init_newsession() {
 	init_booleans
 	set_working_directory
 	set_upcommitsfile
-	set_dnappliedfile
 	set_gitbranch
 	upcmtstartline=0
 	get_next_cherrypick
@@ -1379,7 +1311,6 @@ init_newsession() {
 ctrl_c() {
 	echo
 	validate_last_upstream_hash
-	init_dynstrings
 	abort_gitcherrypick $CTLC_EXIT         # defined in lib/ui.source
 }
 
@@ -1404,7 +1335,7 @@ fi
 declare infostr="Type \"$(basename $0) -h\" for more info."
 declare invoptstr="\nInvalid option.\n$infostr"
 declare needcmtstr="\nMust supply commit hash with -p | --pick\n$infostr"
-declare longopts="new,continue,status,pick:,help"
+declare longopts="new,continue,status,history,pick:,help"
 declare shortopts="csp:h"
 
 # If there are no options, then assume --continue the previous session.
@@ -1435,6 +1366,10 @@ else
 			;;
 		-s | "--status" )
 			show_status
+			exit 0
+			;;
+		"--history" )
+			show_history ext
 			exit 0
 			;;
 		-h | "--help" 	)
@@ -1497,10 +1432,6 @@ print_herald
 getlasttag
 menu_loop
 
-# Init the strings containing dynamic runtime information.
-#
-init_dynstrings
-
 while :; do
 
 	commit="$(ui_readline $upcmtstartline $upcommitsfile)"
@@ -1518,252 +1449,5 @@ while :; do
 done
 
 echo
-echo "Done."
-echo
-exit 0
-
-###############################################################################
-# code below kept for historical reasons
-#
-
-# Export the shmsg function for used in spawned shells.
-#
-export str_shellmsg
-typeset -fx  shmsg
-
-if $b_create_patchset; then
-	dshash=$(echo $dspshead | cut -d' ' -f1)
-	echo "create patchset from $dshash"
-
-	git format-patch \
-		--no-renames \
-		--signoff \
-		--stat=80 \
-		--output-directory "$workdir" \
-		$dshash
-	echo
-fi
-
-# If the user provides a bpcommits file to contain the new commits
-# created by cherrypicking into the current git tree, then be sure the
-# file is empty.
-#
-echo "Resulting downstream commits:    "$dnappliedfile""
-$b_use_dscmtlog && cat /dev/null > "$dnappliedfile"
-
-function check_commitsfile {
-	local commitsfile="$1"
-	local patchcount=$(cat "$commitsfile" | wc -l)
-
-	if [ $patchcount -eq 0 ]; then
-		echo
-		echo -e "\
-	Sorry, but file "$attr_bold""$commitsfile""$attr_OFF" is empty."
-		echo
-		[ $# -eq 2 ] && eval $2=$patchcount
-		return 1
-	fi
-
-	[ $# -eq 2 ] && eval $2=$patchcount
-	return 0
-}
-
-	# If user typed "exit 2" when exiting the external shell, he is signaling
-	# that s/he wants to exit this script and leave the repo with the last
-	#
-	if $b_shellcommit_abort; then
-		echo -en "$str_extcmt_validate"
-		read -n1 spawnshell
-		[ "$spawnshell" == "x" ] && ui_sh_spawn
-		echo -e "\tContinuing ..."
-		let index++
-		continue
-	fi
-
-if [ $bppatchcount -gt 0 ] && [ $upcommitsfile ]; then
-	git log --reverse -n$bppatchcount | grep "    commit" \
-		| cut -d' ' -f6 > $upcommitsfile
-
-	echo
-	echo -e "\tFollowing are the commits you cherry-picked from upstream to"
-	echo -e "\tcreate the backported patch set."
-	echo
-	cat "$upcommitsfile"
-
-	getyn "Create patches from cherry-picked commits?" yes
-	if $yes; then
-		git_file2patchset $upcommitsfile $workdir
-	fi
-fi
-
-#===  FUNCTION  ================================================================
-#          NAME:  show_downstream_patchset_head
-#   DESCRIPTION:  Show the start commit for the downstream patch set
-#    PARAMETERS:  none
-#       RETURNS:  none
-#===============================================================================
-show_downstream_patchset_head() {
-	local cols=$((tcols - menupad))
-	local dscmtstr=$(
-cat <<EOF
- D  : from downstream commit     : $OFF${dspshead:0:$cols}$BLD
-EOF
-)
-	$b_create_patchset && echo -e "$dscmtstr"
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  set_downstream_patchset_head
-#   DESCRIPTION:  Sets commit of the downstream branch from which to start the
-#                 creation of a downstream patch set.
-#    PARAMETERS:  none
-#	GLOBALS:  dspshead - Hash of downstream patch set head for generating
-#	                     the downstream patchset.
-#	                     NOTE: The patchset starts with the commit AFTER the
-#	                     downstream patch head. That's the way git-format-
-#	                     patch works.
-#       	  qstr - string containing a boldfaced 'q' for quit
-#       RETURNS:  zero
-#===============================================================================
-set_downstream_patchset_head() {
-	local stat
-	local hash
-	local cols=$((tcols - 9))
-	local cmtlog
-	local notfoundmsg="can't be found in this branch. Try again.\n"
-	local pstr=\
-"$OFF\0Enter hash for start of patchset or $qstr to return to main menu : "
-
-	echo "NOTE: patch set starts at the commit following the one selected."
-
-	while :; do
-		getuser "$pstr" hash
-		[[ "$hash" == "q" ]] && return 1
-		cmtlog=$(git log --oneline -n1 $hash 2>/dev/null)
-		stat=$?
-
-		if [ $stat -ne 0 ]; then
-			echo -en "\nHash $BLD$hash$OFF "
-			echo -e $notfoundmsg
-			continue
-		fi
-		dspshead=$(git log --oneline -n1 $hash)
-		break
-	done
-	return 0
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  resolve_conflicts
-#   DESCRIPTION:  Loop through resolve conflict procedure until done
-#    PARAMETERS:  none
-#       GLOBALS:  b_shellcommit
-#       	  b_shellcommit_discard
-#                 b_shellcommit_abort
-#                 str_shellmsg
-#                 str_conflicts
-#       RETURNS:  none
-#===============================================================================
-resolve_conflicts() {
-	local yn
-	while :; do
-		git status
-		echo -e "$str_shellmsg"
-
-		# bash 3>&2>&1 | tee $workdir/shell_$shell_index
-		# \tThe activity in the new shell will be saved in ...\n\
-		# \t\t"$attr_bold""$workdir"/shell_$shellindex.log"$attr_OFF"\n\
-
-		bash
-		retval=$?
-		[ $retval -eq 1 ] && b_shellcommit_discard=true && return
-		[ $retval -eq 2 ] && b_shellcommit=true && return
-		[ $retval -eq 3 ] && b_shellcommit_abort=true && return
-		str_cmtmsg="$str_conflicts"
-
-		getyn "\nDone fixing conflicts?" yn
-		$yn && break
-	done
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  show_cont
-#   DESCRIPTION:  Show the control to continue (Forward from last hash)
-#    PARAMETERS:  none
-#       RETURNS:  none
-#===============================================================================
-show_cont() {
-	local contstr=$(
-cat <<EOF
-
- >  Continue from Last Upstream Commit
-EOF
-)
-	# echo -e "$contstr"
-	$lasthashvalid && echo -e "$contstr"
-
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  use_last_upstream_hash
-#   DESCRIPTION:  Show the upstream commit we will be starting from
-#    PARAMETERS:  none
-#       GLOBALS:  upcommitsfile
-#                 upcmtstartline
-#                 lasthashlog
-#       RETURNS:  nonzero if last hash invalid
-#===============================================================================
-use_last_upstream_hash() {
-
-	# At this point, validate_last_upstream_hash will have been called,
-	# so that if it is valid, it will show in the main menu.
-	#
-	$lasthashvalid || { warn_lasthashinv; upcmtstartline=1; return 1; }
-
-	# If the commit stored in the project file is not in the commits file
-	# then lasthashvalid=false and upcmtstartline=1
-	#
-	upcmtstartline=$(grep -m1 -n "$lastuphash" "$upcommitsfile" | cut -d':' -f1)
-	[ -z "$upcmtstartline" ] && lasthashvalid=false && upcmtstartline=1
-
-	# The grep will return the line in upcommitsfile of the most recent
-	# successfully backported upstream commit. The one we want to start
-	# with is the commit after that.
-	#
-	let upcmtstartline++
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  warn_lasthashinv
-#   DESCRIPTION:  Issues warning that the attempt to restart cherrypicking from
-#                 the last committed hash did not succeed, because it is not
-#                 part of the current set of upstream hashes to cherrypick.
-#    PARAMETERS:  none
-#       GLOBALS:  lastuplog     - most recently applied commit
-#                 upcommitsfile - file of upstream commits to cherrypick
-#                 upcmtstartline- starting line for upcommitsfile
-#       RETURNS:  none
-#===============================================================================
-warn_lasthashinv() {
-	local lasthashinvstr=$(
-cat <<EOF
-
-  The most recently applied commit: ${lastuplog:0:40}
-  is not part of the current set of upstream commmits to be processed as
-  listed in the file: $BLD$upcommitsfile$OFF
-  We will start cherrypicking with the first commit in that file.
-\0
-EOF
-)
-	local lasthashempstr=$(
-cat <<EOF
-  There was no recently applied commit found, so we will start cherrypicking
-  with the first commit in file: $BLD$upcommitsfile$OFF
-\0
-EOF
-)
-	[ -z "$lastuplog" ] \
-		&& echo -e "$lasthashempstr" || echo -e "$lasthashinvstr"
-}
-
+exit_gitcherrypick $exit_good
 
