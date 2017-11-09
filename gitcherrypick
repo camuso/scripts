@@ -73,7 +73,7 @@ declare b_conflict		# last attempt generated a conflict
 
 declare b_autocommit		# Enable autocommit when true
 
-dscommitsfile="/dev/shm/gcpdscommits"
+dscommitsdefault="gcpdscommits"
 
 #########################################
 # Global Variables
@@ -474,7 +474,7 @@ EOF
 )
 	# echo -e "$UND\0set_uscommitsfile$OFF"
 
-	[ "$uscommitsfile" ] && prstr="$prstr\n$currentfile"
+	[ "$uscommitsfile" ] && prstr="$prstr.\n$currentfile"
 	ui_getfilespec "$prstr : " uscommitsfile
 	stat=$?
 
@@ -503,20 +503,42 @@ EOF
 #	          prj_dscommits  - offset into project file for dscommitsfile
 #       RETURNS:  1 if no dscommitsfile, else 0
 #===============================================================================
-function set_dscommitsfile {
-	getuser "File for resulting downstream commits from the cherry-pick: " \
-		dscommitsfile
+set_dscommitsfile() {
+	local stat
+	local prstr=$(
+cat <<EOF
+Enter a file to contain the map of upstream-to-downstream commits resulting
+from cherrypicks managed by this script
+EOF
+)
+	local currentfile=$(
+cat <<EOF
+$OFF\0The current file is $BLD$dscommitsfile$OFF.
+Press $qstr at the prompt to use this file
+EOF
+)
+	local defaultmsg=$(
+cat <<EOF
+Using the default file: $BLD$workdir/$dscommitsdefault$OFF
+EOF
+)
 
-	if [ $dscommitsfile ]; then
-		b_use_dscmtlog=true
-		# echo true
-	else
-		b_use_dscmtlog=false
-		# echo false
-		return 1
+	# echo -e "$UND\0set_dscommitsfile$OFF"
+
+	[ "$dscommitsfile" ] && prstr="$prstr.\n$currentfile"
+	ui_getfilespec "$prstr : " dscommitsfile
+	stat=$?
+
+	if [ $stat -ne 0 ]; then
+		if [ "$dscommitsfile" ]; then
+			echo -e "Keeping: $BLD$dscommitsfile$OFF"
+		else
+			dscommitsfile=$workdir/$dscommitsdefault
+			echo -e "$defaultmsg"
+		fi
 	fi
 
-	[[ -f $dscommitsfile ]] || touch $dscommitsfile
+	> $dscommitsfile
 	prj_set_item $prj_dscommits $dscommitsfile
 	return 0
 }
@@ -636,39 +658,6 @@ EOF
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  warn_lasthashinv
-#   DESCRIPTION:  Issues warning that the attempt to restart cherrypicking from
-#                 the last committed hash did not succeed, because it is not
-#                 part of the current set of upstream hashes to cherrypick.
-#    PARAMETERS:  none
-#       GLOBALS:  lastuplog     - most recently applied commit
-#                 uscommitsfile - file of upstream commits to cherrypick
-#                 uscmtstartline- starting line for uscommitsfile
-#       RETURNS:  none
-#===============================================================================
-warn_lasthashinv() {
-	local lasthashinvstr=$(
-cat <<EOF
-
-  The most recently applied commit: ${lastuplog:0:40}
-  is not part of the current set of upstream commmits to be processed as
-  listed in the file: $BLD$uscommitsfile$OFF
-  We will start cherrypicking with the first commit in that file.
-\0
-EOF
-)
-	local lasthashempstr=$(
-cat <<EOF
-  There was no recently applied commit found, so we will start cherrypicking
-  with the first commit in file: $BLD$uscommitsfile$OFF
-\0
-EOF
-)
-	[ -z "$lastuplog" ] \
-		&& echo -e "$lasthashempstr" || echo -e "$lasthashinvstr"
-}
-
-#===  FUNCTION  ================================================================
 #          NAME:  validate_last_upstream_hash
 #   DESCRIPTION:  validates whether the hash stored in the project file is
 #                 valid for this instance of gitcherrypick
@@ -718,35 +707,6 @@ getlasttag() {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  use_last_upstream_hash
-#   DESCRIPTION:  Show the upstream commit we will be starting from
-#    PARAMETERS:  none
-#       GLOBALS:  uscommitsfile
-#                 uscmtstartline
-#                 lasthashlog
-#       RETURNS:  nonzero if last hash invalid
-#===============================================================================
-use_last_upstream_hash() {
-
-	# At this point, validate_last_upstream_hash will have been called,
-	# so that if it is valid, it will show in the main menu.
-	#
-	$lasthashvalid || { warn_lasthashinv; uscmtstartline=1; return 1; }
-
-	# If the commit stored in the project file is not in the commits file
-	# then lasthashvalid=false and uscmtstartline=1
-	#
-	uscmtstartline=$(grep -m1 -n "$lastuphash" "$uscommitsfile" | cut -d':' -f1)
-	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
-
-	# The grep will return the line in uscommitsfile of the most recent
-	# successfully backported upstream commit. The one we want to start
-	# with is the commit after that.
-	#
-	let uscmtstartline++
-}
-
-#===  FUNCTION  ================================================================
 #          NAME:  get_next_cherrypick
 #   DESCRIPTION:  Gets the next commit in the commits file that doesn't have a
 #                 leading hash.
@@ -766,8 +726,6 @@ get_next_cherrypick() {
 		line="$(ui_readline $idx $uscommitsfile)"
 		[ "${line:0:1}" = "#" ] || break
 	done
-
-	echo "idx: $idx"
 
 	if [ $idx -gt $count ]; then
 		echo "setting b_nomore true"
@@ -850,24 +808,6 @@ cat <<EOF
 EOF
 )
 	$lasthashvalid && echo -e "$laststr"
-}
-
-#===  FUNCTION  ================================================================
-#          NAME:  show_cont
-#   DESCRIPTION:  Show the control to continue (Forward from last hash)
-#    PARAMETERS:  none
-#       RETURNS:  none
-#===============================================================================
-show_cont() {
-	local contstr=$(
-cat <<EOF
-
- >  Continue from Last Upstream Commit
-EOF
-)
-	# echo -e "$contstr"
-	$lasthashvalid && echo -e "$contstr"
-
 }
 
 #===  FUNCTION  ===============================================================
@@ -953,7 +893,7 @@ $(show_next_cherrypick)
  b  Current git branch           : $OFF$(get_gitbranch)$BLD
  p  Current subject prefix       : $OFF$subjectprefix$BLD
  w  Working directory            : $OFF$workdir$BLD
-
+ d  Log of downstream commits    : $OFF$dscommitsfile$BLD
     $UND\0Control                  $OFF$BLD
  N  Start a New Session
  p  Pop 'n' commits
@@ -988,23 +928,16 @@ function menu_parser {
 			;;
 		u )	set_uscommitsfile
 			;;
+		d )	set_dscommitsfile
+			;;
 		c )	set_next_cherrypick
 			;;
-#		a )	ui_toggle b_autocommit
-#			;;
-#		d )	ui_toggle b_create_patchset
-#			;;
 		N )	init_newsession
 			;;
 		h )	less $MYHLP
 			;;
 		q )	exit_gitcherrypick $exit_good
 			;;
-#		x )	set_booleans
-#			ui_sh_spawn
-#			;;
-#		D )	set_downstream_patchset_head
-#			;;
 		r )	set_booleans
 			return $rc_run
 			;;
@@ -1041,39 +974,6 @@ function menu_loop {
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  resolve_conflicts
-#   DESCRIPTION:  Loop through resolve conflict procedure until done
-#    PARAMETERS:  none
-#       GLOBALS:  b_shellcommit
-#       	  b_shellcommit_discard
-#                 b_shellcommit_abort
-#                 str_shellmsg
-#                 str_conflicts
-#       RETURNS:  none
-#===============================================================================
-resolve_conflicts() {
-	local yn
-	while :; do
-		git status
-		echo -e "$str_shellmsg"
-
-		# bash 3>&2>&1 | tee $workdir/shell_$shell_index
-		# \tThe activity in the new shell will be saved in ...\n\
-		# \t\t"$attr_bold""$workdir"/shell_$shellindex.log"$attr_OFF"\n\
-
-		bash
-		retval=$?
-		[ $retval -eq 1 ] && b_shellcommit_discard=true && return
-		[ $retval -eq 2 ] && b_shellcommit=true && return
-		[ $retval -eq 3 ] && b_shellcommit_abort=true && return
-		str_cmtmsg="$str_conflicts"
-
-		getyn "\nDone fixing conflicts?" yn
-		$yn && break
-	done
-}
-
-#===  FUNCTION  ================================================================
 #          NAME:  edit_commit
 #   DESCRIPTION:  Loop through process to edit commit message until done
 #    PARAMETERS:  none
@@ -1105,15 +1005,37 @@ edit_commit() {
 #                 lastuplog
 #       RETURNS:  none
 #===============================================================================
-function abort_gitcherrypick() {
+abort_gitcherrypick() {
 	local exitcode=$1
 	local lastdnlog=$(git log --oneline -n1)
 
-	# echo -en "$str_abort"
-	# echo -e "Upstream  : $BLD${lastuplog:0:60}$OFF"
-	# echo -e "Downstream: $BLD${lastdnlog:0:60}$OFF\n"
 	git cherry-pick --abort >/dev/null 2>&1
-	# echo -e "\tExiting ..."
+	exit_gitcherrypick $exitcode
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  reset_gitcherrypick
+#   DESCRIPTION:  Exit the script in an orderly fashion.
+#    PARAMETERS:  $1 - exit code
+#       GLOBALS:  str_abort
+#                 uscommitsfile
+#                 dscommitsfile
+#                 lastuplog
+#       RETURNS:  none
+#===============================================================================
+reset_gitcherrypick() {
+	local cols=$((tcols - 16))
+	local orighead=$(git log --oneline -n1 $dsorighead)
+	local exitcode=$2
+	local headmsg=$(
+cat <<EOF
+The git head is being reset to the original head of the branch when you started
+this session.
+Resetting to: ${orighead:0:cols}
+EOF
+)
+	git cherry-pick --abort >/dev/null 2>&1
+	git reset --hard $dsorighead
 	exit_gitcherrypick $exitcode
 }
 
@@ -1439,6 +1361,7 @@ init_newsession() {
 	init_booleans
 	set_working_directory
 	set_uscommitsfile
+	set_dscommitsfile
 	set_gitbranch
 	uscmtstartline=0
 	get_next_cherrypick
@@ -1726,6 +1649,119 @@ set_downstream_patchset_head() {
 		break
 	done
 	return 0
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  resolve_conflicts
+#   DESCRIPTION:  Loop through resolve conflict procedure until done
+#    PARAMETERS:  none
+#       GLOBALS:  b_shellcommit
+#       	  b_shellcommit_discard
+#                 b_shellcommit_abort
+#                 str_shellmsg
+#                 str_conflicts
+#       RETURNS:  none
+#===============================================================================
+resolve_conflicts() {
+	local yn
+	while :; do
+		git status
+		echo -e "$str_shellmsg"
+
+		# bash 3>&2>&1 | tee $workdir/shell_$shell_index
+		# \tThe activity in the new shell will be saved in ...\n\
+		# \t\t"$attr_bold""$workdir"/shell_$shellindex.log"$attr_OFF"\n\
+
+		bash
+		retval=$?
+		[ $retval -eq 1 ] && b_shellcommit_discard=true && return
+		[ $retval -eq 2 ] && b_shellcommit=true && return
+		[ $retval -eq 3 ] && b_shellcommit_abort=true && return
+		str_cmtmsg="$str_conflicts"
+
+		getyn "\nDone fixing conflicts?" yn
+		$yn && break
+	done
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  show_cont
+#   DESCRIPTION:  Show the control to continue (Forward from last hash)
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+show_cont() {
+	local contstr=$(
+cat <<EOF
+
+ >  Continue from Last Upstream Commit
+EOF
+)
+	# echo -e "$contstr"
+	$lasthashvalid && echo -e "$contstr"
+
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  use_last_upstream_hash
+#   DESCRIPTION:  Show the upstream commit we will be starting from
+#    PARAMETERS:  none
+#       GLOBALS:  uscommitsfile
+#                 uscmtstartline
+#                 lasthashlog
+#       RETURNS:  nonzero if last hash invalid
+#===============================================================================
+use_last_upstream_hash() {
+
+	# At this point, validate_last_upstream_hash will have been called,
+	# so that if it is valid, it will show in the main menu.
+	#
+	$lasthashvalid || { warn_lasthashinv; uscmtstartline=1; return 1; }
+
+	# If the commit stored in the project file is not in the commits file
+	# then lasthashvalid=false and uscmtstartline=1
+	#
+	uscmtstartline=$(grep -m1 -n "$lastuphash" "$uscommitsfile" | cut -d':' -f1)
+	[ -z "$uscmtstartline" ] && lasthashvalid=false && uscmtstartline=1
+
+	# The grep will return the line in uscommitsfile of the most recent
+	# successfully backported upstream commit. The one we want to start
+	# with is the commit after that.
+	#
+	let uscmtstartline++
+}
+
+#===  FUNCTION  ================================================================
+#          NAME:  warn_lasthashinv
+#   DESCRIPTION:  Issues warning that the attempt to restart cherrypicking from
+#                 the last committed hash did not succeed, because it is not
+#                 part of the current set of upstream hashes to cherrypick.
+#    PARAMETERS:  none
+#       GLOBALS:  lastuplog     - most recently applied commit
+#                 uscommitsfile - file of upstream commits to cherrypick
+#                 uscmtstartline- starting line for uscommitsfile
+#       RETURNS:  none
+#===============================================================================
+warn_lasthashinv() {
+	local lasthashinvstr=$(
+cat <<EOF
+
+  The most recently applied commit: ${lastuplog:0:40}
+  is not part of the current set of upstream commmits to be processed as
+  listed in the file: $BLD$uscommitsfile$OFF
+  We will start cherrypicking with the first commit in that file.
+\0
+EOF
+)
+	local lasthashempstr=$(
+cat <<EOF
+  There was no recently applied commit found, so we will start cherrypicking
+  with the first commit in file: $BLD$uscommitsfile$OFF
+\0
+EOF
+)
+	[ -z "$lastuplog" ] \
+		&& echo -e "$lasthashempstr" || echo -e "$lasthashinvstr"
 }
 
 
