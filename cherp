@@ -53,7 +53,6 @@ declare prj_dnorighead		# original git head of current session
 declare prj_lastuphash		# most recently applied upstream commit
 declare prj_workdir		# scratch directory for the session
 declare prj_upcommits		# file containing list of upstream commits
-declare prj_dncommits		# file to receive list of downstream commits
 declare prj_b_session_active	# session in progress
 declare prj_b_nomore		# no more commits to process in upcommitsfile
 declare prj_b_conflict		# last attempt generated a conflict
@@ -284,12 +283,14 @@ function read_booleans {
 	local val
 	local emptyline="$(prj_get_emptyline)"
 
+	# echo -e "$UND\0read_booleans$OFF"
 	for bool in $ui_bools; do
 		val=$(prj_get_item $index)
 		eval $bool=$val
 		[ "${!bool}" == "$emptyline" ] && eval $bool=false
 		let index++
 	done
+
 	return 0
 }
 
@@ -419,7 +420,6 @@ EOF
 #	GLOBALS:  dnappliedfile - file containing the new commits resulting from
 #	                          those that were cherry-picked
 #	          b_use_dscmtlog - boolean set true if the filename is not ""
-#	          prj_dncommits  - offset into project file for dnappliedfile
 #       RETURNS:  1 if no dnappliedfile, else 0
 #===============================================================================
 set_dnappliedfile() {
@@ -926,6 +926,7 @@ function menu_loop {
 #===============================================================================
 edit_commit() {
 	local yup
+
 	while :; do
 		# Display the git log message and inquire if it needs more
 		# editing.
@@ -979,10 +980,24 @@ EOF
 }
 
 #===  FUNCTION  ================================================================
-#          NAME:  cherrypick
+#          NAME:  run_continue
 #   DESCRIPTION:  Given a commit, try to cherry pick it
 #    PARAMETERS:  $1 - uphash
-#       GLOBALS:  cmtmsgfile
+#       GLOBALS:  none
+#       RETURNS:  none
+#===============================================================================
+run_continue() {
+	# echo -e "$UND\0run_continue$OFF"
+	init_session
+	run_me
+}
+
+
+#===  FUNCTION  ================================================================
+#          NAME:  cherrypick
+#   DESCRIPTION:  Given a commit, try to cherry pick it
+#    PARAMETERS:  $1 - upstream commit hash being applied to downstream branch
+#       GLOBALS:  upcommitsfile
 #                 commit
 #                 tcols
 #                 prj_lastuphash
@@ -1018,8 +1033,7 @@ Make sure the hases in $BLD$upcommitsfile$OFF are all valid.
 
 EOF
 )
-
-	prj_set_item $prj_lastuphash $uphash
+	commit=$(git log --oneline $uphash)
 	echo -e "\nProcessing : ${commit:0:$wcols}"
 	git cherry-pick "$uphash"
 	gitstat=$?
@@ -1035,9 +1049,11 @@ EOF
 	[ $gitstat -eq 0 ] || {
 		echo -e "$conflictsmsg"
 		b_conflict=true
-		prj_set_item $prj_b_conflict $b_conflict
 		exit_cherp $exit_conflict
 	}
+
+	stage_commit $uphash
+	lastuphash=$uphash
 
 	return 0;
 }
@@ -1045,23 +1061,16 @@ EOF
 #===  FUNCTION  ================================================================
 #          NAME:  stage_commit
 #   DESCRIPTION:  Given a commit, process it using the global variables
-#    PARAMETERS:  none
+#    PARAMETERS:  $1 - upstream commit hash being applied to downstream branch
 #       GLOBALS:  b_conflict
 #		  cmtmsgfile
 #		  str_cmtmsg
-#		  str_shellmsg
-#		  str_noconflicts
-#		  str_conflicts
-#		  str_abort
 #       RETURNS:  none
 #===============================================================================
 stage_commit() {
 
 	local description
-	local uphash
-
-	uphash=$(prj_get_item $prj_lastuphash)
-	b_conflict=$(prj_get_item $prj_b_conflict)
+	local uphash=$1
 
 	git commit -aC "$uphash"
 
@@ -1102,7 +1111,6 @@ stage_commit() {
 	$b_conflict && edit_commit
 
 	$b_conflict=false
-	prj_set_item $prj_b_conflict $b_conflict
 }
 
 #===  FUNCTION  ================================================================
@@ -1121,6 +1129,7 @@ count_prj_items() {
 	local index
 
 	# echo -e "$UND\0count_prj_items$OFF"
+
 	# Init ui items
 	# -------------
 	# This loop enumerates and counts the items that will be stored in the
@@ -1136,7 +1145,6 @@ count_prj_items() {
 	prj_lastuphash \
 	prj_workdir \
 	prj_upcommits \
-	prj_dncommits \
 	prj_b_session_active \
 	prj_b_nomore \
 	prj_b_conflict \
@@ -1233,7 +1241,6 @@ check_prj_file() {
 #       RETURNS:  none
 #===============================================================================
 save_session() {
-
 	# echo -e "$UND\0save_session$OFF"
 
 	save_booleans
@@ -1255,8 +1262,7 @@ save_session() {
 #                 upcommitsfile
 #                 prj_workdir
 #                 prj_upcommits
-#                 prj_dncommits
-#       RETURNS:  stat, which is the value returned by the call to menu_parser
+#       RETURNS:  stat, the value returned by the call to check_prj_file
 #===============================================================================
 read_session() {
 	local stat
@@ -1264,6 +1270,7 @@ read_session() {
 	# echo -e "$UND\0read_session$OFF"
 	check_prj_file "$1"
 	stat=$?
+	[ $stat -eq 0 ] || return $stat
 
 	read_booleans
 
@@ -1288,6 +1295,7 @@ init_session() {
 
 	# echo -e "$UND\0init_session$OFF"
 	read_session
+	[ $? -eq 0 ] || init_newsession
 
 	[[ -d $workdir ]] || set_working_directory
 	[[ -f $upcommitsfile ]] || set_upcommitsfile
@@ -1303,7 +1311,7 @@ init_session() {
 #       RETURNS:  none
 #===============================================================================
 init_newsession() {
-	echo -e "\n$UND\0init_newsession$OFF"
+	# echo -e "\n$UND\0init_newsession$OFF"
 
 	read_session
 
@@ -1330,16 +1338,17 @@ init_newsession() {
 run_me() {
 	local commit
 	local uphash
-	local gcp
+	local stat
 
+	# echo -e "$UND\0run_me$OFF"
 	while :; do
 
+		get_next_cherrypick
 		commit="$(ui_readline $upcmtstartline $upcommitsfile)"
 		uphash="$(echo $commit | cut -d' ' -f1)"
-		get_next_cherrypick $uphash
-		gcp=$?
+		stat=$?
 
-		if [ $gcp -ne 0 ];then
+		if [ $stat -ne 0 ];then
 			echo -e "No more commits in $BLD$upcommitsfile$OFF"
 			break
 		fi
@@ -1407,7 +1416,7 @@ else
 		-c | "--continue" )
 			b_continue=true
 			shift
-			break
+			run_continue
 			;;
 		-p | "--pick" )
 			b_single=true
