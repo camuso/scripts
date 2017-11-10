@@ -21,9 +21,17 @@ attr_bold="\033[1m"
 attr_under="\033[4m"
 attr_OFF="\033[0m"
 
-BLD="$attr_bold"
-UND="$attr_under"
-OFF="$attr_OFF"
+BLD="\033[1m"
+UND="\033[4m"
+OFF="\033[0m"
+
+# Errors
+#
+declare ui_err_invargc=1
+declare ui_err_notdigit=2
+declare ui_err_invfile=3
+declare ui_err_invdir=4
+declare ui_err_invlinec=5
 
 # Contlol-C exit code
 # see http://www.tldp.org/LDP/abs/html/exitcodes.html
@@ -311,7 +319,7 @@ function ui_getfilespec {
 		[ "$filespec" ] || echo -e "$msginvfilnam"
 		[ "$filespec" = "q" ] && return 1
 		[ -f "$filespec" ] && break
-		echo $filespec
+		echo -e "$BLD$filespec$OFF is not a valid file."
 	done
 
 	eval $2=$filespec
@@ -476,6 +484,24 @@ function ui_replaceline {
 	mv __temp__file__ "$3"
 }
 
+check_lineargs() {
+	local number=$1
+	local file="$2"
+	local lines
+	local argc=$#
+
+	[ $argc -eq 2 ] || return $ui_err_invargc
+
+	ui_isdigit $number
+	[ $? -eq 0 ] || return $ui_err_notdigit
+
+	[ -f "$file" ] || return $ui_err_notfile
+
+	lines=$(cat "$file" | wc -l)
+	((number > lines)) && return ui_err_invlinec
+	return 0
+}
+
 # ui_readline
 # Reads one line in a file given the line number.
 # $1 - line number
@@ -489,6 +515,12 @@ function ui_replaceline {
 #
 function ui_readline {
 	local __line__
+	local stat
+
+	check_lineargs $1 $2
+	stat=$?
+	[ $stat -eq 0 ] || return $stat
+
 	awk -v __line__="$1" '{
 		if (NR == __line__) {
 			print $0;
@@ -507,6 +539,13 @@ function ui_readline {
 #
 function ui_insertline {
 	lc=$(cat $3 | wc -l)
+
+	[ $# -eq 3 ] || return $ui_err_invargc
+
+	ui_isdigit $1
+	[ $? -eq 0 ] || return $ui_err_notdigit
+
+	[ -f "$3" ] || return $ui_err_notfile
 
 	if [ $1 -gt $lc ]; then
 		echo "$2" >> $3
@@ -528,10 +567,11 @@ function ui_insertline {
 # $2 - file
 #
 function ui_deleteline {
+	local stat
 
-	#lc=$(cat $2 | wc -l)
-	#
-	#[ $1 -gt $lc ] && exit 1
+	check_lineargs $1 $2
+	stat=$?
+	[ $stat -eq 0 ] || return $stat
 
 	awk -v line=$1 '{
 		if (NR != line) {
@@ -539,33 +579,6 @@ function ui_deleteline {
 		}
 	}' $2 > __temp__file__
 	mv -f __temp__file__ $2
-}
-
-# ui_isdigit
-# Determine if input is a decimal digit
-#
-# $1 input string
-#
-function ui_isdigit {
-	echo $1 | grep -q '[0-9]'
-	return $?
-}
-
-# ui_isxdigit
-# Determine if input is a hexadecimal digit
-#
-# $1 input string
-#
-function ui_isxdigit {
-	echo $1 | grep -q '[0-9a-fA-F]'
-	return $?
-}
-
-# ui_toggle - toggle a boolean value
-#
-function ui_toggle {
-	local boolean=${!1}
-	$boolean && eval $1=false || eval $1=true
 }
 
 # ui_cycle_state - cycle through the states of a variable
@@ -659,6 +672,18 @@ ui_isdigit() {
 	[[ $1 =~ ^-?[0-9]+$ ]] && return 0 || return 1
 }
 
+# ui_isxdigit - determines if $1 is a hexacecimal digit
+#
+# returns 0 if hex digit, 1 if not
+#
+# example:
+#
+# $(isxdigit $foo) && echo yup || echo nope
+#
+ui_isxdigit() {
+	[[ $1 =~ ^-?[0-9a-fA-F]+$ ]] && return 0 || return 1
+}
+
 # ui_strtok - tokenizes a string and returns an array
 #
 # $1 - the string to tokenize
@@ -696,6 +721,11 @@ ui_trunc_string() {
 
 	strlen=$((tcols - pad))
 	echo "${str:0:$strlen}"
+}
+
+ui_press_any() {
+	echo -n "Press any key to continue ... "
+	read -n1
 }
 
 ui_source_loaded=true
