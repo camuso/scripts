@@ -581,6 +581,13 @@ function ui_deleteline {
 	mv -f __temp__file__ $2
 }
 
+# ui_toggle - toggle a boolean value
+#
+function ui_toggle {
+	local boolean=${!1}
+	$boolean && eval $1=false || eval $1=true
+}
+
 # ui_cycle_state - cycle through the states of a variable
 #
 # $1 - variable
