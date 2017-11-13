@@ -35,16 +35,18 @@ source $MYLIB/ui.source
 source $MYLIB/project.source
 
 ########################################
-# Function Return Codes
+# Return and Control Codes
 ########################################
 declare rc_continue=0	# Continue for another pass
 declare rc_run=1	# Run cherp
+
 declare exit_good=0	# Normal exit
 declare exit_abort=1	# Abort cherrypick and exit
 declare exit_conflict=2	# Exit with a conflict
 declare exit_reset=3	# Exit after resetting the world
 declare exit_bogus=4	# Exit because of bogus commit
 declare exit_init=5	# The project has not been initialized
+declare exit_bad=10	# Exiting from command line call with bad status
 
 #########################################
 # Project Variable offsets into prj file
@@ -105,9 +107,6 @@ $OFF\0There is currently a session active.
 	$BLD$MYNAME --new$OFF to start a new session
 "
 
-declare str_shellmsg
-declare str_extcmt_query
-declare str_extcmt_validate
 declare str_abort
 
 #########################################
@@ -670,9 +669,7 @@ show_next_cherrypick() {
 	local cols=$((tcols - menupad))
 	local eofstr=$(
 cat <<EOF
-
-${currentupcommit:0:$tcols}
-is the last upstream commit in file: $upcommitsfile
+$currentuphash is the last commit in file: $upcommitsfile
 
 EOF
 )
@@ -727,42 +724,18 @@ EOF
 }
 
 #===  FUNCTION  ===============================================================
-#          NAME:  init_cmdline_call
-#   DESCRIPTION:  Check integrity of system if calling from the command line 
-#    PARAMETERS:  none
-#       GLOBALS:  tcols - number of columns in the current terminal
-#                 menupad - number of to the dynamic menu items
-#       RETURNS:  none
-#===============================================================================
-init_cmdline_call() {
-	local newstr="Please type $BLD$MYNAME --new$OFF to start.\n"
-
-	# echo -e "$UND\0init_cmdline_call$OFF"
-
-	[ -f $MYPRJ ] || {
-		echo -e "There is no project file.\n$newstr"
-		return 1
-	}
-
-	read_session "statcall"
-
-	[ $? -eq 0 ] || {
-		echo -e "The project file is inconsistant.\n$newstr"
-		return 1
-	}
-}
-
-#===  FUNCTION  ===============================================================
 #          NAME:  show_history
 #   DESCRIPTION:  show history of applied patches in downstream branch
-#    PARAMETERS:  $1 - is "ext" if external call
+#    PARAMETERS:  $1 - if true, then it's a command line call
 #       GLOBALS:  tcols - number of columns in the current terminal
 #                 menupad - number of to the dynamic menu items
 #       RETURNS:  none
 #===============================================================================
 show_history() {
-	[ "$1" ] && init_cmdline_call
+	$1 && init_cmdline_call
 	git log --oneline $dnorighead..HEAD
+	$1 && exit 0
+	return 0
 }
 
 #===  FUNCTION  ===============================================================
@@ -806,6 +779,7 @@ $(show_next_cherrypick getstat)
 EOF
 )
 	echo -e "$statstr"
+	exit 0
 }
 
 #===  FUNCTION  ===============================================================
@@ -840,7 +814,7 @@ $(show_next_cherrypick)
 
     $UND\0Control                  $OFF$BLD
  N  Start a New Session
- p  Pop 'n' commits
+ P  Pop 'n' commits
  s  Show History
  r  Run cherp
  q  Quit this script
@@ -859,6 +833,8 @@ EOF
 #       	  continue looping.
 #===============================================================================
 function menu_parser {
+	local pops
+
 	validate_last_upstream_hash
 	show_settings
 	promptgetchar ""$attr_bold"Enter one of the above: "$attr_OFF"" setting
@@ -879,12 +855,14 @@ function menu_parser {
 			;;
 		s )	show_history
 			;;
+		P )     getuser "Pop how many commits: " pops
+			pop_commits $pops
+			;;
 		h )	less $MYHLP
 			;;
 		q )	exit_cherp $exit_good
 			;;
-		r )	set_booleans
-			run_me
+		r )	run_me
 			# return $rc_run
 			;;
 	esac
@@ -941,12 +919,12 @@ edit_commit() {
 #===  FUNCTION  ================================================================
 #          NAME:  abort_cherp
 #   DESCRIPTION:  Exit the script in an orderly fashion.
-#    PARAMETERS:  $1 - exit code
+#    PARAMETERS:  $1 - true if command line call
 #       GLOBALS:  none
 #       RETURNS:  none
 #===============================================================================
 abort_cherp() {
-
+	$1 && init_cmdline_call
 	git cherry-pick --abort >/dev/null 2>&1
 	exit_cherp $exit_abort
 }
@@ -971,9 +949,10 @@ this session.
 Resetting to: ${orighead:0:cols}
 EOF
 )
+	init_cmdline_call
 	git cherry-pick --abort >/dev/null 2>&1
 	git reset --hard $dnorighead
-	upcmtstartline=1
+	upcmtstartline=0
 	exit_cherp $exit_reset
 }
 
@@ -988,8 +967,8 @@ EOF
 run_continue() {
 
 	# echo -e "$UND\0run_continue$OFF"
-	init_session
 	init_cmdline_call
+	git cherry-pick --continue
 	b_continue=false
 	run_me
 }
@@ -1005,7 +984,6 @@ run_continue() {
 run_commit() {
 
 	# echo -e "$UND\0run_commit$OFF"
-	init_session
 	init_cmdline_call
 	b_continue=false
 	stage_commit
@@ -1151,35 +1129,64 @@ stage_commit() {
 }
 
 #===  FUNCTION  ================================================================
+#          NAME:  pop_upcmtstartline
+#   DESCRIPTION:  Backup the starting line in the upstream commits file
+#       GLOBALS:  upcmtstartline
+#    PARAMETERS:  $1 - number of commits to pop
+#       RETURNS:  status from call to ui_readline
+#===============================================================================
+pop_upcmtstartline() {
+	local pops=$1
+	local line
+	local stat
+
+	while ((pops > 0 && upcmtstartline > 0)); do
+		let upcmtstartline--
+		line="$(ui_readline $upcmtstartline $upcommitsfile)"
+		stat=$?
+		[ $stat -ne 0 ] && return $stat
+		[ "${line:0:1}" = "#" ] && continue
+		let pop--
+	done
+
+	return $stat
+}
+
+#===  FUNCTION  ================================================================
 #          NAME:  pop_commits
 #   DESCRIPTION:  Backup the current head of the downstream branch and modify
 #                 the upcmtstartline accordingly
-#       GLOBALS:  All session variables are affected
+#       GLOBALS:  upcmtstartline
 #    PARAMETERS:  $1 - number of commits to pop
-#                 $2 - if called from command line
+#                 $2 - if true, then it's a command line call
 #       RETURNS:  nonzero if attempting to pop more than has been committed
 #===============================================================================
 pop_commits() {
 	local pops=$1
 	local ext=$2
+	local cmdline
+	local commits=$(git log --oneline $dnorighead..HEAD | wc -l)
 	local popmsg=$(
 cat <<EOF
-
 The number of pops you requested is greater than the number of commits that you
 have made in this session.$BLD
-Commits this session : $OFF$upcmtstartline$BLD
+Commits this session : $OFF$commits$BLD
       Pops requested : $OFF$pops
 
 EOF
 )
-	((upcmtstartline >= pop)) || {
+	$ext && init_cmdline_call
+
+	((commits >= pops)) || {
 		echo -e "$popmsg"
+		$ext && exit_cherp $exit_bad
 		ui_press_any
 		return 1
 	}
 
-	upcmtstartline=$((upcmtstartline - pops))
+	pop_upcmtstartline $pops
 	git reset --hard HEAD~$pops
+	$ext && exit_cherp $exit_good
 	return 0
 }
 
@@ -1300,9 +1307,8 @@ check_prj_file() {
 #===  FUNCTION  ================================================================
 #          NAME:  save_session
 #   DESCRIPTION:  Save session's project variables to the project file.
-#    PARAMETERS:  $1 statcall, if this is a status call
-#       GLOBALS:  str_abort
-#                 upcommitsfile
+#    PARAMETERS:  $1 is not empty if this is an status call
+#       GLOBALS:  upcommitsfile
 #                 upcmtstartline
 #                 All the sticky project variables
 #       RETURNS:  none
@@ -1354,11 +1360,55 @@ read_session() {
 	return $stat
 }
 
+#===  FUNCTION  ===============================================================
+#          NAME:  init_common
+#   DESCRIPTION:  initialization common to all inits
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+init_common() {
+
+	b_nomore=false
+
+	[ $upcmtstartline -gt 0 ] && let upcmtstartline-- || upcmtstartline=0
+	$b_new && upcmtstartline=0
+
+	get_next_cherrypick
+	currentupcommit=$(ui_readline $upcmtstartline $upcommitsfile)
+	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
+}
+
+
+#===  FUNCTION  ===============================================================
+#          NAME:  init_cmdline_call
+#   DESCRIPTION:  Check integrity of system if calling from the command line
+#    PARAMETERS:  none
+#       RETURNS:  none
+#===============================================================================
+init_cmdline_call() {
+	local newstr="Please type $BLD$MYNAME --new$OFF to start.\n"
+
+	# echo -e "$UND\0init_cmdline_call$OFF"
+
+	[ -f $MYPRJ ] || {
+		echo -e "There is no project file.\n$newstr"
+		return 1
+	}
+
+	read_session "ext"
+
+	[ $? -eq 0 ] || {
+		echo -e "The project file is inconsistant.\n$newstr"
+		return 1
+	}
+
+	init_common
+}
 
 #===  FUNCTION  ================================================================
 #          NAME:  init_session
 #   DESCRIPTION:  Init the continuing session from the saved project variables
-#    PARAMETERS:  $1 statcall, if this is a status call
+#    PARAMETERS:  $1 not empty if this is a comman line call
 #       GLOBALS:  All sesson variables are affected
 #       RETURNS:  none
 #===============================================================================
@@ -1366,19 +1416,10 @@ init_session() {
 
 	# echo -e "$UND\0init_session$OFF"
 	read_session
-	[ $? -eq 0 ] || init_newsession
-
-	[[ -d $workdir ]] || set_working_directory
-	[[ -f $upcommitsfile ]] || set_upcommitsfile
+	[ $? -eq 0 ] || { init_newsession && return; }
 
 	read_booleans
-
-	b_new=false
-	b_nomore=false
-	let upcmtstartline-=1
-	get_next_cherrypick
-	currentupcommit=$(ui_readline $upcmtstartline $upcommitsfile)
-	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
+	init_common
 }
 
 #===  FUNCTION  ================================================================
@@ -1393,22 +1434,16 @@ init_newsession() {
 
 	read_session
 
-	b_new=false
-	b_nomore=false
-
 	init_booleans
 	set_working_directory
 	set_upcommitsfile
 	set_gitbranch
-	upcmtstartline=0
-	get_next_cherrypick
 	read_booleans
+	init_common
 
 	dnorighead=$(git log --oneline -1 | cut -d' ' -f1)
 	prj_set_item $prj_dnorighead $dnorighead
-
-	currentupcommit=$(ui_readline $upcmtstartline $upcommitsfile)
-	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
+	b_new=false
 }
 
 #===  FUNCTION  ================================================================
@@ -1437,6 +1472,9 @@ run_me() {
 
 		cherrypick
 	done
+
+	save_session
+	menu_loop
 }
 
 #############################
@@ -1472,7 +1510,7 @@ fi
 declare infostr="Type \"$(basename $0) -h\" for more info."
 declare invoptstr="\nInvalid option.\n$infostr"
 declare needcmtstr="\nMust supply commit hash with -p | --pick\n$infostr"
-declare longopts="abort,new,continue,status,history,reset,setup,pick:pop:,help"
+declare longopts="abort,new,continue,commit,status,history,reset,setup,pick:,pop:,help"
 declare shortopts="sp:h"
 
 # If there are no options, then assume --setup the previous session.
@@ -1494,16 +1532,14 @@ if [ $# -ne 0 ]; then
 			shift
 			;;
 		"--abort" )
-			init_session
 			abort_cherp
 			;;
 		"--reset" )
-			init_session
 			reset_cherp
 			;;
 		"--commit" )
-			shift
 			run_commit
+			shift
 			;;
 		"--continue" )
 			b_continue=true
@@ -1517,16 +1553,14 @@ if [ $# -ne 0 ]; then
 			run_single
 			;;
 		"--pop" )
-			pop_commits
+			pops=$2
+			pop_commits $pops true
 			;;
 		-s | "--status" )
-			init_session
 			show_status
-			exit 0
 			;;
 		"--history" )
-			show_history ext
-			exit 0
+			show_history true
 			;;
 		-h | "--help" 	)
 			less $MYHLP
