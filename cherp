@@ -1490,10 +1490,6 @@ run_me() {
 	$b_cmdline && exit_cherp $exit_good || menu_loop
 }
 
-#############################
-# Start of Script Execution
-#############################
-
 # run if user hits control-c
 #
 ctrl_c() {
@@ -1501,6 +1497,21 @@ ctrl_c() {
 	validate_last_upstream_hash
 	exit_cherp $CTLC_EXIT         # defined in lib/ui.source
 }
+
+check_command() {
+	local cmd="$1"
+	local lead="--"
+
+	[ "${#cmd}" -eq 2 ] && eval $2="$cmd" && return
+	[ "${cmd:0:2}" = "$lead" ] && eval $2="$cmd" && return
+
+	[ "${cmd:0:1}" = "-" ] && cmd="-$cmd" || cmd="--$cmd"
+	eval $2="$cmd"
+}
+
+#############################
+# Start of Script Execution
+#############################
 
 # trap keyboard interrupt (control-c)
 #
@@ -1520,6 +1531,7 @@ fi
 # Command Line Options
 ###########################################
 
+declare checked_cmd
 declare infostr="Type \"$(basename $0) -h\" for more info."
 declare invoptstr="\nInvalid option.\n$infostr"
 declare needcmtstr="\nMust supply commit hash with -p | --pick\n$infostr"
@@ -1548,11 +1560,14 @@ if [ $# -eq 0 ]; then
 	b_cmdline=false
 else
 	b_cmdline=true
+
+	check_command "$1" checked_cmd
+
 	opts=$(getopt --options $shortopts --long $longopts --name "$0" -- "$@")
 	eval set -- "$opts"
 
 	while :; do
-	    case "$1" in
+	    case "$checked_cmd" in
 		"--abort" )
 			abort_cherp
 			;;
