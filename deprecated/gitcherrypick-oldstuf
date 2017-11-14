@@ -319,3 +319,32 @@ shmsg() {
 }
 
 
+	# Loop asking for a commit or line number until one is found or the
+	# user enters "q" to quit looking.
+	#
+	while :; do
+		getuser "$hashprompt " selectedcommit
+		[ "$selectedcommit" = "q" ] && \
+			{ $b_cmdline && exit_cherp $exit_good || return; }
+
+		# If the user enters a number 7 digits or more, then it's a
+		# commit hash.
+		#
+		# Else, see if its one of the valid line numbers captured in
+		# the linary in the "read line" loop above.
+		#
+		# If we can't find the submitted linenumber or commit hash in
+		# the upcommitsfile, then tell them to try again.
+		#
+		if [ ${#selectedcommit} -ge 7 ]; then
+			lookup_hash $selectedcommit upcmtstartline
+			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
+			break
+		else
+			ui_inarray $selectedcommit linary[@]
+			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
+			upcmtstartline=$selectedcommit
+			break
+		fi
+	done
+
