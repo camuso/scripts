@@ -164,13 +164,15 @@ function set_gitbranch {
 	local brmsg=$(
 cat <<EOF
 $BLD
-The following commands will be issued when a new branch is checked out."
+The following commands will be issued when a new branch is checked out.
 $OFF
 	git am --abort            # Abort any pending git am ops
 	git checkout <selected>   # checkout the selected branch
 \0
 EOF
 )
+	$b_cmdline && init_cmdline_call
+
 	git branch > $workdir/branchlist
 
 	while read line; do
@@ -188,13 +190,13 @@ EOF
 	git checkout "$gitbranch"
 
 	if [ $? -ne 0 ]; then
-		$b_cmdline && exit_cherp
+		$b_cmdline && exit_cherp $exit_pending
 		return 1
 	fi
 
 	git log --oneline -1
 	getlasttag
-	return 0
+	$b_cmdline && exit_cherp $exit_good || return 0
 }
 
 #===  FUNCTION  ================================================================
@@ -1175,14 +1177,12 @@ pop_upcmtstartline() {
 #   DESCRIPTION:  Backup the current head of the downstream branch and modify
 #                 the upcmtstartline accordingly
 #       GLOBALS:  upcmtstartline
+#                 b_cmdline
 #    PARAMETERS:  $1 - number of commits to pop
-#                 $2 - if true, then it's a command line call
 #       RETURNS:  nonzero if attempting to pop more than has been committed
 #===============================================================================
 pop_commits() {
 	local pops=$1
-	local ext=$2
-	local cmdline
 	local commits=$(git log --oneline $dnorighead..HEAD | wc -l)
 	local popmsg=$(
 cat <<EOF
@@ -1197,14 +1197,14 @@ EOF
 
 	((commits >= pops)) || {
 		echo -e "$popmsg"
-		$ext && exit_cherp $exit_bad
+		$b_cmdline && exit_cherp $exit_bad
 		ui_press_any
 		return 1
 	}
 
 	pop_upcmtstartline $pops
 	git reset --hard HEAD~$pops
-	$ext && exit_cherp $exit_good
+	$b_cmdline && exit_cherp $exit_good
 	return 0
 }
 
@@ -1286,10 +1286,11 @@ count_prj_items() {
 #          NAME:  check_prj_file
 #   DESCRIPTION:  Check the project file status
 #                 If the size changed, then recreate the project file.
-#    PARAMETERS:  $1 - non empty string indicates a status call
+#    PARAMETERS:  none
 #       GLOBALS:  MYDATA
 #                 MYPRJ
 #                 prj_entries
+#                 b_cmdline
 #       RETURNS:  status from call to prj_init_prjfile
 #===============================================================================
 check_prj_file() {
@@ -1313,7 +1314,7 @@ check_prj_file() {
 
 		# If this is a status call, then return with the status now.
 		#
-		[ "$1" ] && return $stat
+		$b_cmdline && return $stat
 
 		echo
 		echo "A new project file has been created."
@@ -1347,7 +1348,7 @@ save_session() {
 #   DESCRIPTION:  Read the variables stored in the project file
 #                 Some project variables are updated elsewhere, and only need
 #                 to be retrieved at init time and saved at exit time.
-#    PARAMETERS:  $1 - if not empty indicates a status call
+#    PARAMETERS:  none
 #       GLOBALS:  workdir
 #                 cmtmsgfile
 #                 upcommitsfile
@@ -1359,7 +1360,7 @@ read_session() {
 	local stat
 
 	# echo -e "$UND\0read_session$OFF"
-	check_prj_file "$1"
+	check_prj_file
 	stat=$?
 	[ $stat -eq 0 ] || return $stat
 
@@ -1427,7 +1428,7 @@ init_cmdline_call() {
 #===  FUNCTION  ================================================================
 #          NAME:  init_session
 #   DESCRIPTION:  Init the continuing session from the saved project variables
-#    PARAMETERS:  $1 not empty if this is a comman line call
+#    PARAMETERS:  none
 #       GLOBALS:  All sesson variables are affected
 #       RETURNS:  none
 #===============================================================================
@@ -1439,6 +1440,7 @@ init_session() {
 
 	read_booleans
 	init_common
+	$b_cmdline && exit_cherp $exit_good
 }
 
 #===  FUNCTION  ================================================================
@@ -1463,13 +1465,15 @@ init_newsession() {
 	prj_set_item $prj_dnorighead $dnorighead
 
 	init_common
+	$b_cmdline && exit_cherp $exit_good
 }
 
 #===  FUNCTION  ================================================================
 #          NAME:  run_me
 #   DESCRIPTION:  Main program loop
 #       GLOBALS:  upcommitsfile
-#    PARAMETERS:  $1 - if true, running externally
+#                 $b_cmdline
+#    PARAMETERS:  none
 #       RETURNS:  none
 #===============================================================================
 run_me() {
@@ -1478,7 +1482,7 @@ run_me() {
 
 	# echo -e "$UND\0run_me$OFF"
 
-	[ $1 ] && init_cmdline_call
+	$b_session_inited || { $b_cmdline && init_cmdline_call; }
 
 	if $b_conflict; then
 		echo -e "$BLD\0There is an unresolved conflict" \
@@ -1503,8 +1507,7 @@ run_me() {
 	done
 
 	save_session
-
-	[ $1 ] && exit_cherp $exit_good || menu_loop
+	$b_cmdline && exit_cherp $exit_good || menu_loop
 }
 
 #############################
@@ -1540,12 +1543,29 @@ fi
 declare infostr="Type \"$(basename $0) -h\" for more info."
 declare invoptstr="\nInvalid option.\n$infostr"
 declare needcmtstr="\nMust supply commit hash with -p | --pick\n$infostr"
-declare longopts="abort,new,continue,commit,status,history,reset,run,setup,pick:,pop:,help"
 declare shortopts="sp:h"
+declare longopts="\
+abort,\
+branch,\
+continue,\
+commit,\
+history,\
+new,\
+pick:,\
+pop:,\
+reset,\
+run,\
+setup,\
+status,\
+help\
+"
 
-# If there are no options, then assume --setup the previous session.
+# If there are no options, then just run the menu.
 #
-if [ $# -ne 0 ]; then
+if [ $# -eq 0 ]; then
+	b_cmdline=false
+else
+	b_cmdline=true
 	opts=$(getopt --options $shortopts --long $longopts --name "$0" -- "$@")
 	eval set -- "$opts"
 
@@ -1553,8 +1573,9 @@ if [ $# -ne 0 ]; then
 	    case "$1" in
 		"--new" )
 			init_newsession
-			shift
-			break
+			;;
+		"--branch" )
+			set_gitbranch
 			;;
 		"--setup" )
 			init_session
