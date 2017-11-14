@@ -1500,11 +1500,12 @@ check_command() {
 	local cmd="$1"
 	local lead="--"
 
-	[ "${#cmd}" -eq 2 ] && eval $2="$cmd" && return
-	[ "${cmd:0:2}" = "$lead" ] && eval $2="$cmd" && return
+	[ "${#cmd}" -eq 2 ] && eval $2="$cmd" && return 0
+	[ "${cmd:0:2}" = "$lead" ] && eval $2="$cmd" && return 0
 
 	[ "${cmd:0:1}" = "-" ] && cmd="-$cmd" || cmd="--$cmd"
 	eval $2="$cmd"
+	return 1
 }
 
 #############################
@@ -1560,6 +1561,9 @@ else
 	b_cmdline=true
 
 	check_command "$1" checked_cmd
+	[ $? -eq 0 ] || shift
+
+	# [ $# -gt 1 ] && checked_cmd="$checked_cmd ${@:2:$#}"
 
 	opts=$(getopt --options $shortopts --long $longopts --name "$0" -- "$@")
 	eval set -- "$opts"
@@ -1596,7 +1600,7 @@ else
 			;;
 		"--pop" )
 			pops=$2
-			pop_commits $pops true
+			pop_commits $pops
 			;;
 		"--reset" )
 			reset_cherp
