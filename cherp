@@ -522,6 +522,10 @@ lookup_hash() {
 #       RETURNS:  none
 #===============================================================================
 set_next_cherrypick() {
+
+	# echo -e "$UND\0set_next_cherrypick$OFF"
+	$b_cmdline && init_cmdline_call
+
 	local counter=0
 	local line
 	local linary
@@ -534,52 +538,28 @@ set_next_cherrypick() {
 	local q="$OFF\0'$BLD\0q$OFF\0'$BLD"
 	local hashprompt=$(
 cat <<EOF
-Enter a line number or commit hash here, or $q to return to main menu:
+Enter a line number or commit hash here, or $q to make no selection:
 EOF
 )
-	echo -e "\n$BLD\0NOTE:$OFF Not showing lines with a leading '$BLD\0#$OFF'.\n"
+	echo -e "\nContents of upstream commits file: $BLD$upcommitsfile$OFF"
+	echo -e "$BLD\0NOTE:$OFF Not showing lines with a leading '$BLD\0#$OFF'.\n"
 
 	# Dump the contents of the upcommitsfile
 	#
 	while read line; do
 		let counter++
 		[ "${line:0:1}" = "#" ] && continue
-		line=$(printf " %${numwid}d %s" $counter "$line")
+		line=$(printf "%b %${numwid}d %b%s" $BLD $counter $OFF "$line")
 		echo "${line:0:cols}"
 		linary[$idx]=$counter
 		let idx++
 	done < $upcommitsfile
 
-	# Loop asking for a commit or line number until one is found or the
-	# user enters "q" to quit looking.
-	#
-	while :; do
-		getuser "$hashprompt " selectedcommit
-		[ "$selectedcommit" = "q" ] && return
-
-		# If the user enters a number 7 digits or more, then it's a
-		# commit hash.
-		#
-		# Else, see if its one of the valid line numbers captured in
-		# the linary in the "read line" loop above.
-		#
-		# If we can't find the submitted linenumber or commit hash in
-		# the upcommitsfile, then tell them to try again.
-		#
-		if [ ${#selectedcommit} -ge 7 ]; then
-			lookup_hash $selectedcommit upcmtstartline
-			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
-			break
-		else
-			ui_inarray $selectedcommit linary[@]
-			[ $? -ne 0 ] && pr_nohash_msg $selectedcommit && continue
-			upcmtstartline=$selectedcommit
-			break
-		fi
-	done
-
+	echo
+	loop_range 1 $idx upcmtstartline
 	currentupcommit="$(ui_readline $upcmtstartline $upcommitsfile)"
 	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
+	$b_cmdline && exit_cherp $exit_good
 }
 
 #===  FUNCTION  ================================================================
@@ -739,7 +719,7 @@ EOF
 #===  FUNCTION  ===============================================================
 #          NAME:  show_history
 #   DESCRIPTION:  show history of applied patches in downstream branch
-#    PARAMETERS:  $1 - if true, then it's a command line call
+#    PARAMETERS:  none
 #       GLOBALS:  tcols - number of columns in the current terminal
 #                 menupad - number of to the dynamic menu items
 #       RETURNS:  none
@@ -747,7 +727,7 @@ EOF
 show_history() {
 	[ $1 ] && init_cmdline_call
 	git log --oneline $dnorighead..HEAD
-	$1 && exit 0
+	$b_cmdline && exit 0
 	return 0
 }
 
@@ -859,7 +839,7 @@ function menu_parser {
 			;;
 		p )	git_set_subjectprefix
 			;;
-		w )	prj_set_directory "working" $prj_workdir workdir quiet
+		w )	set_working_directory
 			;;
 		u )	set_upcommitsfile
 			;;
@@ -1549,15 +1529,17 @@ abort,\
 branch,\
 continue,\
 commit,\
+help,\
 history,\
 new,\
 pick:,\
 pop:,\
 reset,\
 run,\
+select,\
 setup,\
 status,\
-help\
+version,\
 "
 
 # If there are no options, then just run the menu.
@@ -1571,54 +1553,54 @@ else
 
 	while :; do
 	    case "$1" in
-		"--new" )
-			init_newsession
-			;;
-		"--branch" )
-			set_gitbranch
-			;;
-		"--setup" )
-			init_session
-			menu_loop
-			shift
-			;;
 		"--abort" )
 			abort_cherp
 			;;
-		"--reset" )
-			reset_cherp
+		"--branch" )
+			set_gitbranch
 			;;
 		"--commit" )
 			run_commit
 			shift
 			;;
 		"--continue" )
-			b_continue=true
-			shift
 			run_continue
+			;;
+		-h | "--help" 	)
+			less $MYHLP
+			exit 0
+			;;
+		"--history" )
+			show_history
+			;;
+		"--new" )
+			init_newsession
 			;;
 		-p | "--pick" )
 			currentuphash=$2
 			[ "$currentuphash" ] || { echo -e "$needcmtstr"; exit 1; }
-			shift 2
 			run_single
 			;;
 		"--pop" )
 			pops=$2
 			pop_commits $pops true
 			;;
+		"--reset" )
+			reset_cherp
+			;;
 		-r | "--run" )
 			run_me true
 			;;
+		"--select" )
+			set_next_cherrypick
+			;;
+		"--setup" )
+			init_session
+			menu_loop
+			shift
+			;;
 		-s | "--status" )
 			show_status
-			;;
-		"--history" )
-			show_history true
-			;;
-		-h | "--help" 	)
-			less $MYHLP
-			exit 0
 			;;
 		"--version" )
 			print_herald
