@@ -269,7 +269,8 @@ loop_yn() {
 
 # loop_range()
 #
-# Loop until user gives a number in the range defined by the args
+# Loop until user gives a number in the range defined by the args or
+# enters 'q' to quiet and return to the caller with the 'q'
 #
 # $1 - minimum
 # $2 - maximum
@@ -279,18 +280,21 @@ loop_range() {
 	local min=$1
 	local max=$2
 	local number
-	local __cmd__
+	local cmd
 	local pstr=\
-"$BLD\0Please enter a number between$OFF $min$BLD and$OFF $max: "
+"$OFF\0Please enter a number between $BLD$min$OFF and $BLD$max$OFF or $qstr: "
 
-	[ $max -lt 10 ] && __cmd__=promptgetchar || cmd=getuser
-	echo
+	echo -e "Press $qstr to return without making a selection."
+	[ $max -lt 10 ] && cmd=promptgetchar || cmd=getuser
+	# echo "cmd: $cmd"
+
 	while true; do
-		$__cmd__ "$pstr" number
+		$cmd "$pstr" number
 
-		if [[ $number =~ ^-?[0-9]+$ ]]  && \
-		   [[ $number -ge $min ]]       && \
-		   [[ $number -le $max ]]; then
+		if ([[ $number =~ ^-?[0-9]+$ ]]  && \
+		    [[ $number -ge $min ]]       && \
+		    [[ $number -le $max ]]) ||
+		    [ "$number" = "q" ] ; then
 			eval $3=$number
 			echo
 			return 0
