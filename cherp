@@ -928,8 +928,10 @@ edit_commit() {
 #       RETURNS:  none
 #===============================================================================
 abort_cherp() {
-	git cherry-pick --abort # >/dev/null 2>&1
-	exit 0
+	init_cmdline_call
+	git cherry-pick --abort
+	b_conflict=false
+	exit_cherp $exit_good
 }
 
 #===  FUNCTION  ================================================================
@@ -953,9 +955,10 @@ Resetting to: ${orighead:0:cols}
 EOF
 )
 	init_cmdline_call
-	git cherry-pick --abort >/dev/null 2>&1
+	git cherry-pick --abort
 	git reset --hard $dnorighead
-	upcmtstartline=0
+	b_conflict=false
+	upcmtstartline=1
 	exit_cherp $exit_reset
 }
 
@@ -972,7 +975,9 @@ run_continue() {
 	# echo -e "$UND\0run_continue$OFF"
 	init_cmdline_call
 	git cherry-pick --continue
+	b_conflict=false
 	b_continue=false
+	get_next_cherrypick
 	run_me
 }
 
@@ -988,8 +993,10 @@ run_commit() {
 
 	# echo -e "$UND\0run_commit$OFF"
 	init_cmdline_call
+	b_conflict=true
 	b_continue=false
 	stage_commit
+	get_next_cherrypick
 	run_me
 }
 
@@ -1373,13 +1380,13 @@ init_common() {
 
 	b_nomore=false
 
-	[ $upcmtstartline -gt 0 ] && let upcmtstartline-- || upcmtstartline=0
-	$b_new && upcmtstartline=0
+	$b_new && upcmtstartline=1
 
-	get_next_cherrypick
 	currentupcommit=$(ui_readline $upcmtstartline $upcommitsfile)
 	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
+
 	b_session_inited=true
+	b_new=false
 }
 
 
@@ -1446,7 +1453,6 @@ init_newsession() {
 
 	dnorighead=$(git log --oneline -1 | cut -d' ' -f1)
 	prj_set_item $prj_dnorighead $dnorighead
-	b_new=false
 
 	init_common
 }
@@ -1466,7 +1472,14 @@ run_me() {
 
 	[ $1 ] && init_cmdline_call
 
-	b_new=false
+	if $b_conflict; then
+		echo -e "$BLD\0There is an unresolved conflict" \
+			"cherrypicking: $OFF$currentuphash"
+		show_status
+		[ $1 ] && exit_cherp $exit_conflict
+		ui_press_any
+		return
+	fi
 
 	while :; do
 
@@ -1483,7 +1496,7 @@ run_me() {
 
 	save_session
 
-	$1 && exit_cherp $exit_good || 	menu_loop
+	[ $1 ] && exit_cherp $exit_good || menu_loop
 }
 
 #############################
