@@ -536,11 +536,7 @@ set_next_cherrypick() {
 	local cols=$((tcols - 2 - $numwid))
 	local selectedcommit
 	local q="$OFF\0'$BLD\0q$OFF\0'$BLD"
-	local hashprompt=$(
-cat <<EOF
-Enter a line number or commit hash here, or $q to make no selection:
-EOF
-)
+
 	echo -e "\nContents of upstream commits file: $BLD$upcommitsfile$OFF"
 	echo -e "$BLD\0NOTE:$OFF Not showing lines with a leading '$BLD\0#$OFF'.\n"
 
@@ -725,7 +721,7 @@ EOF
 #       RETURNS:  none
 #===============================================================================
 show_history() {
-	[ $1 ] && init_cmdline_call
+	$b_cmdline && init_cmdline_call
 	git log --oneline $dnorighead..HEAD
 	$b_cmdline && exit 0
 	return 0
@@ -980,6 +976,8 @@ run_continue() {
 #       RETURNS:  none
 #===============================================================================
 run_commit() {
+	local gitstat=$(git status --porcelain)
+	[ "$gitstat" ] || { git status && exit 0; }
 
 	# echo -e "$UND\0run_commit$OFF"
 	init_cmdline_call
