@@ -46,9 +46,11 @@ declare exit_conflict=2	# Exit with a conflict
 declare exit_reset=3	# Exit after resetting the world
 declare exit_bogus=4	# Exit because of bogus commit
 declare exit_init=5	# The project has not been initialized
+declare exit_pending=6	# There are changes pending, so action can't complete
 declare exit_bad=10	# Exiting from command line call with bad status
 
 declare b_session_inited=false	# boolean to indicate session is inited
+declare b_cmdline=false		# boolean indicating a comman line call
 
 #########################################
 # Project Variable offsets into prj file
@@ -109,8 +111,6 @@ $OFF\0There is currently a session active.
 	$BLD$MYNAME --new$OFF to start a new session
 "
 
-declare str_abort
-
 #########################################
 # Functions
 #########################################
@@ -153,37 +153,45 @@ function get_gitbranch {
 #    PARAMETERS:  None
 #       GLOBALS:  workdir
 #                 gitbranch
-#       RETURNS:  0 if new branch selected, 1 if user aborted selection
+#       RETURNS:  0 if new branch selected, 1 if user did not make a selection
+#                 or if the selected branch could not be checked out.
 #===============================================================================
 function set_gitbranch {
 	local index=1
 	local linenumber
 	local line
 	local branchlist
-
+	local brmsg=$(
+cat <<EOF
+$BLD
+The following commands will be issued when a new branch is checked out."
+$OFF
+	git am --abort            # Abort any pending git am ops
+	git checkout <selected>   # checkout the selected branch
+\0
+EOF
+)
 	git branch > $workdir/branchlist
-	echo -e "$attr_bold"
 
 	while read line; do
 		printf "%2d  $line\n" $index
 		let index++
 	done < $workdir/branchlist
 
-	echo -e  "$attr_bold"
-	echo -e  "The following commands will be issued before a new branch is checked out."
-	echo -en "$attr_OFF"
-	echo -e  "\tgit am --abort      # Abort any pending git am ops"
-	echo -e  "\tgit checkout -f     # Discard any changes"
-	echo -e
-	echo -en "$attr_bold"
-	echo -en "Enter the number corresponding to the branch you want or $qstr to leave as is: "
-	echo -en "$attr_OFF"
-	read  linenumber
-	[ "$linenumber" == "q" ] && return
+	echo -e "$brmsg"
+	loop_range 1 $((index - 1)) linenumber
+
+	[ "$linenumber" == "q" ] && return 1
 	gitbranch="$(ui_readline $linenumber $workdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git am --abort --quiet >/dev/null 2>&1
-	git checkout -f "$gitbranch" 2>&1
+	git checkout "$gitbranch"
+
+	if [ $? -ne 0 ]; then
+		$b_cmdline && exit_cherp
+		return 1
+	fi
+
 	git log --oneline -1
 	getlasttag
 	return 0
