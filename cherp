@@ -552,7 +552,9 @@ set_next_cherrypick() {
 	done < $upcommitsfile
 
 	echo
-	loop_range 1 $idx upcmtstartline
+	loop_range 1 $idx selectedcommit
+	[ "$selectedcommit" = "q" ] || upcmtstartline=$selectedcommit
+	$b_nomore && prstr="$eofstr" || prstr="${currentupcommit:0:$cols}"
 	currentupcommit="$(ui_readline $upcmtstartline $upcommitsfile)"
 	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
 	$b_cmdline && exit_cherp $exit_good
@@ -632,7 +634,6 @@ get_next_cherrypick() {
 	if [ $idx -gt $count ]; then
 		echo -e "${currentupcommit:0:$tcols}"
 		echo -e "was the last upstream commit in file: $upcommitsfile"
-		b_nomore=true
 		return 1
 	fi
 
@@ -658,14 +659,15 @@ show_next_cherrypick() {
 	local cols=$((tcols - menupad))
 	local eofstr=$(
 cat <<EOF
-$currentuphash is the last commit in file: $upcommitsfile
+$currentuphash was the last commit in file: $upcommitsfile
 
 EOF
 )
-	[ "$1" ] && statstr="    Next commit to cherrypick    :" \
-	         || statstr=" c  Next commit to cherrypick    :"
+	$b_cmdline && statstr="    Next commit to cherrypick    :" \
+		   || statstr=" c  Next commit to cherrypick    :"
 
-	$b_nomore && prstr="$eofstr" || prstr="${currentupcommit:0:$cols}"
+	ui_readline $((upcmtstartline + 1)) $upcommitsfile >/dev/null 2>&1
+	[ $? -eq 0 ] && prstr="${currentupcommit:0:$cols}" || prstr="$eofstr"
 
 	local show_next_cherrypick_str=$(
 cat <<EOF
@@ -1144,7 +1146,7 @@ pop_upcmtstartline() {
 		stat=$?
 		[ $stat -ne 0 ] && return $stat
 		[ "${line:0:1}" = "#" ] && continue
-		let pop--
+		let pops--
 	done
 
 	return $stat
@@ -1160,6 +1162,8 @@ pop_upcmtstartline() {
 #       RETURNS:  nonzero if attempting to pop more than has been committed
 #===============================================================================
 pop_commits() {
+	$b_cmdline && init_cmdline_call
+
 	local pops=$1
 	local commits=$(git log --oneline $dnorighead..HEAD | wc -l)
 	local popmsg=$(
@@ -1171,8 +1175,6 @@ Commits this session : $OFF$commits$BLD
 
 EOF
 )
-	[ $ext ] && init_cmdline_call
-
 	((commits >= pops)) || {
 		echo -e "$popmsg"
 		$b_cmdline && exit_cherp $exit_bad
