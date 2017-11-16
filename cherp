@@ -534,7 +534,7 @@ set_next_cherrypick() {
 	local linecount=$(cat $upcommitsfile | wc -l)
 	local numwid=${#linecount}
 	local cols=$((tcols - 2 - $numwid))
-	local selectedcommit
+	local selected
 	local q="$OFF\0'$BLD\0q$OFF\0'$BLD"
 
 	echo -e "\nContents of upstream commits file: $BLD$upcommitsfile$OFF"
@@ -545,15 +545,15 @@ set_next_cherrypick() {
 	while read line; do
 		let counter++
 		[ "${line:0:1}" = "#" ] && continue
-		line=$(printf "%b %${numwid}d %b%s" $BLD $counter $OFF "$line")
+		line=$(printf "%b %${numwid}d %b%s" $BLD $((idx+1)) $OFF "$line")
 		echo "${line:0:cols}"
 		linary[$idx]=$counter
 		let idx++
 	done < $upcommitsfile
 
 	echo
-	loop_range 1 $idx selectedcommit
-	[ "$selectedcommit" = "q" ] || upcmtstartline=$selectedcommit
+	loop_range 1 $idx selected
+	[ "$selected" = "q" ] || upcmtstartline=${linary[$((selected - 1))]}
 	$b_nomore && prstr="$eofstr" || prstr="${currentupcommit:0:$cols}"
 	currentupcommit="$(ui_readline $upcmtstartline $upcommitsfile)"
 	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
@@ -740,8 +740,8 @@ show_history() {
 show_status() {
 	local cols=$((tcols - menupad))
 	local subjectprefix="$(git config format.subjectprefix)"
-	local lasttag=$(cat $lasttagfile)
-	local lastbrcmt=$(git log -n1 --oneline)
+	local lasttag
+	local lastbrcmt
 	local orighead
 	local statstr
 
@@ -749,6 +749,8 @@ show_status() {
 
 	init_cmdline_call
 
+	# [ -f lasttagfile ] || git describe --tags --abbrev=0 > $lasttagfile
+	# lasttag=$(cat $lasttagfile)
 	lastbrcmt=$(git log -n1 --oneline)
 	orighead=$(git log --oneline -n1 $dnorighead)
 
@@ -1542,6 +1544,8 @@ abort,\
 branch,\
 continue,\
 commit,\
+directory,\
+hashlist,\
 help,\
 history,\
 new,\
@@ -1577,6 +1581,9 @@ else
 			;;
 		"--branch" )
 			set_gitbranch
+			;;
+		"--commands" )
+			show_commands
 			;;
 		"--commit" )
 			run_commit
