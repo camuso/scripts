@@ -354,7 +354,7 @@ myshlvl=$SHLVL
 # Print the Herald
 #
 echo -e ""$BLD""$UND""
-echo "Patch Review $version - Review patches and compare to upstream"
+echo "Patch Review $version  Review patches and compare to upstream"
 echo -e "$OFF"
 
 ! $(git_checkrepo) && git_invrepomsg && exit 1

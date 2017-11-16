@@ -250,7 +250,7 @@ myshlvl=$SHLVL
 # Print the Herald
 #
 echo -e ""$BLD""$UND""
-echo "Patch Develop $version - Check backported patches with upstream"
+echo "Patch Develop $version  Check backported patches with upstream"
 echo -e "$OFF"
 
 ! $(git_checkrepo) && git_invrepomsg && exit 1
