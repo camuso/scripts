@@ -47,6 +47,7 @@ declare exit_reset=3	# Exit after resetting the world
 declare exit_bogus=4	# Exit because of bogus commit
 declare exit_init=5	# The project has not been initialized
 declare exit_pending=6	# There are changes pending, so action can't complete
+declare exit_nothing=7	# There is nothing to do
 declare exit_bad=10	# Exiting from command line call with bad status
 
 declare b_session_inited=false	# boolean to indicate session is inited
@@ -92,7 +93,6 @@ declare b_single=false		# only perform single cherrypick, no menu
 declare gitbranch
 declare ui_bools=""
 
-declare b_nomore
 declare currentuphash
 declare currentupcommit
 
@@ -554,7 +554,6 @@ set_next_cherrypick() {
 	echo
 	loop_range 1 $idx selected
 	[ "$selected" = "q" ] || upcmtstartline=${linary[$((selected - 1))]}
-	$b_nomore && prstr="$eofstr" || prstr="${currentupcommit:0:$cols}"
 	currentupcommit="$(ui_readline $upcmtstartline $upcommitsfile)"
 	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
 	$b_cmdline && exit_cherp $exit_good
@@ -637,7 +636,6 @@ get_next_cherrypick() {
 		return 1
 	fi
 
-	b_nomore=false
 	upcmtstartline=$idx
 	currentupcommit="$line"
 	currentuphash=$(echo $line | cut -d' ' -f1)
@@ -961,6 +959,15 @@ EOF
 #       RETURNS:  none
 #===============================================================================
 run_continue() {
+	local statstr=$(
+cat <<EOF
+You have made changes that must be committed before using "cherp continue".
+You can use "cherp commit" if you want cherp to make these commits for you."
+EOF
+)
+
+	local gitstat=$(git status --porcelain)
+	[ "$gitstat" ] && { echo -e "$statstr"; git status; exit $exit_pending; }
 
 	# echo -e "$UND\0run_continue$OFF"
 	init_cmdline_call
@@ -981,7 +988,7 @@ run_continue() {
 #===============================================================================
 run_commit() {
 	local gitstat=$(git status --porcelain)
-	[ "$gitstat" ] || { git status && exit 0; }
+	[ "$gitstat" ] || { git status && exit $exit_nothing; }
 
 	# echo -e "$UND\0run_commit$OFF"
 	init_cmdline_call
@@ -1368,8 +1375,6 @@ read_session() {
 #       RETURNS:  none
 #===============================================================================
 init_common() {
-
-	b_nomore=false
 
 	$b_new && upcmtstartline=1
 
