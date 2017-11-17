@@ -170,7 +170,7 @@ for filename in $(ls -1 !(*.patch)); do
 	#
 	# Replace spaces, slashes, colons and semicolons with hyphens
 	#
-	subject=$(echo "$subject" | sed "s\[/:; ]\-\g")
+	subject=$(echo "$subject" | sed "s\[/:; *]\-\g")
 	newname=$(printf "%s.patch" "$subject")
 	echo "mv "$filename" -> "$newname""
 	mv "$filename" "$newname"
