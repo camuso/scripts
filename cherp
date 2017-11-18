@@ -181,7 +181,7 @@ EOF
 	done < $workdir/branchlist
 
 	echo -e "$brmsg"
-	loop_range 1 $((index - 1)) linenumber
+	loop_range_q 1 $((index - 1)) linenumber
 
 	[ "$linenumber" == "q" ] && return 1
 	gitbranch="$(ui_readline $linenumber $workdir/branchlist | tr -d [\*" "])"
@@ -552,7 +552,7 @@ set_next_cherrypick() {
 	done < $upcommitsfile
 
 	echo
-	loop_range 1 $idx selected
+	loop_range_q 1 $idx selected
 	[ "$selected" = "q" ] || upcmtstartline=${linary[$((selected - 1))]}
 	currentupcommit="$(ui_readline $upcmtstartline $upcommitsfile)"
 	currentuphash=$(echo $currentupcommit | cut -d' ' -f1)
