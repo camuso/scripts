@@ -42,7 +42,7 @@ cd $1
 echo "Changing directory to "$PWD""
 
 declare -i count=1
-declare -i total=$(ls | wc -l)
+declare -i total=$(ls -1 | wc -l)
 declare -i windex
 declare -i fldwid=0
 declare -a subary
@@ -81,8 +81,8 @@ for filename in $(ls -1 !(*.patch)); do
 
 	# Extract the subject line.
 	#
-	subject=$(grep -m1 "Subject: " $filename)
-	#
+	subject=$(grep -m1 "Subject: " "$filename")
+
 	# Remove the word "Subject: " from the line
 	#
 	subject=$(echo "$subject" | cut -d' ' -f2-)
@@ -159,19 +159,19 @@ for filename in $(ls -1 !(*.patch)); do
 		subject=${subary[@]}
 	fi
 
-	# Remove any brackets, parentheses, and quotes
+	# replace leading bracket with nothing
 	#
-	subject=$(echo "$subject" | sed 's/[][<>(),"]//g')
-	subject=$(echo "$subject" | sed "s/'//g")
+	# Replace non-alphanumerics with a hyphen, then delete the leading
+	# hyphen.
 	#
-	# remove any leading whitespace
+	subject=$(echo "$subject" | sed 's/[^[:alnum:]]\+/-/g')
+	subject=$(echo "$subject" | sed 's/-//')
+
+	# If the last character is a hyphen, remove it.
 	#
-	subject="$(echo -e "$subject" | sed -e 's/^[[:space:]]*//')"
-	#
-	# Replace spaces, slashes, colons and semicolons with hyphens
-	#
-	subject=$(echo "$subject" | sed "s\[/:; *]\-\g")
-	newname=$(printf "%s.patch" "$subject")
+	[ "${subject:(-1)}" = "-" ] && subject=${subject%?}
+
+	newname=$(echo "$subject"".patch")
 	echo "mv "$filename" -> "$newname""
 	mv "$filename" "$newname"
 	count=$((count+1))
