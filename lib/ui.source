@@ -323,10 +323,11 @@ loop_range_q() {
 	while true; do
 		$cmd "$pstr" number
 
-		if ([[ $number =~ ^-?[0-9]+$ ]]  && \
-		    [[ $number -ge $min ]]       && \
-		    [[ $number -le $max ]]) ||
-		    [ "$number" = "q" ] ; then
+		[ "$number" = "q" ] && { eval $3=$number; return 1; }
+
+		if [[ $number =~ ^-?[0-9]+$ ]]  && \
+		   [[ $number -ge $min ]]       && \
+		   [[ $number -le $max ]]; then
 			eval $3=$number
 			echo
 			return 0
