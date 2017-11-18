@@ -183,7 +183,10 @@ EOF
 	echo -e "$brmsg"
 	loop_range_q 1 $((index - 1)) linenumber
 
-	[ "$linenumber" == "q" ] && return 1
+	if [ "$linenumber" == "q" ]; then
+		$b_cmdline && exit_cherp $exit_nothing || return 1
+	fi
+
 	gitbranch="$(ui_readline $linenumber $workdir/branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git am --abort --quiet >/dev/null 2>&1
