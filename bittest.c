@@ -7,7 +7,7 @@
 typedef unsigned char u8;
 
 #define ACPI_MASKABLE_GPE_MAX   0x80
-#define BITS_PER_INT (sizeof(int) * 8)
+#define BITS_PER_INT (sizeof(unsigned int) * 8)
 #define GPE_MASK_ARRAY_SIZE (ACPI_MASKABLE_GPE_MAX / BITS_PER_INT)
 
 #define BIT_INDEX(bit) (bit / BITS_PER_INT)
@@ -15,6 +15,9 @@ typedef unsigned char u8;
 
 #define ACPI_GPE_MASK_SET_BIT(bit) \
 	acpi_masked_gpes[BIT_INDEX(bit)] |= (1 << BIT_OFFSET(bit))
+
+#define ACPI_GPE_MASK_CLR_BIT(bit) \
+	acpi_masked_gpes[BIT_INDEX(bit)] &= ~(1 << BIT_OFFSET(bit))
 
 #define ACPI_GPE_MASK_TEST_BIT(bit) \
 	!!(acpi_masked_gpes[BIT_INDEX(bit)] & (1 << BIT_OFFSET(bit)))
