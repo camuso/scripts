@@ -396,7 +396,7 @@ function apply_patches {
 				    echo "Continuing without patching...\n"
 				    return $stat
 				    ;;
-		    	esac
+			esac
 			exit_me 1
 		fi
 
@@ -445,7 +445,7 @@ show_applyfailmode() {
 	    $applyfailmode_exit ) echo "Exit" ;;
 	    $applyfailmode_cont ) echo "Continue without applying" ;;
 	                      * ) echo "Not a valid failover mode" ;;
-    	esac
+	esac
 }
 
 # init_session_file()
