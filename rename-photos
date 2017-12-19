@@ -30,7 +30,7 @@ usage
 [ $# -ge 2 ] || min_parms
 
 PhotosPath="$1"				# Source path of new photos
-SortPath="$HOME/.imagesort"		# Default sort path
+SortPath="/tmp/photos/"		# Default sort path
 LibraryPath="$2"			# Destination path of renamed photos
 CharFromName=4
 
