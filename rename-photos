@@ -29,11 +29,6 @@ usage
 
 [ $# -ge 2 ] || min_parms
 
-PhotosPath="$1"				# Source path of new photos
-# SortPath="$2"				# Default sort path
-LibraryPath="$2"			# Destination path of renamed photos
-CharFromName=4
-
 declare -i optcount=0
 declare -i argcount=2
 declare prefix=""
@@ -82,13 +77,15 @@ shift $optcount
 [ "$prefix" ] && echo "Your Prefix is: $prefix" || echo "There is no prefix."
 [ "$suffix" ] && echo "Your suffix is: $suffix" || echo "There is no suffix."
 
-############
-# Test to see if $PhotosPath exists, if not prompt for new path / exit.
+PhotosPath="$1"				# Source path of new photos
+LibraryPath="$2"			# Destination path of renamed photos
+CharFromName=4
+
 [ -d $PhotosPath ]  || { echo "$PhotosPath does not exist. Exiting ..."; exit1 ; }
 [ -d $LibraryPath ] || { echo "$LibraryPath does not exist. Exiting ..."; exit 1; }
 
-echo "Your source directory is:       $PhotosPath having $(ls -1 $PhotosPath | wc -l) photos."
-echo "Your destination directory is:  $LibraryPath"
+echo "Your source directory is:       ""$PhotosPath"" having $(ls -1 $PhotosPath | wc -l) photos."
+echo "Your destination directory is:  ""$LibraryPath"
 read -p "Press any key to continue or Ctl-c to exit."
 
 ############
@@ -97,8 +94,11 @@ read -p "Press any key to continue or Ctl-c to exit."
 # jhead  -autorot -ft -nf%y%m%d-%H%M%S $SortPath/*
 cd $PhotosPath
 
+# find $PhotosPath -type f -iname '*.jpg' \
+# -exec jhead -autorot -mkexif -rgt -ft -nf"$prefix"%Y-%m-%d-%H-%M-%S"$suffix" '{}' \;
+
 find $PhotosPath -type f -iname '*.jpg' \
- -exec jhead -autorot -mkexif -rgt -ft -nf"$prefix"%Y-%m-%d-%H-%M-%S"$suffix" '{}' \;
+ -exec jhead -mkexif -ft -nf"$prefix"%Y-%m-%d-%H-%M-%S"$suffix" '{}' \;
 
 ###########
 # Sort files into folders using $CharFromName letters of the file name
