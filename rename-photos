@@ -42,7 +42,13 @@ declare suffix=""
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options]
+$(basename $0) [options] <PhotosPath> <LibraryPath>
+
+  Uses jhead to rename photos according to their exif information.
+
+  PhotosPath  - Directory containing the photos to be renamed
+  LibraryPath - Directory to receive the renamed photos
+
   Options
   -p prefix - 
   -s suffix - 
@@ -71,7 +77,7 @@ while getopts p:s: OPTION; do
 done
 
 shift $optcount
-[ $# -ne $argcount ] || usage 1
+[ $# -eq $argcount ] || usage 1
 
 [ "$prefix" ] && echo "Your Prefix is: $prefix" || echo "There is no prefix."
 [ "$suffix" ] && echo "Your suffix is: $suffix" || echo "There is no suffix."
