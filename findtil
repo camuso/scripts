@@ -1,0 +1,28 @@
+#!/bin/bash
+#
+# findtil
+#
+
+argcount=1
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) <path>
+
+Finds files of the type ??????~?.jpg anc copys them into the
+destination directory.
+
+path - directory into which to copy the files
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+find . -type f -iname "??????~?.jpg" -exec cp -v '{}' "$1" \;
