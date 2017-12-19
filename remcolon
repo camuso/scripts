@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# remcolon
+#
+
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+# [ $# -eq  "$argcount" ] || usage 1
+
+for f in $(ls -1); do
+	[[ "$f" = *":"* ]] || continue
+	fp=$(echo $f | sed -e 's/:/-/g')
+	mv -v $f $fp
+done
