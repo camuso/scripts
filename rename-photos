@@ -27,17 +27,17 @@ function min_parms {
 
 usage
 
-[ $# -ge 2 ] || min_parms
-
 declare -i optcount=0
-declare -i argcount=2
+declare -i argcount=1
 declare prefix=""
 declare suffix=""
+declare PhotosPath=""
+declare LibraryPath=""
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options] <PhotosPath> <LibraryPath>
+$(basename $0) [options] <PhotosPath>
 
   Uses jhead to rename photos according to their exif information.
 
@@ -45,8 +45,9 @@ $(basename $0) [options] <PhotosPath> <LibraryPath>
   LibraryPath - Directory to receive the renamed photos
 
   Options
-  -p prefix - 
-  -s suffix - 
+  -p prefix - to be added to the beginning of the new filename
+  -s suffix - to be added at the end of the new filename
+  -c dir    - copy to a different directory
 \0
 EOF
 )
@@ -56,7 +57,7 @@ usage() {
 	exit $1
 }
 
-while getopts p:s: OPTION; do
+while getopts p:s:c: OPTION; do
     case "$OPTION" in
 
 	p ) prefix=$OPTARG
@@ -65,7 +66,14 @@ while getopts p:s: OPTION; do
 	s ) suffix=$OPTARG
 	    optcount=$((optcount+2))
 	    ;;
-	* ) echo "unrecognized option -$OPTION"
+	c ) LibraryPath=$OPTARG
+	    optcount=$((optcount+2))
+	    [ -d $LibraryPath ] || {
+		    echo "$LibraryPath does not exist. Exiting ..."
+		    exit 1
+	    }
+	    ;;
+        * ) echo "unrecognized option -$OPTION"
 	    echo -e "$usagestr"
 	    exit 127
     esac
@@ -78,21 +86,13 @@ shift $optcount
 [ "$suffix" ] && echo "Your suffix is: $suffix" || echo "There is no suffix."
 
 PhotosPath="$1"				# Source path of new photos
-LibraryPath="$2"			# Destination path of renamed photos
 CharFromName=4
 
 [ -d $PhotosPath ]  || { echo "$PhotosPath does not exist. Exiting ..."; exit1 ; }
-[ -d $LibraryPath ] || { echo "$LibraryPath does not exist. Exiting ..."; exit 1; }
 
 echo "Your source directory is:       ""$PhotosPath"" having $(ls -1 $PhotosPath | wc -l) photos."
-echo "Your destination directory is:  ""$LibraryPath"
+[ "$LibraryPath" ] && echo "Your destination directory is:  ""$LibraryPath"
 read -p "Press any key to continue or Ctl-c to exit."
-
-############
-# rename all image files in $SortPath
-# FolderDateDD-HHMMSS.ext
-# jhead  -autorot -ft -nf%y%m%d-%H%M%S $SortPath/*
-cd $PhotosPath
 
 # find $PhotosPath -type f -iname '*.jpg' \
 # -exec jhead -autorot -mkexif -rgt -ft -nf"$prefix"%Y-%m-%d-%H-%M-%S"$suffix" '{}' \;
@@ -112,17 +112,5 @@ find $PhotosPath -type f -iname '*.jpg' \
 #	mv -v $SortPath/$file $LibraryPath/$FolderDate/$file
 #done
 
-##########
-# move sorted files into photo library
-mv -v $PhotosPath/* $LibraryPath/
+[ "$LibraryPath" ] && rsync -Pvat $PhotosPath/*.jpg $LibraryPath/.
 
-##########
-# Umount the card
-# umount $CameraPath
-
-##########
-# End notification
-echo
-echo "Photos  from: $PhotosPath"
-echo "End location: $LibraryPath"
-echo
