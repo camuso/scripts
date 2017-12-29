@@ -98,7 +98,7 @@ read -p "Press any key to continue or Ctl-c to exit."
 # -exec jhead -autorot -mkexif -rgt -ft -nf"$prefix"%Y-%m-%d-%H-%M-%S"$suffix" '{}' \;
 
 find $PhotosPath -type f -iname '*.jpg' \
- -exec jhead -mkexif -ft -nf"$prefix"%Y-%m-%d--%H-%M-%S"$suffix" '{}' \;
+ -exec jhead -ft -n"$prefix"%Y-%m-%d--%H-%M-%S"$suffix" '{}' \;
 
 ###########
 # Sort files into folders using $CharFromName letters of the file name
