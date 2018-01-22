@@ -49,7 +49,7 @@ usage() {
 # leading colon in options list tells the option parser to parse errors
 # silently, allowing the user to address parsing errors.
 #
-while getopts :s:adrn:h OPTION; do
+while getopts :s:adr:h OPTION; do
     case "$OPTION" in
 
 	s ) $gitold && continue
@@ -76,5 +76,12 @@ cmdline="$@"
 $gitold || hashwid="%<(9)"
 [ "$cmtauth" ] || authwid=""
 
-fmtstr="$hashwid%C(bold green)%h $authwid$cmtauth$cmtdate%C(reset)%s"
+# If output is to terminal, then do the special formatting.
+# Else, if being redirected, just plain output.
+#
+[ -t 1 ] && \
+	fmtstr="$hashwid%C(bold green)%h $authwid$cmtauth$cmtdate%C(reset)%s" \
+|| \
+	fmtstr="$hashwid%h $authwid$cmtauth$cmtdate%s"
+
 git log $reverse --date=short --pretty=format:"$fmtstr" $cmdline
