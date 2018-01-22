@@ -12,6 +12,7 @@ declare hashwid=""
 declare authwid=""
 declare fmtstr=""
 declare cmtexpr="-1"
+declare b_format=true
 
 declare gver=$(git --version | cut -d' ' -f3)
 declare -i gmaj=$(echo $gver | cut -d'.' -f1)
@@ -46,20 +47,25 @@ usage() {
 	exit $1
 }
 
+# If output is to terminal, then do the special formatting.
+# Else, if being redirected, just plain output.
+#
+[ -t 1 ] && b_format=true || b_format=false
+
 # leading colon in options list tells the option parser to parse errors
 # silently, allowing the user to address parsing errors.
 #
-while getopts :s:adr:h OPTION; do
+while getopts :ads:rh- OPTION; do
     case "$OPTION" in
 
 	s ) $gitold && continue
 	    authwid="%<($OPTARG,mtrunc)"
 	    let optcount++
 	    ;;
-	a ) cmtauth="%C(bold yellow)%ae "
+	d ) $b_format && cmtdate="%C(bold green)%ad" || cmtdate="%ad"
 	    let optcount++
 	    ;;
-	d ) cmtdate="%C(bold green)%ad "
+	a ) $b_format && cmtauth="%C(bold yellow)%ae" || cmtauth="%ae"
 	    let optcount++
 	    ;;
 	r ) reverse="--reverse"
@@ -67,21 +73,20 @@ while getopts :s:adr:h OPTION; do
 	    ;;
 	h ) echo "Option: $OPTION"
 	    usage 0
+	    ;;
+	- ) break
     esac
 done
 
 shift $optcount
 cmdline="$@"
 
-$gitold || hashwid="%<(9)"
+$gitold || hashwid="%<(8)"
 [ "$cmtauth" ] || authwid=""
 
-# If output is to terminal, then do the special formatting.
-# Else, if being redirected, just plain output.
-#
-[ -t 1 ] && \
-	fmtstr="$hashwid%C(bold green)%h $authwid$cmtauth$cmtdate%C(reset)%s" \
+$b_format && \
+	fmtstr="$hashwid%C(bold green)%h$authwid$cmtauth $cmtdate %C(reset)%s" \
 || \
-	fmtstr="$hashwid%h $authwid$cmtauth$cmtdate%s"
+	fmtstr="$hashwid%h$authwid$cmtauth $cmtdate %s"
 
 git log $reverse --date=short --pretty=format:"$fmtstr" $cmdline
