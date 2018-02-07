@@ -1,0 +1,143 @@
+#!/bin/bash
+#
+# addversiontosubject
+#
+
+shopt -s extglob
+
+declare -i optcount=0
+declare -i ver
+declare dir=""
+declare sstr='*.patch'
+declare b_dir=false
+declare b_sstr=false
+declare file
+declare line
+declare front
+declare back
+declare newstr
+declare index
+declare tmpfil="__repline_temp"
+declare -i lnum
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] ver
+
+Inserts a version number into the "Subject:" line of a patch.
+Assumes that the patch is formatted as "[<text> PATCH <more-text> nn/mm]"
+where nn/mm is the patch number in the series.
+
+Given only the version number, e.g. "2", etc, the script will insert it
+as "V2" just before the right bracket as follows.
+
+"[<text> PATCH <more-text> nn/mm V2]"
+
+  ver - the version number to insert in the subject line, number only
+
+  Options
+
+  -d dir  - Specifies the directory in which the patch files are located.
+            Default is the current directory.
+
+  -s sstr - Specifies a search string. You must provide the whole search
+            string, including the wild cards.
+            Default is "*.patch"
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+read_nth_line() {
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+# strindex string-1 string-2
+#
+# Return zero-based index of string-2 in string-1
+# Returns -1 if string-2 is not found in string-1
+#
+strindex() {
+	local x="${1%%$2*}"
+	[[ $x = $1 ]] && echo -1 || echo ${#x}
+}
+
+repline() {
+	local num=$1
+	local str="$2"
+	local fil="$3"
+	local lin
+	local index=1;
+
+	touch $tmpfil
+	> $tmpfil
+
+	while read lin; do
+		[ $index -eq $num ] && echo "$str" >> $tmpfil \
+				    || echo "$lin" >> $tmpfil
+		let index++
+	done < "$fil"
+
+	mv -f $tmpfil $fil
+}
+
+while getopts d:s: OPTION; do
+    case "$OPTION" in
+
+	d ) dir=$OPTARG
+	    b_dir=true
+	    optcount=$((optcount+2))
+	    ;;
+	s ) sstr="$OPTARG"
+	    b_sstr=true
+	    optcount=$((optcount+2))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
+[ $# -eq 1 ] || usage 1
+
+ver="$1"
+$b_dir && cd "$dir"
+
+for file in $(ls $sstr); do
+
+	echo $file
+
+	# Find the line number of the subject line.
+	lnum=$(grep 'Subject:' -m1 -n "$file" | cut -d':' -f1)
+
+	# Acquire the subject line
+	line=$(read_nth_line $lnum "$file")
+
+	# Locate the first "]" in the subject line
+	index=$(strindex "$line" "]")
+	[ $index -lt 0 ] && continue
+
+	# Acquire the front and back parts of the line
+	front="${line:0:$index}"
+	back="${line:$index}"
+
+	# Create the new subject line with the version number
+	newstr="$front"" V""$ver""$back"
+	echo $newstr
+
+	# Replace the subject line with the new one having the version number.
+	repline "$lnum" "$newstr" "$file"
+done
+
+rm -f $tmpfil
+
