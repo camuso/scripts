@@ -81,7 +81,7 @@ repline() {
 	touch $tmpfil
 	> $tmpfil
 
-	while read lin; do
+	while IFS= read -r lin; do
 		[ $index -eq $num ] && echo "$str" >> $tmpfil \
 				    || echo "$lin" >> $tmpfil
 		let index++
@@ -138,6 +138,8 @@ for file in $(ls $sstr); do
 	# Replace the subject line with the new one having the version number.
 	repline "$lnum" "$newstr" "$file"
 done
+
+$b_dir && cd -
 
 rm -f $tmpfil
 
