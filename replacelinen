@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# replacelinen
+#
+
+declare -i argcount=3
+declare -i ERR_ARG=1
+declare -i ERR_NUM=2
+declare -i ERR_FIL=3
+declare -i OK_EXIT=0
+declare -i CTLC_EXIT=130
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) linenum newstr filepath
+
+Replace a line of text with a new string at a specific line of a file.
+
+  linenum  - 1-based number of the line being replaced
+  newstr   - the string to replace it with
+  filepath - the complete path of the file
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+}
+
+exit_me() {
+	local exit_code=$1
+	# echo "exit_code: $exit_code"
+	((exit_code == CTLC_EXIT || exit_code == OK_EXIT)) || usage
+	exit $exit_code
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	exit_me $CTLC_EXIT
+}
+
+repline() {
+	local num=$1
+	local str="$2"
+	local fil="$3"
+	local tmpfil="__replinen_temp"
+	local lin
+	local index=1;
+
+	> $tmpfil
+
+	while IFS= read -r lin; do
+		[ $index -eq $num ] && echo "$str" >> $tmpfil \
+				    || echo "$lin" >> $tmpfil
+		let index++
+	done < "$fil"
+
+	mv -f $tmpfil $fil
+	rm -f $tmpfil
+}
+
+main() {
+	# Trap for control-c
+	trap control_c SIGINT
+	[ $# -eq  "$argcount" ] || exit_me $ERR_ARG
+
+	local num=$1
+	local str="$2"
+	local fil="$3"
+
+	[[ $num =~ ^-?[0-9]+$ ]] || exit_me $ERR_NUM
+	[ -f $fil ] || exit_me $ERR_FIL
+
+	repline $num "$str" "$fil"
+}
+
+main $1 "$2" "$3"
+
+exit_me $OK_EXIT
+
