@@ -7,6 +7,7 @@ declare remotename="$1"
 declare owneropt=""
 declare logfile="$HOME/.initmystuff.log"
 declare filelist=""
+declare repolist="bin rcback"
 
 #[ "$remotename" ] && owneropt="--no-same-owner"
 
@@ -24,12 +25,16 @@ echo
 # If the bin directory exists, leave it alone and just note that
 # in the log file.
 #
-[ -d "bin" ] \
-	&& echo -e "
-----------------------------------------
-- bin directory exists. Not cloning..  -
-----------------------------------------\n" >> "$logfile" 2>&1 \
-	|| git clone https://github.com/camuso/scripts.git bin
+for repo in $repolist; do
+	[ -d $repo ] && mv -f $repo "$repo".old
+	git clone https://github.com/camuso/"$repo".git $repo
+done
+
+# Update the bin directory, if needed, and delete the newly cloned
+# scripts directory.
+#
+mv -uv scripts temp
+rm -fvr scripts
 
 # Unpack the archives and save them in the ~/ark directory
 #
@@ -157,6 +162,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 		rhpkgurl="http://download.devel.redhat.com/rel-eng/dist-git/fedora/rhpkg.repo"
 		rcmurl="http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo"
 		installagent="dnf"
+		dnf install -y fedpkg
 
 	elif [[ "$distro" == *"RedHat"* ]]; then
 		yum install -y redhat-lsb-core
@@ -181,6 +187,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	gcc \
 	gcc-c++ \
 	openssl \
+	bind-utils \
 	openssl-devel \
 	ncurses-devel \
 	rpm-build \
@@ -190,6 +197,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	ipmitool \
 	OpenIPMI \
 	watchdog \
+	hostname \
 	kmmod \
 	kmod-libs \
 	kmodtool \
@@ -199,6 +207,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	elinks \
 	lynx \
 	patchutils \
+	rsync \
 	texinfo \
 	trousers \
 	trousers-devel \
