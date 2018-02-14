@@ -1,0 +1,109 @@
+#!/bin/bash
+#
+# insertaftersubject
+#
+
+declare -i EXIT_OK=0
+declare -i EXIT_ERR=1
+declare -i ERR_NOFIL=1
+declare -i ERR_NODIR=2
+declare -i ERR_NOTXT=3
+
+declare tmpfil="./__insertaftersubject.tmp"
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) directory file
+
+Inserts the contents of "file" after the "Subject" line of all the .patch
+files in "directory". For the sake of predictability, spacer lines should
+be included in the "file".
+
+  directory - the directory containing the patch files
+  file      - the file to be inserted after the "Subject" line.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+exitme() {
+	local exitcode=$1
+	local item="$2"
+
+	case $exitcode in
+		$EXIT_OK ) 	exit $EXIT_OK ;;
+		$ERR_NOFIL | \
+		$ERR_NODIR )	echo "$item: does not exist" ;;
+		$ERR_NOTXT)	echo "$item: is not a text file" ;;
+	esac
+	exit $EXIT_ERR
+}
+
+read_nth_line(){
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+insertfile() {
+	local dst="$1"
+	local num=$2
+	local src="$3"
+	local lin
+	local index=1
+	local b_nextline
+
+	> $tmpfil
+
+	while IFS= read -r lin; do
+		echo "$lin" >> $tmpfil
+		if [ $index -eq $num ]; then
+			cat "$src" >> $tmpfil
+		fi
+		let index++
+	done < "$dst"
+
+	mv -f $tmpfil $dst
+}
+
+main() {
+	local argcount=2
+	[ $# -eq  "$argcount" ] || usage 1
+
+	local dir="$1"
+	local fil="$2"
+	local lnum
+	local line
+
+	for pat in $(ls $dir/*.patch); do
+
+		# Test for existence of file and directory
+		[ -f "$fil" ] || exitme $ERR_NOFIL "$fil"
+		[ -d "$dir" ] || exitme $ERR_NODIR "$dir"
+
+		# Test for ascii text file
+		file $fil | grep -q -m1 ASCII
+		[ $? -eq 0 ] || exitme $ERR_NOTXT "$fil"
+
+		# Find the line number of the subject line of the patch file.
+		lnum=$(grep 'Subject:' -m1 -n "$pat" | cut -d':' -f1)
+		let lnum++
+
+		line=$(read_nth_line $lnum "$pat")
+		[ "$line" ] && let lnum++
+
+		# insert the file starting at the next line
+		insertfile $pat $lnum $fil
+	done
+
+	rm -f $tmpfil
+}
+main $@
