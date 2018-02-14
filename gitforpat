@@ -4,17 +4,24 @@
 #
 
 declare -i argcount=2
+declare -i optcount=0
+declare cletter="--no-cover-letter"
+declare reroll="--reroll-count=0"
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) commitspec
+$(basename $0) [OPTIONS] directory commitspec
 
   Generate a patch set from a commit expression.
 
   directory  - directory that will contain the patch set
   commitspec - any commit expression, which can also be preceeded by other
                git-format-patch options.
+
+  OPTIONS:
+  -c      - generate a cover letter
+  -v n    - version number of the patch
 
   The patch set will be created with the following git command.
 
@@ -38,6 +45,23 @@ usage() {
 	exit $1
 }
 
+while getopts :cv: OPTION; do
+    case "$OPTION" in
+
+	c ) cletter="--cover-letter"
+	    b_dir=true
+	    optcount=$((optcount+1))
+	    ;;
+	v ) reroll="--reroll-count=$OPTARG"
+	    optcount=$((optcount+2))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+shift $optcount
 [ $# -eq  "$argcount" ] || usage 1
 
 directory="$1"
@@ -45,6 +69,8 @@ shift
 commitspec="$@"
 
 git format-patch \
+	"$cletter" \
+	"$reroll" \
 	--no-renames \
 	--signoff \
 	--stat=80 \
