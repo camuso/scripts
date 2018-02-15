@@ -17,26 +17,37 @@ touch "$logfile"
 cat /dev/null > "$logfile"
 echo >> "$logfile" 2>&1
 
-echo "***************************" >> "$logfile" 2>&1
-echo "* Clone the scripts       *" >> "$logfile" 2>&1
-echo "***************************" >> "$logfile" 2>&1
+echo "*******************************" >> "$logfile" 2>&1
+echo "* Clone or update the scripts *" >> "$logfile" 2>&1
+echo "*******************************" >> "$logfile" 2>&1
 echo
 
-# If the bin directory exists, leave it alone and just note that
-# in the log file.
-#
 for repo in $repolist; do
-	[ -d $repo ] && mv -f $repo "$repo".old
-	git clone https://github.com/camuso/"$repo".git $repo
+	if [ -e $repo ]; then
+		if [ -d $repo/.git ]; then
+			cd $repo
+			git pull
+			cd -
+		else
+			rm -rf repo
+			git clone https://github.com/camuso/"$repo".git $repo
+		fi
+	else
+		git clone https://github.com/camuso/"$repo".git $repo
+	fi
 done
 
 # Update the bin directory, if needed, and delete the newly cloned
 # scripts directory.
 #
-[ -d temp ] && rm -rf temp
-mv -uv scripts temp
-rm -fvr scripts
-rm -rf rcbak.old
+if [ -d bin/.git ]; then
+	cd bin
+	git pull
+	cd -
+else
+	[ -e bin ] && rm -rf bin
+	mv scripts bin
+fi
 
 # Unpack the archives and save them in the ~/ark directory
 #
