@@ -41,6 +41,7 @@ done
 # scripts directory.
 #
 if [ -d bin/.git ]; then
+	rm -rf scripts
 	cd bin
 	git pull
 	cd -
@@ -51,27 +52,27 @@ fi
 
 # Unpack the archives and save them in the ~/ark directory
 #
-[ -d ~/ark ] || mkdir ~/ark
-cd ~/ark
+# [ -d ~/ark ] || mkdir ~/ark
+# cd ~/ark
 
 filelist="$(ls -1 ~/ark)"
 
-echo "***************************" >> "$logfile" 2>&1
-echo "* Unpacking the tar files *" >> "$logfile" 2>&1
-echo "***************************" >> "$logfile" 2>&1
-echo
-for file in $filelist	# <-- NO QUOTES around $filelist!
-do
-	echo "---------------" >> "$logfile" 2>&1
-	echo "Unpacking $file" | tee -a "$logfile" 2>&1
-	tar -C $HOME --no-same-owner --keep-newer-files -xvf $file \
-		>> "$logfile" 2>&1
-	echo "* * * * * * * * * " >> "$logfile" 2>&1
-	echo "" >> "$logfile" 2>&1
-done
-echo "***************************" >> "$logfile" 2>&1
-echo >> "$logfile" 2>&1
-echo >> "$logfile" 2>&1
+# echo "***************************" >> "$logfile" 2>&1
+# echo "* Unpacking the tar files *" >> "$logfile" 2>&1
+# echo "***************************" >> "$logfile" 2>&1
+# echo
+# for file in $filelist	# <-- NO QUOTES around $filelist!
+# do
+#	echo "---------------" >> "$logfile" 2>&1
+#	echo "Unpacking $file" | tee -a "$logfile" 2>&1
+#	tar -C $HOME --no-same-owner --keep-newer-files -xvf $file \
+#		>> "$logfile" 2>&1
+#	echo "* * * * * * * * * " >> "$logfile" 2>&1
+#	echo "" >> "$logfile" 2>&1
+# done
+# echo "***************************" >> "$logfile" 2>&1
+# echo >> "$logfile" 2>&1
+# echo >> "$logfile" 2>&1
 
 # Return to $HOME
 #
