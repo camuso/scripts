@@ -7,7 +7,7 @@ declare remotename="$1"
 declare owneropt=""
 declare logfile="$HOME/.initmystuff.log"
 declare filelist=""
-declare repolist="scripts rcbak"
+declare repolist="scripts rcbak hints etcbk"
 
 #[ "$remotename" ] && owneropt="--no-same-owner"
 
@@ -29,7 +29,7 @@ for repo in $repolist; do
 			git pull
 			cd -
 		else
-			rm -rf repo
+			rm -rf $repo
 			git clone https://github.com/camuso/"$repo".git $repo
 		fi
 	else
@@ -80,25 +80,25 @@ cd
 # Copy etc and rc files out of their archive directories into their respective
 # real directories, but only if they're newer.
 #
-#echo "************************************************" >> "$logfile" 2>&1
-#echo "* Copying newer files from Backup Dirctories   *" >> "$logfile" 2>&1
-#echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
-#echo "************************************************" >> "$logfile" 2>&1
-#echo >> "$logfile" 2>&1
+echo "************************************************" >> "$logfile" 2>&1
+echo "* Copying newer files from Backup Dirctories   *" >> "$logfile" 2>&1
+echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
+echo "************************************************" >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
 
 # Get the full pathname so we can use that to copy from.
 # If the file or directory already exists, then copy it into a .orig before
 # performing the rsync and possibley overwriting it with new content.
 # If the .orig file already exists, do not write over it.
 #
-#for f in $(ls -rtd1 rcbak/{*,.*}); do
-#	name=$(basename $f);
-#	if [ -f $f ] && [ -f "$name" ]; then
-#		[[ -f $name.orig ]] || cp -v $name $name.orig 2>&1 | tee -a $logfile
-#	fi
-#done
+for f in $(ls -rtd1 rcbak/{*,.*}); do
+	name=$(basename $f);
+	if [ -f $f ] && [ -f "$name" ]; then
+		[[ -f $name.orig ]] || cp -v $name $name.orig 2>&1 | tee -a $logfile
+	fi
+done
 
-#rsync -Pvat rcbak/ . 2>&1 | tee -a $logfile
+rsync -Pvat rcbak/ . 2>&1 | tee -a $logfile
 
 if [ "$remotename" == "root" ]; then
 	for file in \
@@ -225,6 +225,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	trousers \
 	trousers-devel \
 	rhpkg \
+	vim \
 	koji \
 	brewkoji \
 	http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
