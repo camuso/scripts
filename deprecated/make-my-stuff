@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# make-my-stuff 0.2
+
+[ -d ~/ark ] || mkdir ~/ark/
+
+cat /dev/null > ~/.makemystuff.log
+echo
+for tarname in \
+"code" \
+"hints" \
+"etcbk" \
+"rcbak" \
+; do
+	echo "Packing archive "$tarname".tgz"
+	tar -C $HOME --exclude-vcs -czvf ~/ark/$tarname.tgz $tarname/ \
+		>> ~/.makemystuff.log 2>&1
+done
+echo
