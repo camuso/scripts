@@ -54,9 +54,9 @@ fi
 #
 # [ -d ~/ark ] || mkdir ~/ark
 # cd ~/ark
-
-filelist="$(ls -1 ~/ark)"
-
+#
+# filelist="$(ls -1 ~/ark)"
+#
 # echo "***************************" >> "$logfile" 2>&1
 # echo "* Unpacking the tar files *" >> "$logfile" 2>&1
 # echo "***************************" >> "$logfile" 2>&1
@@ -76,7 +76,7 @@ filelist="$(ls -1 ~/ark)"
 
 # Return to $HOME
 #
-cd
+# cd
 
 # Copy etc and rc files out of their archive directories into their respective
 # real directories, but only if they're newer.
@@ -99,7 +99,7 @@ for f in $(ls -rtd1 rcbak/{*,.*}); do
 	fi
 done
 
-rsync -Pvat rcbak/ . 2>&1 | tee -a $logfile
+rsync -Pvat --exclude {.git,.gitignore} rcbak/ . 2>&1 | tee -a $logfile
 
 if [ "$remotename" == "root" ]; then
 	for file in \
@@ -159,7 +159,6 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	declare rhpkgurl=""
 	declare rcmurl=""
 	declare installagent""
-
 
 	# Apparently, RHEL does not come with lsb_release installed.
 	# We will need another method to determine whether this is Fedora or RHEL
