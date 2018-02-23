@@ -7,7 +7,7 @@ declare remotename="$1"
 declare owneropt=""
 declare logfile="$HOME/.initmystuff.log"
 declare filelist=""
-declare repolist="scripts rcbak hints etcbk"
+declare repolist="scripts rcbak hints etcbk misc ipmi"
 
 #[ "$remotename" ] && owneropt="--no-same-owner"
 
