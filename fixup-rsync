@@ -4,9 +4,9 @@ remoteuser="$1"
 
 if [ "$remoteuser" == "root" ]; then
 	chown -v root.root /root
-	chmod -v g-w /root
+#	chmod -v g-w /root
 else
 	chown -v $remoteuser.$remoteuser /home/$remoteuser
-	chmod -v g-w /home/$1
+#	chmod -v g-w /home/$1
 fi
 
