@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# vim-filelist
+#
+
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+declare filelist="$1"
+
+for ((index=1; ; ++index)); do f=$(readlinen $index $filelist); echo "$f"; read; [ "$f" ] && vim "$f" || break; read; done
