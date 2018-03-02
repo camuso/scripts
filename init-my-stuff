@@ -22,6 +22,9 @@ echo "* Clone or update the scripts *" >> "$logfile" 2>&1
 echo "*******************************" >> "$logfile" 2>&1
 echo
 
+which git
+[ $? -eq 0 ] || yum install -y git
+
 for repo in $repolist; do
 	if [ -e $repo ]; then
 		if [ -d $repo/.git ]; then
@@ -204,7 +207,6 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	openssl-devel \
 	ncurses-devel \
 	rpm-build \
-	git \
 	git-email \
 	cscope \
 	ipmitool \
@@ -260,6 +262,11 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 				git fetch --all
 				git checkout -b rh7 rh7/master
 				git checkout -b pegas pegas/master
+				;;
+			"8" )	git remote add rh8 git://git.host.prod.eng.bos.redhat.com/kernel-rhel8.git
+				git remote update
+				git fetch
+				git checkout -b rh8 rh8/master
 				;;
 		esac
 	fi
