@@ -3,11 +3,16 @@
 # vim-filelist
 #
 
+declare -i argcount=1
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0)
+$(basename $0) filelist
+
+filelist - a list of files with no empty lines
+
+The vim editor is invoked for every file in the list.
 
 \0
 EOF
@@ -18,8 +23,27 @@ usage() {
 	exit $1
 }
 
+function read_nth_line {
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+press_any() {
+	echo -n "Press any key to continue or ctl-c to quit... "
+	read -n1
+}
+
 [ $# -eq  "$argcount" ] || usage 1
 
 declare filelist="$1"
 
-for ((index=1; ; ++index)); do f=$(readlinen $index $filelist); echo "$f"; read; [ "$f" ] && vim "$f" || break; read; done
+for ((index=1; ; ++index)); do
+	f=$(read_nth_line $index $filelist)
+	echo "vim $f"
+	press_any
+	[ "$f" ] && vim "$f" || break
+	press_any
+done
