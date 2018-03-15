@@ -143,3 +143,21 @@ comment2list(){
 	done < $templist
 	rm -f $templist
 }
+
+# strtok - tokenizes a string and returns an array
+#
+# $1 - the string to tokenize
+# $2 - the string of delimiters
+# $3 - returns the tokenized string as an array
+#
+# examples:
+#
+# strtok kernel-pegas-4.11.0-2.el7.x86_64 ".-" array
+#
+# ${array[@]} will contain all the tokens separated by delimiters "."
+# and "-", and the delimiters will be replaced by spaces.
+#
+strtok() {
+	IFS="$2" read -r -a $3 <<< "$1"
+}
+
