@@ -42,16 +42,7 @@ $(basename $0) [options] filepath
 EOF
 )
 
-getlist() {
-	echo $1
-	find $1 -type f -name \*.[ch] \
-		-exec echo '{}' \; 
-	#	-exec sh -c ' \
-	#	grep "#include" $1 | cut -d':' -f2;' \
-	#	sh {} \;
-}
-
-usage() {
+sage() {
 	echo -e "$usagestr"
 	exit $1
 }
@@ -78,8 +69,8 @@ shopt -s globstar
 
 filepath="$1"
 [ -f "$filepath" ] || {
-	echo -e "\n\t$BLD$filepath not found!$OFF"
-	exit 0
+	echo -e "\n\t$BLD$filepath not a file! $OFF"
+	exit $_NOINCLUDES_
 }
 
 dir=$(dirname $filepath)

@@ -65,19 +65,19 @@ incfile="$1"
 srcfile="$2"
 
 IFS=
-echo -e "\n$BLD\0findinclude $incfile $srcfile$OFF"
+echo -e "\n$BLD$(basename $0) $incfile $srcfile$OFF"
 inclist=$(getallinclude $srcfile)
-[ $? -eq $_NOINCLUDES_ ] && { echo -e "$BLD\tno includes$OFF"; exit 0; }
-echo "$inclist"
+[ $? -eq $_NOINCLUDES_ ] && { echo -e "$BLD\tno includes$OFF"; exit $_NOINCLUDES_; }
+# echo "$inclist"
 
 #set -x
 while read line; do
-	echo "$line" | grep -w "$incfile"
+	echo "$line" | grep -w "$incfile" 2>&1 > /dev/null
 	[ $? -eq 0 ] && { echo ""$srcfile" contains "$incfile""; exit $_FOUNDIT_; }
 done <<< "$inclist"
 
 while read line; do
-	echo -e "$BLD\0parse $line for $incfile$OFF"
+	# (echo -e "$BLD\0parse $line for $incfile$OFF")
 	[ -f "$line" ] || continue
 	findinclude "$incfile" "$line"
 	stat=$?
