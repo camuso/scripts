@@ -20,4 +20,4 @@ function usage {
 
 [ $# -ne 3 ] && usage
 
-sed -i "s|"$curstr"|"$newstr"|g" $file
+sed -i "s|$curstr|$newstr|g" $file
