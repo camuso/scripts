@@ -3,6 +3,14 @@
 # getallinclude
 #
 
+######################################################
+#
+# REQUIRES THESE BASH SCRIPTS
+#
+# getinclude
+#
+######################################################
+
 #
 # Text attributes
 #
@@ -64,8 +72,6 @@ shift $optcount
 
 shopt -s extglob
 shopt -s globstar
-
-> .tmp.out
 
 filepath="$1"
 [ -f "$filepath" ] || {
