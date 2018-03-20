@@ -59,7 +59,6 @@ insertfile() {
 	local src="$3"
 	local lin
 	local index=1
-	local b_nextline
 
 	> $tmpfil
 
@@ -97,6 +96,8 @@ main() {
 		lnum=$(grep 'Subject:' -m1 -n "$pat" | cut -d':' -f1)
 		let lnum++
 
+		# If there is anything on the next line after the Subject line,
+		# then increment to the line after that.
 		line=$(read_nth_line $lnum "$pat")
 		[ "$line" ] && let lnum++
 
