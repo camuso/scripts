@@ -15,6 +15,7 @@ $0 [options] <user@host>
 Options:
   -f file  - send only the named archive
   -i       - install default apps to root@host
+  -p       - host does not have push priveleges to git repos
   -h       - this help text
 
 EOF
@@ -35,14 +36,17 @@ sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 rsyncmd="rsync -Pvat --no-owner --no-group"
 file=""
 user=""
+pushpriv=""
 installer=false
 
-while getopts "ihf:" OPTION; do
+while getopts "iphf:" OPTION; do
 	case "$OPTION" in
 		f )	file="$OPTARG"
 			[ -f "$file" ] || do_usage
 			;;
 		i )	installer=true
+			;;
+		p )	pushpriv="-p"
 			;;
 		h )	do_usage
 			;;
@@ -56,9 +60,9 @@ echo "connecting with $remote..."
 $rsyncmd ~/ark/$file $remote:ark/$file
 
 if $installer; then
-	runremote $user $hos ~/bin/init-my-stuff $user "install"
+	runremote $user $hos ~/bin/init-my-stuff $pushpriv $user "install"
 else
-	runremote $user $hos ~/bin/init-my-stuff $user
+	runremote $user $hos ~/bin/init-my-stuff $pushpriv $user
 fi
 
 echo
