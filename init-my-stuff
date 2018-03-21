@@ -52,7 +52,7 @@ which git
 
 for repo in $repolist; do
 	if [ -e $repo ]; then
-		if [ -d $repo/.git ]; then
+		if [ -d "$repo"/.git ]; then
 			echo "Updating $repo" | tee -a "$logfile" 2>&1
 			cd $repo
 			git pull
@@ -104,11 +104,12 @@ echo >> "$logfile" 2>&1
 for f in $(ls -rtd1 rcbak/{*,.*}); do
 	name=$(basename $f);
 	if [ -f $f ] && [ -f "$name" ]; then
-		[[ -f $name.orig ]] || cp -v $name $name.orig 2>&1 | tee -a $logfile
+		[[ -f "$name".orig ]] \
+			|| cp -v $name "$name".orig 2>&1 | tee -a $logfile
 	fi
 done
 
-rsync -Pvat --exclude {.git,.gitignore} rcbak/ . 2>&1 | tee -a $logfile
+rsync -Pvat --exclude '.git*' rcbak/ . 2>&1 | tee -a $logfile
 
 if [ "$remotename" == "root" ]; then
 	for file in \
