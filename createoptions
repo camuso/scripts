@@ -14,6 +14,7 @@
 # usage creatoptions file "opt opt opt:arg opt"
 #####################################################################
 
+source lib/ui.source
 source lib/formatargs
 
 usagestr=$(
@@ -69,7 +70,7 @@ declare b_opts		# options belonging to THIS script
 declare b_args=false	# arguments belonging to THIS script
 declare -i index=0
 declare -i optcount=0	# counts opts for THIS script
-declare -i optnum=0	# the number of optioins passed to the created script
+declare -i optnum=0	# the number of options passed to the created script
 declare -i argcount=0	# counts any args to pass to the created script
 declare -i width=0	# width of an opt or arg
 declare -i widest=0	# width of widest opt or arg
@@ -109,6 +110,7 @@ file=$1
 optflg=""
 optarg=""
 
+[ "$optstr" ] || optstr="h"
 
 # Create an array of options flags and arguments for those options
 # flags. For example, a command line like this:
@@ -154,7 +156,7 @@ $(basename $0) [options]' >> $file
 
 $b_args && formatargs $file "${argstr[@]}" argcount
 
-printf "\n%sOptions\n" "$spacer" >> $file
+printf "\nOptions:\n" "$spacer" >> $file
 
 index=0
 while [ $index -lt $optnum ]; do
@@ -165,7 +167,8 @@ while [ $index -lt $optnum ]; do
 	# The following line puts the optional argument in a fixed
 	# width field determined by widest in the previous loop.
 	#
-	printf "%-${widest}s - \n" ${optargarray[$index]}  >> $file
+	printf "%-${widest}s - " ${optargarray[$index]}  >> $file
+	[ "$optflg" == "h" ] && echo "help" >> $file || echo >> $file
 	echo "optflg = ${optflgarray[$index]} optarg = ${optargarray[$index]}"
 	let index++
 done
@@ -176,7 +179,7 @@ EOF
 
 usage() {
 	echo -e "$usagestr"
-	exit $1
+	exitme 0
 }
 ' >> $file
 
@@ -210,7 +213,11 @@ while [ $index -lt $optnum ]; do
 		echo -e "$optarg=\$OPTARG" >> $file
 		echo -e "\t    "'optcount=$((optcount+2))' >> $file
 	else
-		echo -e 'optcount=$((optcount+1))' >> $file
+		if [ "$optflg" == "h" ]; then
+			echo -e "usage" >> $file
+		else
+			echo -e 'optcount=$((optcount+1))' >> $file
+		fi
 	fi
 
 	echo -en "\t    ;;\n" >> $file
@@ -224,5 +231,5 @@ echo -en "\t    exit 127\n" >> $file
 echo -e  "    esac" >> $file
 echo -e  "done\n" >> $file
 echo -e  'shift $optcount' >> $file
-echo -e  '[ $# -eq '"$argcount ] || usage 1\n" >> $file
+echo -e  "[ $# -eq $argcount ] || exitme $ui_err_invargc\n" >> $file
 chmod +x $file

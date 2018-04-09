@@ -76,27 +76,49 @@ shift $optcount
 ofile=$1
 
 if [ -f "$ofile" ]; then
+# set -x
 	echo
 	echo "File: $ofile already exists!"
 	getyn "Do you want to overwrite?" answer
 	$answer && echo "Overwriting file: $ofile" || exit 1
+# set +x
 fi
 
 > $ofile
 
 echo -en '#!/bin/bash
 #
-# '"$ofile"'
+# '$ofile'
 #
+
+source lib/ui.source
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is not a digit."
+" is an invalid filename."
+" is an invalid directory name."
+" is an invalid line count"
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg="${exitmsgary[$exitval]}"
+
+	echo -e "$BLD$strarg$exitmsg$OFF"
+
+	[ $exitval -ne 0 ] && echo -e "Type$BLD '$ofile' -h$OFF for help."
+	exit $exitval
+}
 
 ' >> $ofile
 
-if $b_opts; then
-	$b_args && createoptions -o "$opts" -a "$args" $ofile \
-	        || createoptions -o "$opts" $ofile
-	chmod +x "$ofile"
-	exit 0
-fi
+$b_args && createoptions -o "$opts" -a "$args" $ofile \
+	|| createoptions -o "$opts" $ofile
+chmod +x "$ofile"
+exit 0
 
 echo -n '
 declare usagestr=$(
@@ -105,6 +127,7 @@ cat <<EOF
 $(basename $0)' >> $ofile
 
 $b_args && formatargs $ofile "${args[*]}" argcount || echo >> $ofile
+echo "argcount: $argcount"
 
 echo -n '
 \0
@@ -113,10 +136,10 @@ EOF
 
 usage() {
 	echo -e "$usagestr"
-	exit $1
+	exitme 0
 }
 
-[ $# -eq  "$argcount" ] || usage 1
+[ $# -ne  '$argcount' ] && exitme $ui_err_invargc
 
 ' >> $ofile
 

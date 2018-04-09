@@ -19,7 +19,7 @@ formatargs() {
 	local -i widest
 	local -i index
 
-	echo -e " "${args[@]}"\n\n" >> $ofile
+	echo -e " ${args[@]}\n" >> $ofile
 
 	# find the widest arg to use its space to create a nicely aligned
 	# list of arguments
@@ -31,6 +31,7 @@ formatargs() {
 		[ $width -gt $widest ] && widest=$width
 	done
 
+	printf "Arguments:\n" >> $ofile
 	index=0
 	for arg in ${args[@]}; do
 		printf "%s%-${widest}s - \n" "$spacer" "$arg" >> $ofile
