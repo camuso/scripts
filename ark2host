@@ -7,10 +7,16 @@
 # the remote system.
 #
 
-usage=$(
+declare BLD="\033[1m"
+declare UND="\033[4m"
+declare OFF="\033[0m"
+
+declare usage=$(
 cat <<EOF
 
-$0 [options] <user@host>
+$(basename $0) [options] <user@host>
+
+Migrate archived environment in git repos to host.
 
 Options:
   -f file  - send only the named archive
@@ -22,13 +28,29 @@ EOF
 
 )
 
+declare -i NOERR=0
+declare -i ERR_NOFIL=1
+
+declare -a errmsg=(
+""
+" not a valid file."
+)
+
 function do_usage {
+	local exval=$1
 	echo "$usage"
-	exit 1
+	exit $exval
+}
+
+function err_exit {
+	local err=$1
+	local str="$2"
+	echo -e "\n$BLD$str${errmsg[$err]}$OFF"
+	do_usage 1
 }
 
 argc=$#
-[ $argc -lt 1 ] && do_usage
+[ $argc -lt 1 ] && do_usage $NOERR
 
 remote=${!argc}
 
@@ -42,13 +64,13 @@ installer=false
 while getopts "iphf:" OPTION; do
 	case "$OPTION" in
 		f )	file="$OPTARG"
-			[ -f "$file" ] || do_usage
+			[ -f "$file" ] || err_exit $ERR_NOFIL "$file"
 			;;
 		i )	installer=true
 			;;
 		p )	pushpriv="-p"
 			;;
-		h )	do_usage
+		h )	do_usage $NOERR
 			;;
 	esac
 done
