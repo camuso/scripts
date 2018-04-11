@@ -46,8 +46,6 @@ function getuser {
 
 	echo -ne "$attr_bold$promptstring$attr_OFF"
 	read var
-	[ "$var" == "q" ] && buhbye "Exiting ..."
-	[ "$var" == "x" ] && ui_sh_spawn
 	eval $2=$var
 }
 
