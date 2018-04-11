@@ -178,7 +178,7 @@ EOF
 )
 
 usage() {
-	echo -e "$usagestr"
+	echo -en "$usagestr"
 	exitme 0
 }
 ' >> $file
@@ -196,10 +196,15 @@ while [ $index -lt $optnum ]; do
 done
 echo $optstr
 
-echo "
-while getopts "$optstr" OPTION; do
-    case \"\$OPTION\" in
-" >> $file
+echo -en '
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts '"$optstr"' OPTION; do
+    	    case "$OPTION" in
+' >> $file
 
 index=0
 
@@ -207,29 +212,30 @@ while [ $index -lt $optnum ]; do
 	optflg=${optflgarray[$index]}
 	optflg=${optflg:0:1}
 	optarg=${optargarray[$index]}
-	echo -en "\t$optflg ) " >> $file
+	echo -en "\t\t$optflg ) " >> $file
 
-	if [[ $optarg ]]; then
-		echo -e "$optarg=\$OPTARG" >> $file
-		echo -e "\t    "'optcount=$((optcount+2))' >> $file
-	else
-		if [ "$optflg" == "h" ]; then
-			echo -e "usage" >> $file
-		else
-			echo -e 'optcount=$((optcount+1))' >> $file
-		fi
-	fi
+	[[ $optarg ]] && echo -en "$optarg=\$OPTARG\n\t\t    " >> $file
+	[ "$optflg" == "h" ] && echo -e "usage" >> $file
+	echo -e 'let ++optcount' >> $file
 
-	echo -en "\t    ;;\n" >> $file
+	echo -en "\t\t    ;;\n" >> $file
 	let index++
 done
 
-echo -en "\t* ) " >> $file
+echo -en "\t\t* ) " >> $file
 echo -en "echo \"unrecognized option -\$OPTION\"\n" >> $file
-echo -en "\t    echo -e \"\$usagestr\"\n" >> $file
-echo -en "\t    exit 127\n" >> $file
-echo -e  "    esac" >> $file
-echo -e  "done\n" >> $file
-echo -e  'shift $optcount' >> $file
-echo -e  "[ $# -eq $argcount ] || exitme $ui_err_invargc\n" >> $file
-chmod +x $file
+echo -en "\t\t    echo -e \"\$usagestr\"\n" >> $file
+echo -en "\t\t    exit 127\n" >> $file
+echo -e  "\t    esac" >> $file
+echo -e  "\tdone\n" >> $file
+echo -e  '\tshift $optcount' >> $file
+echo -e  "\t[ \$# -eq $argcount ] || exitme \$EXIT_INVARG\n" >> $file
+echo -en '
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
+' >> $file

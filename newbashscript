@@ -91,57 +91,59 @@ echo -en '#!/bin/bash
 # '$ofile'
 #
 
-source lib/ui.source
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="\033[1m"
+unset UND && declare UND="\033[4m"
+unset OFF && declare OFF="\033[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
 
 declare -a exitmsgary=(
 ""
 "Invalid number of arguments."
-" is not a digit."
 " is an invalid filename."
 " is an invalid directory name."
-" is an invalid line count"
 )
 
 exitme() {
 	local exitval=$1
 	local strarg=""
-	local exitmsg="${exitmsgary[$exitval]}"
+	local exitmsg
 
-	echo -e "$BLD$strarg$exitmsg$OFF"
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
 
-	[ $exitval -ne 0 ] && echo -e "Type$BLD '$ofile' -h$OFF for help."
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD '$ofile' -h$OFF for help."
+	fi
+
 	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	exitme $CTLC_EXIT
 }
 
 ' >> $ofile
 
 $b_args && createoptions -o "$opts" -a "$args" $ofile \
 	|| createoptions -o "$opts" $ofile
-chmod +x "$ofile"
-exit 0
-
-echo -n '
-declare usagestr=$(
-cat <<EOF
-
-$(basename $0)' >> $ofile
-
-$b_args && formatargs $ofile "${args[*]}" argcount || echo >> $ofile
-echo "argcount: $argcount"
-
-echo -n '
-\0
-EOF
-)
-
-usage() {
-	echo -e "$usagestr"
-	exitme 0
-}
-
-[ $# -ne  '$argcount' ] && exitme $ui_err_invargc
-
-' >> $ofile
 
 chmod +x "$ofile"
 
