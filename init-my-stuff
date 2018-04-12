@@ -7,7 +7,7 @@ declare -i optcount=0
 declare remotename
 declare logfile="$HOME/.initmystuff.log"
 declare repolist="rcbak hints etcbk misc ipmi"
-declare b_pushpriv=true
+declare b_pushpriv=false
 declare clonestr
 
 while getopts hp OPTION; do
@@ -16,7 +16,7 @@ while getopts hp OPTION; do
 	h ) optcount=$((optcount+1))
 	    ;;
 	p ) optcount=$((optcount+1))
-	    b_pushpriv=false
+	    b_pushpriv=true
 	    ;;
 	* ) echo "unrecognized option -$OPTION"
 	    exit 127
@@ -35,7 +35,7 @@ cd		# make sure we're home
 # account.
 #
 $b_pushpriv && clonestr="git clone git@github.com:camuso/" \
-	    || clonestr="it clone https://github.com/camuso/"
+	    || clonestr="git clone https://github.com/camuso/"
 
 # If we don't have an ssh key, generate it.
 #
