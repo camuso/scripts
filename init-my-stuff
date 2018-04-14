@@ -253,10 +253,12 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	cd /work/us/linux
 
 	if [[ "$arch" == "aarch64" ]]; then
+		git remote add pegas http://git.app.eng.bos.redhat.com/git/kernel-alt.git/
 		git remote add rhelsa git://git.app.eng.bos.redhat.com/rhelsa7.git
 		git remote update
 		git fetch
 		git checkout -b rhelsa rhelsa/master
+		git checkout -b pegas pegas/master
 	else
 		case $majversion in
 			"6" ) 	git remote add rh6 git://git.app.eng.bos.redhat.com/rhel6.git
