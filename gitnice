@@ -90,5 +90,5 @@ $b_format && \
 	fmtstr="$hashwid%h$authwid$cmtauth $cmtdate %s"
 
 [ "$cmdline" ] && \
-	git log $reverse --date=short --pretty=format:"$fmtstr" $cmdline \
+	git log $reverse --date=short --pretty=format:"$fmtstr" "$cmdline" \
 	|| git log $reverse --date=short --pretty=format:"$fmtstr" -1
