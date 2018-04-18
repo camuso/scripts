@@ -79,8 +79,8 @@ while getopts :ads:rh- OPTION; do
 done
 
 shift $optcount
-cmdline="$@"
-
+cmdline=($@)
+echo "cmdline: \""$cmdline"\""
 $gitold || hashwid="%<(8)"
 [ "$cmtauth" ] || authwid=""
 
@@ -90,5 +90,5 @@ $b_format && \
 	fmtstr="$hashwid%h$authwid$cmtauth $cmtdate %s"
 
 [ "$cmdline" ] && \
-	git log $reverse --date=short --pretty=format:"$fmtstr" "$cmdline" \
+	git log $reverse --date=short --pretty=format:"$fmtstr" "${cmdline[@]}" \
 	|| git log $reverse --date=short --pretty=format:"$fmtstr" -1
