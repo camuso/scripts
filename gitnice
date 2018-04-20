@@ -80,7 +80,7 @@ done
 
 shift $optcount
 cmdline=($@)
-echo "cmdline: \""$cmdline"\""
+# echo "cmdline: \""$cmdline"\""
 $gitold || hashwid="%<(8)"
 [ "$cmtauth" ] || authwid=""
 
