@@ -85,7 +85,7 @@ $gitold || hashwid="%<(8)"
 [ "$cmtauth" ] || authwid=""
 
 $b_format && \
-	fmtstr="$hashwid%C(bold green)%h$authwid$cmtauth $cmtdate %C(reset)%s" \
+	fmtstr="$hashwid%C(bold green)%h $authwid$cmtauth $cmtdate %C(reset)%s" \
 || \
 	fmtstr="$hashwid%h$authwid$cmtauth $cmtdate %s"
 
