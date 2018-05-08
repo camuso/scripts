@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# chkbldlog
+#
+
+argcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Parses ../make.log for errors and warnings.
+Intended to be used after kmake.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit $1
+}
+
+[ $# -eq  "$argcount" ] || usage 1
+
+set -x
+grep -i err ../make.log
+grep -i warn ../make.log
+set +x
+
