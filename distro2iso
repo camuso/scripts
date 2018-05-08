@@ -85,8 +85,14 @@ parse_config() {
 	local line=0
 	local text=""
 
+	echo "configfile: $configfile"
+	echo "section: $section"
+	echo "name: $name"
+
 	[[ ${section:0:1} == "[" ]] || section="[$section]"
+	echo "post processed section: $section"
 	line=$(grep -F -m1 -n $section $configfile | cut -d':' -f1)
+	echo "line: $line"
 	text=$(awk "/$name/ && NR > $line { print; exit }" $configfile)
 	text=$(echo $text | cut -d'=' -f2-)
 	text=$(echo $text)
@@ -112,8 +118,8 @@ declare treeinfo=""	# .treeinfo file in top directory of DVD
 [[ $(which createrepo) ]] || yum install -y createrepo
 
 cd "$disdir"
-[[ -e ".treeinfo" ]] || errexit $notreeinfo "$disdir"
-[[ -e ".discinfo" ]] || errexit $nodiscinfo "$disdir"
+[[ -f ".treeinfo" ]] || errexit $notreeinfo "$disdir"
+[[ -f ".discinfo" ]] || errexit $nodiscinfo "$disdir"
 discinfo=$(head -1 .discinfo)
 # Create Volume-ID, Volume Header String, and DVD iso filename
 # from the .treeinfo file as follows.
@@ -126,8 +132,8 @@ declare namestr
 declare verstrd
 declare varstr
 declare archstr
-parse_config .treeinfo product short namestr
-parse_config .treeinfo product version verstr
+parse_config .treeinfo release short namestr
+parse_config .treeinfo release version verstr
 parse_config .treeinfo tree variant varstr
 parse_config .treeinfo tree arch archstr
 declare Volume_ID=$namestr-$verstr-$varstr-$archstr
