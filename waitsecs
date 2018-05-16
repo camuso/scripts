@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+# waitsecs
+#
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) secs
+
+Waits for secs seconds, printing dots while waiting.
+
+Arguments:
+  secs - the number of seconds to wait 
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+main() {
+	[ $# -eq 1 ] || usage
+
+	local secs=$1
+	local interval
+	local reps
+
+	[ $secs -le 0 ] && return 1
+
+	case $((
+		(secs <= 10)		   ? 1 :
+		(secs > 10 && secs <= 100) ? 2 :
+		(secs > 100)		   ? 3 : 0)) in
+		(1) interval=.1; reps=$((secs * 10));;
+		(2) interval=.5; reps=$((secs *  2));;
+		(3) interval=1 ; reps=$secs;;
+		(0) return 1;;
+	esac
+
+	echo -n "wait $1 seconds"
+	for (( i=0; i<$reps; i++ )); do
+		echo -n "."
+		sleep $interval
+	done
+	echo
+}
+
+main $@
+exit $?
+
