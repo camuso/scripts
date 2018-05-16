@@ -1,12 +1,28 @@
 #!/bin/sh
 
-wait_ten() {
-   echo -n "wait ten seconds"
-   for (( i=0; i<10; i++ )); do
-	echo -n "."
-	sleep 1
-   done
-   echo
+__waitsecs() {
+	local secs=$1
+	local interval
+	local reps
+
+	[ $secs -le 0 ] && return 1
+
+	case $((
+		(secs <= 10)		   ? 1 :
+		(secs > 10 && secs <= 100) ? 2 :
+		(secs > 100)		   ? 3 : 0)) in
+		(1) interval=.1; reps=$((secs * 10));;
+		(2) interval=.5; reps=$((secs *  2));;
+		(3) interval=1 ; reps=$secs;;
+		(0) return 1;;
+	esac
+
+	echo -n "wait $1 seconds"
+	for (( i=0; i<$reps; i++ )); do
+		echo -n "."
+		sleep $interval
+	done
+	echo
 }
 
 set -e
@@ -20,7 +36,7 @@ for i in $(seq 0 10); do
 	modprobe -v ipmi_poweroff
 	# modprobe -v power_meter
 	modprobe -v acpi_ipmi
-	wait_ten
+	__waitsecs 2
 
 	echo "Remove ipmi modules"
 	# modprobe -rv power_meter
@@ -30,6 +46,6 @@ for i in $(seq 0 10); do
 	modprobe -rv ipmi_devintf
 	modprobe -rv ipmi_si
 	modprobe -rv ipmi_msghandler
-	wait_ten
+	__waitsecs 2
 done
 echo "If you see this message, the test passed."
