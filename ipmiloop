@@ -1,77 +1,151 @@
 #!/bin/bash
+#
+# ipmiloop
+#
 
-loopcount=0
-while [ true ]
-do
-	let loopcount++
-	echo
-	echo "start loop: $loopcount"
-	echo "****************************************************"
-	echo "ipmitool chassis selftest"
-	echo "-------------------------"
-	ipmitool chassis selftest
-	sleep 1
-	echo
-	echo "ipmitool chassis status"
-	echo "-----------------------"
-	ipmitool chassis status
-	sleep 1
-	echo
-	echo "ipmitool chassis bootdev"
-	echo "------------------------"
-	ipmitool chassis bootdev
-	sleep 1
-	echo
-	echo "ipmitool chassis bootparam"
-	echo "--------------------------"
-	ipmitool chassis bootparam
-	sleep 1
-	echo
-	echo "ipmitool chassis identify"
-	echo "-------------------------"
-	ipmitool chassis identify
-	sleep 1
-	echo
-	echo "ipmitool chassis policy list"
-	echo "----------------------------"
-	ipmitool chassis policy list
-	sleep 1
-	echo
-	echo "mc selftest"
-	echo "-----------"
-	ipmitool mc selftest
-	sleep 1
-	echo
-	echo "mc getenables"
-	echo "-------------"
-	ipmitool mc getenables
-	sleep 1
-	echo
-	echo "mc info"
-	echo "-------"
-	ipmitool mc info
-	sleep 1
-	echo
-	echo "mc guid"
-	echo "-------"
-	ipmitool mc guid
-	sleep 1
-	echo
-	echo "ipmitool mc getenables system_event_log"
-	echo "---------------------------------------"
-	ipmitool mc getenables system_event_log
-	sleep 1
-	echo
-	echo "ipmitool mc lan print"
-	echo "---------------------"
-	ipmitool lan print
-	sleep 1
-	echo
-	echo "ipmitool sdr"
-	echo "------------"
-	ipmitool sdr
-	echo
-	echo "end loop: $loopcount"
-	echo "--------------------"
-	sleep 2
-done
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="[1m"
+unset UND && declare UND="[4m"
+unset OFF && declare OFF="[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD ipmiloop -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+declare delay=2
+declare -i count=10
+declare -i optcount=0
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options]
+
+Runs through the ipmitool commands to the host IPMI interface in a loop.
+
+Options:
+  -c count - the number of times through the loop, default is $count
+  -d delay - the numbmer of seconds delay between each command
+             accepts decimal inputs
+  -h this help message
+
+  example:
+
+  $(basename $0) -c5 -d.5
+
+  Loops through the ipmi commands 5 times with a delay of one half-second
+  between each command.
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+runloop() {
+	# ipmitool command array
+	#
+	declare -a cmdary=(
+	"chassis selftest"
+	"chassis status"
+	"chassis bootdev"
+	"chassis bootparam"
+	"chassis identify"
+	"chassis policy list"
+	"mc selftest"
+	"mc getenables"
+	"mc info"
+	"mc guid"
+	"mc getenables system_event_log"
+	"mc lan print"
+	"sdr"
+	)
+
+	for ((i = 0; i < ${#cmdary[@]}; ++i)); do
+		echo "ipmitool ${cmdary[$i]}"
+		ipmitool ${cmdary[$i]}
+		sleep $delay
+	done
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts c:d:h OPTION; do
+	    case "$OPTION" in
+		c ) count=$OPTARG
+		    let ++optcount
+		    ;;
+		d ) delay=$OPTARG
+		    let ++optcount
+		    ;;
+		h ) usage
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 0 ] || exitme $EXIT_INVARG
+
+	for ((j = 0; j < count; ++j)); do
+		runloop
+		echo "endloop: $((j + 1))"
+		echo
+		sleep $delay
+	done
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
