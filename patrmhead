@@ -1,0 +1,168 @@
+#!/bin/bash
+#
+# patrmhead
+#
+
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="[1m"
+unset UND && declare UND="[4m"
+unset OFF && declare OFF="[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD patrmhead -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] directory
+
+Removes archive list header and footer from patch files
+
+Arguments:
+  directory - directory containing the patch files
+
+Options:
+  -h  - this help
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+
+main() {
+	declare -i lint			# line total
+	declare -i mod			# modulus divisor
+	declare -i lcnt			# line counter
+	declare -i tcols=$(tput cols)   # number of columns in the terminal
+	declare CL1="\e["$tcols"D"	# column 1 of the current line
+	declare CCR="\e[K"    		# clear line and carriage return
+	declare UP1="\e[1A"		# move cursor up one line
+
+	declare tempfile="./.tempfile"
+	declare hdrend="Head-of-Message"
+	declare bdyend="Body-of-Message-End"
+	declare b_hdrend
+	declare filename
+	declare dir
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts h OPTION; do
+    	    case "$OPTION" in
+		h ) usage
+		    let ++optcount
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 1 ] || exitme $EXIT_INVARG
+	dir=$1
+	cd $dir
+
+	for filename in $(find $dir -maxdepth 1 -not -type d -name "*.patch");
+	do
+		[ $(grep -m1 "Head-of-Message" $filename) ] || continue
+		> $tempfile
+
+		echo $filename
+		lint=$(cat $filename | wc -l)
+		mod=$(( (lint / tcols) + 1 ))
+		b_hdrend=false
+
+		while IFS= read -r line; do
+			[ $(( lcnt % mod )) -eq 0 ] && echo -n "." && let lcnt++
+
+			# If we found the end of the header, set the flag and continue
+			# Once the flag is set, copy each line into the tempfile.
+			# Skip any residual xml/html lines.
+			# When we detect the end of the body, break the loop.
+			#
+			[[ "$line" == "$hdrend" ]] && b_hdrend=true && continue
+			$b_hdrend || continue
+
+			[[ "$line" == "Head-of-Message-End" ]] && continue
+			[[ "$line" == "Head-Body-Sep-Begin" ]] && continue
+			[[ "$line" == "Head-Body-Sep-End"   ]] && continue
+			[[ "$line" == "Body-of-Message"     ]] && continue
+			[[ "$line" == "$bdyend" ]] && break
+			echo "$line" >> $tempfile
+		done < $filename
+
+		mv -f $tempfile $filename
+
+		# Erase the filename and all the dots and put the cursor back
+		# in the first column of the prevous line. Leave them as
+		# discrete echos for the sake of clarity. Likely that the bash
+		# interpreter will merge them anyway.
+		#
+		echo -en "$CL1"
+		echo -en "$CCR"
+		echo -en "$UP1"
+		echo -en "$CL1"
+		echo -en "$CCR"
+	done
+
+	cd -
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
