@@ -113,7 +113,7 @@ for f in $(ls -rtd1 rcbak/{*,.*}); do
 	fi
 done
 
-rsync -Pvat --exclude '.git*' rcbak/ . 2>&1 | tee -a $logfile
+rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
 
 if [ "$remotename" == "root" ]; then
 	for file in \
