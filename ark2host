@@ -22,6 +22,7 @@ Options:
   -f file  - send only the named archive
   -i       - install default apps to root@host
   -p       - host does not have push priveleges to git repos
+  -g       - do not install linux git repos
   -h       - this help text
 
 EOF

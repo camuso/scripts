@@ -8,15 +8,19 @@ declare remotename
 declare logfile="$HOME/.initmystuff.log"
 declare repolist="rcbak hints etcbk misc ipmi"
 declare b_pushpriv=false
+declare b_gitrepo=true
 declare clonestr
 
-while getopts hp OPTION; do
+while getopts hpg OPTION; do
     case "$OPTION" in
 
 	h ) optcount=$((optcount+1))
 	    ;;
 	p ) optcount=$((optcount+1))
 	    b_pushpriv=true
+	    ;;
+	g ) optcount=$((optcount+1))
+	    b_gitrepo=false
 	    ;;
 	* ) echo "unrecognized option -$OPTION"
 	    exit 127
@@ -236,6 +240,9 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	trousers-devel \
 	rhpkg \
 	vim \
+	vim-enhanced \
+	vim-powerline \
+	vim-filesystem \
 	koji \
 	brewkoji \
 	http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
@@ -251,6 +258,11 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	cd -
 	git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 	cd /work/us/linux
+
+	# If the caller passed a -g option, it means no git repo,
+	# so return to the top directory and exit.
+	#
+	$b_gitrepo || { cd; exit; }
 
 	if [[ "$arch" == "aarch64" ]]; then
 		git remote add pegas http://git.app.eng.bos.redhat.com/git/kernel-alt.git/
