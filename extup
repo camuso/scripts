@@ -1,0 +1,10 @@
+#!/bin/bash
+
+commit_expr="$1"
+
+list=$(git log "$commit_expr" | grep '    commit' | cut -d' ' -f6)
+
+while read commit; do
+	gitnice -d -1 "$commit"
+done <<< "$list"
+
