@@ -18,9 +18,11 @@ $(basename $0) [OPTIONS] directory commitspec
   directory  - directory that will contain the patch set
   commitspec - any commit expression, which can also be preceeded by other
                git-format-patch options.
+  pathspec   - optional path from which to extrac the patches
 
   OPTIONS:
   -c      - generate a cover letter
+  -p:path - limit patch extractions to this path
   -v n    - version number of the patch
 
   The patch set will be created with the following git command.
@@ -45,7 +47,7 @@ usage() {
 	exit $1
 }
 
-while getopts :cv: OPTION; do
+while getopts :cv:p: OPTION; do
     case "$OPTION" in
 
 	c ) cletter="--cover-letter"
@@ -53,6 +55,9 @@ while getopts :cv: OPTION; do
 	    optcount=$((optcount+1))
 	    ;;
 	v ) reroll="--reroll-count=$OPTARG"
+	    optcount=$((optcount+2))
+	    ;;
+	p ) pathspec=$OPTARG
 	    optcount=$((optcount+2))
 	    ;;
 	* ) echo "unrecognized option -$OPTION"
@@ -75,5 +80,6 @@ git format-patch \
 	--signoff \
 	--stat=80 \
 	--output-directory "$directory" \
-	"$commitspec"
+	"$commitspec" \
+	"$pathspec"
 
