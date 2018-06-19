@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# No ttyctl, so we need to save and then restore terminal settings
+vim(){
+    local STTYOPTS="$(stty --save)"
+    stty stop '' -ixoff
+    command vim "$@"
+    stty "$STTYOPTS"
+}
+
+vim -u $HOME/.vimrc -O $1 /mnt/desktop/"$1"
