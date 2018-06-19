@@ -2,8 +2,25 @@
 
 commit_expr="$1"
 pathspec="$2"
+rev=""
 
-list=$(git log "$commit_expr" "$pathspec" | grep '    commit' | cut -d' ' -f6)
+while getopts :p:r OPTION; do
+    case "$OPTION" in
+
+	r ) rev="--reverse"
+	    optcount=$((optcount+2))
+	    ;;
+	p ) pathspec=$OPTARG
+	    optcount=$((optcount+2))
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    echo -e "$usagestr"
+	    exit 127
+    esac
+done
+
+list=$(git log $rev "$commit_expr" $pathspec \
+	| grep '    commit' | cut -d' ' -f6)
 
 while read commit; do
 	gitnice -d -1 "$commit"
