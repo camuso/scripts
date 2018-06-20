@@ -11,7 +11,7 @@ declare reroll="--reroll-count=0"
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [OPTIONS] directory commitspec
+$(basename $0) [OPTIONS] directory commitspec -- pathspec
 
   Generate a patch set from a commit expression.
 
@@ -22,7 +22,6 @@ $(basename $0) [OPTIONS] directory commitspec
 
   OPTIONS:
   -c      - generate a cover letter
-  -p:path - limit patch extractions to this path
   -v n    - version number of the patch
 
   The patch set will be created with the following git command.
@@ -37,7 +36,7 @@ $(basename $0) [OPTIONS] directory commitspec
 
 	--output-directory <directory> \\\
 
-	<commitspec>
+	<commitspec> [-- pathspec]
 \0
 EOF
 )
@@ -57,9 +56,6 @@ while getopts :cv:p: OPTION; do
 	v ) reroll="--reroll-count=$OPTARG"
 	    optcount=$((optcount+2))
 	    ;;
-	p ) pathspec=$OPTARG
-	    optcount=$((optcount+2))
-	    ;;
 	* ) echo "unrecognized option -$OPTION"
 	    echo -e "$usagestr"
 	    exit 127
@@ -67,11 +63,11 @@ while getopts :cv:p: OPTION; do
 done
 
 shift $optcount
-[ $# -eq  "$argcount" ] || usage 1
+[ $# -ge  "$argcount" ] || usage 1
 
 directory="$1"
 shift
-commitspec="$@"
+commitspec=$@
 
 git format-patch \
 	"$cletter" \
@@ -80,6 +76,5 @@ git format-patch \
 	--signoff \
 	--stat=80 \
 	--output-directory "$directory" \
-	"$commitspec" \
-	"$pathspec"
+	$commitspec
 
