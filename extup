@@ -3,11 +3,17 @@
 commit_expr="$1"
 pathspec="$2"
 rev=""
+show_b=true
+declare -a alist		# alternate branch list
+declare -a blist		# current branch list
 
-while getopts :p:r OPTION; do
+while getopts :p:rd OPTION; do
     case "$OPTION" in
 
 	r ) rev="--reverse"
+	    optcount=$((optcount+2))
+	    ;;
+	b ) show_b=false
 	    optcount=$((optcount+2))
 	    ;;
 	p ) pathspec=$OPTARG
@@ -19,10 +25,19 @@ while getopts :p:r OPTION; do
     esac
 done
 
-list=$(git log $rev "$commit_expr" $pathspec \
-	| grep '    commit' | cut -d' ' -f6)
+blist=($(git log $rev "$commit_expr" $pathspec \
+	| grep '^commit' | cut -d' ' -f2))
 
-while read commit; do
-	gitnice -d -1 "$commit"
-done <<< "$list"
+alist=($(git log $rev "$commit_expr" $pathspec \
+	| grep '    commit' | cut -d' ' -f6))
+
+for ((i=0; i < ${#blist[@]}; ++i)); do
+	astr=$(gitnice -d -1 "${alist[$i]}")
+	bstr=$"${blist[$i]:0:8}"
+	if $show_b; then
+		echo "$bstr  $astr"
+	else
+		echo "$astr"
+	fi
+done
 
