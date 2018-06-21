@@ -1,20 +1,19 @@
 #!/bin/bash
 
-commit_expr="$1"
-pathspec="$2"
 rev=""
 show_b=true
+declare -i optcount=0
 declare -a alist		# alternate branch list
 declare -a blist		# current branch list
 
-while getopts :p:rd OPTION; do
+while getopts :p:rb OPTION; do
     case "$OPTION" in
 
 	r ) rev="--reverse"
-	    optcount=$((optcount+2))
+	    optcount=$((optcount+1))
 	    ;;
 	b ) show_b=false
-	    optcount=$((optcount+2))
+	    optcount=$((optcount+1))
 	    ;;
 	p ) pathspec=$OPTARG
 	    optcount=$((optcount+2))
@@ -24,6 +23,10 @@ while getopts :p:rd OPTION; do
 	    exit 127
     esac
 done
+
+shift $optcount
+commit_expr="$1"
+pathspec="$2"
 
 blist=($(git log $rev "$commit_expr" $pathspec \
 	| grep '^commit' | cut -d' ' -f2))
