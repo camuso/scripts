@@ -28,19 +28,20 @@ shift $optcount
 commit_expr="$1"
 pathspec="$2"
 
-blist=($(git log $rev "$commit_expr" $pathspec \
-	| grep '^commit' | cut -d' ' -f2))
+blist=($(git log --oneline $rev --pretty=format:%h $commit_expr $pathspec))
 
-alist=($(git log $rev "$commit_expr" $pathspec \
-	| grep '    commit' | cut -d' ' -f6))
+for ((i=0; i < ${#blist[@]}; ++i)); do
+	log=$(git log -1 ${blist[$i]} | tail -n +2)
+	alist[$i]=$(echo "$log" | egrep -o "\b[0-9a-f]{40}\b")
+done
 
 for ((i=0; i < ${#blist[@]}; ++i)); do
 	astr=$(gitnice -d -1 "${alist[$i]}")
-	bstr=$"${blist[$i]:0:8}"
+	bstr=${blist[$i]}
 	if $show_b; then
-		echo "$bstr  $astr"
+		printf " %-9s %s\n" "$bstr"  "$astr"
 	else
-		echo "$astr"
+		echo " $astr"
 	fi
 done
 
