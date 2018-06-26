@@ -33,15 +33,20 @@ blist=($(git log --oneline $rev --pretty=format:%h $commit_expr $pathspec))
 for ((i=0; i < ${#blist[@]}; ++i)); do
 	log=$(git log -1 ${blist[$i]} | tail -n +2)
 	alist[$i]=$(echo "$log" | egrep -o "\b[0-9a-f]{40}\b")
+	[ $? -eq 0 ] || alist[$i]="Not upstream"
 done
 
 for ((i=0; i < ${#blist[@]}; ++i)); do
-	astr=$(gitnice -d -1 "${alist[$i]}")
+	if [[ "${alist[$i]}" != "Not upstream" ]]; then
+		astr=$(gitnice -d -1 "${alist[$i]}")
+	else
+		printf -v astr "%s %s" "NoUpstr" "$(gitnice -d -1 $bstr | cut -d' ' -f2-)"
+	fi
 	bstr=${blist[$i]}
 	if $show_b; then
-		printf " %-9s %s\n" "$bstr"  "$astr"
+		printf " %-9s %s\n" "$bstr" "$astr"
 	else
-		echo " $astr"
+		echo -n " $astr "
 	fi
 done
 
