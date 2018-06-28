@@ -19,9 +19,6 @@ while getopts :p:rb OPTION; do
 	p ) pathspec=$OPTARG
 	    optcount=$((optcount+2))
 	    ;;
-	* ) echo "unrecognized option -$OPTION"
-	    echo -e "$usagestr"
-	    exit 127
     esac
 done
 
