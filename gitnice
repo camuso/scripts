@@ -68,6 +68,7 @@ while getopts :acds:rwh- OPTION; do
 	    let optcount++
 	    ;;
 	c ) $b_format && cmtdate="%C(bold green)%cd " || autdate="%cd "
+	    let optcount++
 	    ;;
 	d ) $b_format && autdate="%C(bold green)%ad " || autdate="%ad "
 	    let optcount++
