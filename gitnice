@@ -5,16 +5,16 @@
 
 declare -i optcount=0
 declare number="-n 1"
-declare cmtauth=""
-declare cmtdate=""
-declare reverse=""
+declare cmtauth=
+declare cmtdate=
+declare autdate=
+declare reverse=
 declare hashwid="%<(8)"
 declare authwid=""
 declare fmtstr=""
 declare cmtexpr="-1"
 declare b_format=true
 declare hashsiz="h"
-declare logcmd="git log --date=short --abbrev-commit "
 
 declare gver=$(git --version | cut -d' ' -f3)
 declare -i gmaj=$(echo $gver | cut -d'.' -f1)
@@ -35,7 +35,8 @@ $(basename $0) [options] [commitexpr]
   1234567, or 89abcde...f0123456, or -12
 
   Options
-  -d        - show date
+  -c        - show commit date
+  -d        - show author date
   -a        - show author
   -s number - space out author to columns of "number" width (git 2.8+ only)
   -r        - show in reverse order (oldest first)
@@ -57,19 +58,21 @@ usage() {
 # leading colon in options list tells the option parser to parse errors
 # silently, allowing the user to address parsing errors.
 # The hyphen tells the parser to ignore double-dash -- options passed
-# to git.
+# to git as well as the double-dash command line separator.
 #
-while getopts :ads:rwh- OPTION; do
+while getopts :acds:rwh- OPTION; do
     case "$OPTION" in
 
 	s ) $gitold && continue
 	    authwid="%<($OPTARG,mtrunc)"
 	    let optcount++
 	    ;;
-	d ) $b_format && cmtdate="%C(bold green)%ad" || cmtdate="%ad"
+	c ) $b_format && cmtdate="%C(bold green)%cd " || autdate="%cd "
+	    ;;
+	d ) $b_format && autdate="%C(bold green)%ad " || autdate="%ad "
 	    let optcount++
 	    ;;
-	a ) $b_format && cmtauth="%C(bold yellow)%ae" || cmtauth="%ae"
+	a ) $b_format && cmtauth="%C(bold yellow)%ae " || cmtauth="%ae "
 	    let optcount++
 	    ;;
 	r ) reverse="--reverse"
@@ -91,12 +94,10 @@ cmdline=($@)
 $gitold && hashwid=
 [ "$cmtauth" ] || authwid=""
 
-echo "$cmtdate"
-
 $b_format && \
-	fmtstr="$hashwid%C(bold green)%$hashsiz $cmtdate $authwid$cmtauth %C(reset)%s" \
+	fmtstr="$hashwid%C(bold green)%$hashsiz $cmtdate$autdate$authwid$cmtauth%C(reset)%s" \
 || \
-	fmtstr="$hashwid%$hashsiz$cmtdate $authwid$cmtauth %s"
+	fmtstr="$hashwid%$hashsiz $cmtdate$autdate$authwid$cmtauth %s"
 
 if [ "$cmdline" ]; then
 	git log $reverse --date=short --pretty=format:"$fmtstr" "${cmdline[@]}"
