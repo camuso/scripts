@@ -5,6 +5,8 @@ show_b=true
 declare -i optcount=0
 declare -a alist		# alternate branch list
 declare -a blist		# current branch list
+declare show_b
+declare cmtdat=
 declare notupstream="*******"
 
 while getopts :p:rb OPTION; do
@@ -15,9 +17,6 @@ while getopts :p:rb OPTION; do
 	    ;;
 	b ) show_b=false
 	    optcount=$((optcount+1))
-	    ;;
-	p ) pathspec=$OPTARG
-	    optcount=$((optcount+2))
 	    ;;
     esac
 done
@@ -33,9 +32,9 @@ for ((i=0; i < ${#blist[@]}; ++i)); do
 	alist[$i]=$(echo "$log" | egrep -o "\b[0-9a-f]{40}\b")
 
 	if [ $? -eq 0 ]; then
-		astr=$(gitnice -d -1 ${alist[$i]})
+		astr=$(gitnice -c -1 ${alist[$i]})
 	else
-		tmp="$(gitnice -d -1 ${blist[$i]} | cut -d' ' -f2-)"
+		tmp="$(gitnice -c -1 ${blist[$i]} | cut -d' ' -f2-)"
 		astr="$notupstream $tmp"
 	fi
 
