@@ -8,16 +8,18 @@ declare number="-n 1"
 declare cmtauth=""
 declare cmtdate=""
 declare reverse=""
-declare hashwid=""
+declare hashwid="%<(8)"
 declare authwid=""
 declare fmtstr=""
 declare cmtexpr="-1"
 declare b_format=true
+declare hashsiz="h"
+declare logcmd="git log --date=short --abbrev-commit "
 
 declare gver=$(git --version | cut -d' ' -f3)
 declare -i gmaj=$(echo $gver | cut -d'.' -f1)
 declare -i gmin=$(echo $gver | cut -d'.' -f2)
-declare oldgit
+declare gitold
 [ $gmaj -lt 2 ] && [ $gmin -lt 8 ] && gitold=true || gitold=false
 
 declare usagestr=$(
@@ -54,8 +56,10 @@ usage() {
 
 # leading colon in options list tells the option parser to parse errors
 # silently, allowing the user to address parsing errors.
+# The hyphen tells the parser to ignore double-dash -- options passed
+# to git.
 #
-while getopts :ads:rh- OPTION; do
+while getopts :ads:rwh- OPTION; do
     case "$OPTION" in
 
 	s ) $gitold && continue
@@ -71,6 +75,9 @@ while getopts :ads:rh- OPTION; do
 	r ) reverse="--reverse"
 	    let optcount++
 	    ;;
+	w ) hashsiz="H"
+	    let optcount++
+	    ;;
 	h ) echo "Option: $OPTION"
 	    usage 0
 	    ;;
@@ -81,14 +88,18 @@ done
 shift $optcount
 cmdline=($@)
 # echo "cmdline: \""$cmdline"\""
-$gitold || hashwid="%<(8)"
+$gitold && hashwid=
 [ "$cmtauth" ] || authwid=""
 
-$b_format && \
-	fmtstr="$hashwid%C(bold green)%h $authwid$cmtauth $cmtdate %C(reset)%s" \
-|| \
-	fmtstr="$hashwid%h$authwid$cmtauth $cmtdate %s"
+echo "$cmtdate"
 
-[ "$cmdline" ] && \
-	git log $reverse --date=short --pretty=format:"$fmtstr" "${cmdline[@]}" \
-	|| git log $reverse --date=short --pretty=format:"$fmtstr" -1
+$b_format && \
+	fmtstr="$hashwid%C(bold green)%$hashsiz $cmtdate $authwid$cmtauth %C(reset)%s" \
+|| \
+	fmtstr="$hashwid%$hashsiz$cmtdate $authwid$cmtauth %s"
+
+if [ "$cmdline" ]; then
+	git log $reverse --date=short --pretty=format:"$fmtstr" "${cmdline[@]}"
+else
+	git log $reverse --date=short --pretty=format:"$fmtstr" -1
+fi
