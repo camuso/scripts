@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# remotedir
+
+main() {
+	declare rdir="$1"
+	declare rmnt="/mnt/remote"
+	declare mntstr
+	declare stat
+
+	mntstr="$(mount | grep "$rmnt")"
+	stat=$?
+
+	[ $stat -eq 0 ] && {
+		echo "$rmnt is already mounted as..."
+		echo "$mntstr"
+		exit $stat
+	}
+
+	[ -d $rmt ] || sudo mkdir $rmnt
+	sudo sshfs "$rdir" $rmnt
+}
+
+main $@
+
+exit 0
+
