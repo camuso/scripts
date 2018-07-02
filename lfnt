@@ -1,0 +1,14 @@
+#!/bin/bash
+# lfnt - list file not there
+
+main ()
+{
+    > ../lfnt.log
+
+    while read line; do
+        line=$(echo $line | cut -d':' -f2);
+        [ -f $line ] || echo "$line" >> ../lfnt.log
+    done < ../deletes
+}
+
+main
