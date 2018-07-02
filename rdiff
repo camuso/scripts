@@ -1,0 +1,23 @@
+#!/bin/bash
+#
+# pdiff
+#
+# This script depends on a remote directory being mounted on /mnt/remote
+
+main() {
+	declare rmnt="/mnt/remote"
+
+	mount | grep "$rmnt" > /dev/null || {
+		echo "$rmnt is not mounted."
+		echo "Please use \"remotedir\" script"
+		exit 1
+	}
+
+	vimdiff $1 $rmnt/$1
+	exit 0
+}
+
+main $@
+
+exit 0
+
