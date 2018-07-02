@@ -1,0 +1,12 @@
+#!/bin/bash
+#
+# dpat
+
+main() {
+	vim -O $1 ../pat/*.patch
+}
+
+main $@
+
+exit 0
+
