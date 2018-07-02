@@ -1,0 +1,12 @@
+#!/bin/bash
+
+main ()
+{
+    while read line; do
+        line=$(echo $line | cut -d':' -f2);
+        echo -n $line;
+        [ -f $line ] && echo " there" || echo " NOT PRESENT";
+    done < ../deletes
+}
+
+main
