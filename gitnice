@@ -40,6 +40,7 @@ $(basename $0) [options] [commitexpr]
   -a        - show author
   -s number - space out author to columns of "number" width (git 2.8+ only)
   -r        - show in reverse order (oldest first)
+  -w        - show full 40-char hash. Default is "--short"
   -h        - this help text
 \0
 EOF
