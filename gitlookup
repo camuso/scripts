@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# gitseekstr
+
+usage() {
+
+	declare usagestr=$(
+cat <<EOF
+
+$(basename $0) commit-expression string-expresion
+
+Creates a list of commits from the commit expression, then greps
+the commits in the list for the string expression. Recommended
+that both the commit and string expression be delimited by single
+quote marks.
+
+Arguments:
+     commit-expression - Any valid commit expression for the area
+                         of the git tree you want to lookup
+\0
+EOF
+)
+	echo -e "$usagestr"
+	exit 1
+}
+
+main() {
+	declare cmtexp="$1"
+	declare strexp="$2"
+	declare tmpfil=/dev/shm/gitlookup.list
+	declare clist
+
+	[ $# -eq 2 ] || usage
+	[  "$1" == "-h" ] && usage
+
+	clist=$(gitnice -c -r "$cmtexp")
+
+	for c in "$clist"; do
+		cmt=$(echo "$c" | cut -d' ' -f1)
+		echo "$cmt" > $tmpfil
+	done
+
+	while read c; do
+		echo "$c :"
+		git show $c | grep --color -n "$strexp"
+		[ $? -eq 0 ] && echo
+	done < $tmpfil
+
+	rm -f $tmpfil
+	exit 0
+}
+
+main "$@"
+
+exit 0
+
