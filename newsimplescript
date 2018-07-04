@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# newsimplescript
+#
+declare script="$1"
+wrln="echo -e "$1" >> $script"
+
+body="#!/bin/bash
+#
+# $script
+
+main() {
+
+}
+
+main \$@
+
+exit 0
+"
+
+main() {
+	[ -f "$script" ] && { echo "$script already exists."; exit 1; }
+	echo -e "$body" > $script
+	chmod +x $script
+}
+
+main $@
+
+exit 0
+
