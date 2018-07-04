@@ -1,0 +1,17 @@
+#!/bin/bash
+#
+# cleanlist
+
+main() {
+	while read line; do
+		stat=$(echo $line | cut -d' ' -f1)
+		file=$(echo $line |  cut -d' ' -f2)
+		[ "$stat" == "DU" ] && git rm $file
+		[ "$stat" == "M" ] && { git reset $file; git checkout $file; }
+	done < ../temp/buffer-dma.stat
+}
+
+main $@
+
+exit 0
+
