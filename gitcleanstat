@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# gitcleanstat
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Useful for resetting and cleaning up files that git reports as
+"modified unmerged" or "deleted unmerged".
+
+Runs git status to determine the state of the files, then proceeds
+to clean them up by removing the "deleted unmerged" and resetting
+and checking out the "modified unmerged".
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+main() {
+	declare tempfile=/dev/shm/gitcleanstat.list
+
+	[ "$1" = "-h" ] && usage
+
+	git status -uno --porcelain > $tempfile
+
+	while read line; do
+		stat=$(echo $line | cut -d' ' -f1)
+		file=$(echo $line | cut -d' ' -f2)
+		[ "$stat" = "DU" ] && { echo " deleting : $file";  git rm $file; }
+		[ "$stat" = "UU" ] && { echo "resetting : $file";  git reset $file; git checkout $file; }
+		[ "$stat" = "M"  ] && { echo "  keeping : $file"; }
+	done < $tempfile
+
+	rm -f $tempfile
+}
+
+main $@
+
+exit 0
+
