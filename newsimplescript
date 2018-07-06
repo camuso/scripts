@@ -9,6 +9,24 @@ body="#!/bin/bash
 #
 # $script
 
+declare usagestr=\$(
+cat <<EOF
+
+\$(basename \$0) 
+
+Description:
+
+Arguments:
+
+\\\0
+EOF
+)
+
+usage() {
+	echo -en "\$usagestr"
+	exit 1
+}
+
 main() {
 
 }
