@@ -15,8 +15,9 @@ that both the commit and string expression be delimited by single
 quote marks.
 
 Arguments:
-     commit-expression - Any valid commit expression for the area
-                         of the git tree you want to lookup
+    commit-expression - Any valid commit expression for the area
+                        of the git tree you want to lookup
+    string-expression - A string encapsulated by single quotes.
 \0
 EOF
 )
