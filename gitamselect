@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# gitamselect
+
+shopt -s extglob
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) dir min max
+
+Description:
+    Selectively applies numbered patch files in dir from the min up to
+    and including the max.
+    This script assumes that patch files will be named with a leading
+    number separated from the rest of the filename by a hyphen, and 
+    ending with ".patch" e.g.
+
+        0003-this-is-a-patch-file.patch
+
+Arguments:
+    min - lowest number patch
+    max - highest number patch
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	declare dir="$1"
+	declare -i min=$2
+	declare -i max=$3
+	declare p
+	declare pat
+	declare -i num
+
+	[ "$1" == "-h" ] && usage
+
+	for p in $(ls -1 $dir/*.patch); do
+		pat=$(basename $p)
+
+		# convert the number to base 10
+		printf -v num "%d" $((10#$(echo $pat | cut -d'-' -f1)))
+
+		([ $num -ge $min ] && [ $num -le $max ]) && git am "$p"
+	done
+}
+
+main $@
+
+exit 0
+
