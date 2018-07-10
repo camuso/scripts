@@ -13,12 +13,13 @@ Description:
     Selectively applies numbered patch files in dir from the min up to
     and including the max.
     This script assumes that patch files will be named with a leading
-    number separated from the rest of the filename by a hyphen, and 
+    number separated from the rest of the filename by a hyphen, and
     ending with ".patch" e.g.
 
         0003-this-is-a-patch-file.patch
 
 Arguments:
+    dir - directory containing the patch files
     min - lowest number patch
     max - highest number patch
 \0
@@ -26,7 +27,7 @@ EOF
 )
 
 usage() {
-	echo -en $usagestr
+	echo -e "$usagestr"
 	exit 1
 }
 
