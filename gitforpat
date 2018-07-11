@@ -73,6 +73,7 @@ git format-patch \\
 	$cletter \\
 	$reroll  \\
 	--no-renames \\
+	--numbered \\
 	--signoff \\
 	--stat=80 \\
 	--output-directory $directory \\
@@ -86,6 +87,7 @@ git format-patch \
 	"$cletter" \
 	"$reroll" \
 	--no-renames \
+	--numbered \
 	--signoff \
 	--stat=80 \
 	--output-directory "$directory" \
