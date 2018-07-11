@@ -174,30 +174,46 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	declare rcmurl=""
 	declare installagent""
 
-	# Apparently, RHEL does not come with lsb_release installed.
-	# We will need another method to determine whether this is Fedora or RHEL
-	# If it's RHEL, we'll install lsb_release to make our lives easier.
+	# Determine what the os is
 	#
-	# distro="$(lsb_release -is)"
+	[ -f /etc/os-release ] || { echo "No /etc/os-release file"; exit 1; }
+	foo=$(grep -w 'ID' /etc/os-release | cut -d"=" -f2)
+
+	# Strip off the double quote marks
 	#
-	foo=$(find /etc  -maxdepth 1 -type f -name fedora-release)
-	[[ $foo ]] && distro="Fedora" || distro="RedHat"
+	foo=${foo%\"}
+	foo=${foo#\"}
+
+	# distro is the lowercase of the ID we pulled out of /etc/os-release
+	#
+	distro=$(echo "$foo" | tr '[:upper:]' '[:lower:]')
+
+	([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
+		{ "$distro is not Redhat"; exit 1; }
 
 	# Get the additional repos according to distro
 	#
-	if [[ "$distro" == "Fedora" ]]; then
+	if [[ "$distro" == "fedora" ]]; then
 		rhpkgurl="http://download.devel.redhat.com/rel-eng/dist-git/fedora/rhpkg.repo"
 		rcmurl="http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo"
 		installagent="dnf"
 		dnf install -y fedpkg
 
-	elif [[ "$distro" == *"RedHat"* ]]; then
-		yum install -y redhat-lsb-core
-		majversion="$(lsb_release -rs | cut -f1 -d.)"
-		# rhpkgurl="http://download.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
+	elif [[ "$distro" == "rhel" ]]; then
+
+		# Get the major version and strip off any leading double quotes
+		#
+		majversion=$(grep -w 'VERSION_ID' /etc/os-release | cut -d= -f2 | cut -d. -f1)
+		majversion=${majversion#\"}
+
+		# Download and install the rhpkg package
+		#
 		rhpkgurl="http://download-node-02.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
 		rcmurl="$(get_rcmurl $majversion)"
-		installagent="yum"
+
+		# Determine the install agent based on the major version
+		#
+		[ $majversion -lt 8 ] && installagent="yum" || installagent="dnf"
 	else
 		echo "Unrecognized distro: "$distro""
 		exit 1
