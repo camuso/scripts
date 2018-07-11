@@ -45,6 +45,9 @@ main() {
 		pat=$(basename $p)
 
 		# convert the number to base 10
+		if [ "${pat:0:1}" != "0" ]; then
+			pat=$(echo "$pat" | cut -d'-' -f2-)
+		fi
 		printf -v num "%d" $((10#$(echo $pat | cut -d'-' -f1)))
 
 		([ $num -ge $min ] && [ $num -le $max ]) && git am "$p"
