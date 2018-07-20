@@ -1,0 +1,33 @@
+#!/bin/bash
+#
+# g2-mkconfig
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description: runs grub2-mkconfig on the found grub.cfg
+
+Arguments: none
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	gcfg=$(find /boot -name grub.cfg -print -quit)
+	[ -z $gcfg ] && { echo "can't find grub.cfg"; exit 1; }
+	echo "grub2-mkconfig -o $gcfg"
+	grub2-mkconfig -o $gcfg
+}
+
+main $@
+
+exit 0
+
