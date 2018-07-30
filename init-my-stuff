@@ -37,32 +37,38 @@ remotename="$1"
 # version numbers.
 # ------------------------------------------------------------------------
 #
-[ -f /etc/os-release ] || { echo "No /etc/os-release file"; exit 1; }
-foo=$(grep -w 'ID' /etc/os-release | cut -d"=" -f2)
+if [ -f /etc/os-release ]; then
+	foo=$(grep -w 'ID' /etc/os-release | cut -d"=" -f2)
 
-# Strip off the double quote marks
-#
-foo=${foo%\"}
-foo=${foo#\"}
-
-# distro is the lowercase of the ID we pulled out of /etc/os-release
-#
-distro=$(echo "$foo" | tr '[:upper:]' '[:lower:]')
-
-([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
-	{ "$distro is not Redhat"; exit 1; }
-
-if [[ "$distro" == "fedora" ]]; then
-	installagent=dnf
-elif [[ "$distro" == "rhel" ]]; then
-	# Get the major version and strip off any leading double quotes
+	# Strip off the double quote marks
 	#
-	majversion=$(grep -w 'VERSION_ID' /etc/os-release | cut -d= -f2 | cut -d. -f1)
-	majversion=${majversion#\"}
+	foo=${foo%\"}
+	foo=${foo#\"}
 
-	# Determine the install agent based on the major version
+	# distro is the lowercase of the ID we pulled out of /etc/os-release
 	#
-	[ $majversion -lt 8 ] && installagent="yum" || installagent="dnf"
+	distro=$(echo "$foo" | tr '[:upper:]' '[:lower:]')
+
+	([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
+		{ "$distro is not Redhat"; exit 1; }
+
+	if [[ "$distro" == "fedora" ]]; then
+		installagent=dnf
+	elif [[ "$distro" == "rhel" ]]; then
+		# Get the major version and strip off any leading double quotes
+		#
+		majversion=$(grep -w 'VERSION_ID' /etc/os-release | cut -d= -f2 | cut -d. -f1)
+		majversion=${majversion#\"}
+
+		# Determine the install agent based on the major version
+		#
+		[ $majversion -lt 8 ] && installagent="yum" || installagent="dnf"
+	fi
+
+else
+	echo "No /etc/os-release file. Assuming distro is RHEL."
+	distro="rhel"
+	installagent="yum"
 fi
 
 # ========================================================================
