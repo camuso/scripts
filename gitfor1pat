@@ -3,9 +3,10 @@
 # gitfor1pat
 #
 
-directory=$1
-currentnumber="$2"
-commitspec=$3
+declare directory=$1
+declare currentnumber="$2"
+declare commitspec=$3
+declare reroll_count=0
 
 function usage() {
 	echo
@@ -21,12 +22,15 @@ function usage() {
 	exit 1
 }
 
-[ "$1" == "h" ] && usage
+([ "$1" == "h" ] || [ "$1" == "-h" ]) && usage
 [ $# -lt 3 ] && usage
+
+[ "$4" ] && reroll_count=$4
 
 set -x
 git format-patch \
 	-1 \
+	--reroll-count=$reroll_count \
 	--no-renames \
 	--signoff \
 	--stat=80 \
