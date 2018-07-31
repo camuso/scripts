@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# striphdr
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) file
+
+Description:
+  Strip the pseudo-code off the archive file.
+
+Arguments:
+  File - the file to operate on
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	declare file="$1"
+	declare b_start=false
+	declare b_end=false
+	declare tmpfile="./tmpfile"
+
+	> tmpfile
+
+	while IFS= read -r line; do
+		[ "$line" == "Head-of-Message" ] && b_start=true
+		($b_start && ! $b_end) && echo "$line" >> $tmpfile
+		[ "$line" == "-- " ] && b_end=true
+	done < $file
+
+	mv $tmpfile $file
+}
+
+main $@
+
+exit 0
+
