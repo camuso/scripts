@@ -5,7 +5,6 @@
 #
 
 source lib/getyn
-source lib/formatargs
 
 declare b_opts=false
 declare b_args=false
@@ -30,18 +29,19 @@ a usage function
   -o options, a quote enclosed string containing a list of space separated
      option flags with optional corresponding arguments.
 
-     Example: -o "n:number f:file d:directory x h"
+     Example: -o "n:number f:file d:directory x h" -a "arg1 arg2"
 
      Creates options for -n number,  -f file, -d directory, -x and -h
      with no arguments.
 
-  -a arguments, double quote enclosed string of arguments that follow 
+  -a arguments, double quote enclosed string of arguments that follow
      the options for the new script being created.
      If the number of arguments following the options is not exactly
      this number, then the newly created script will print its usage
      message and exit.
 
      Example: -a "arg1 arg2"
+
 \0
 EOF
 )
