@@ -163,6 +163,25 @@ done
 
 rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
 
+# Can only do the following if root
+#
+if [ $(id -u) -eq 0 ]; then
+	# Get the full pathname so we can use that to copy from.
+	# If the file or directory already exists, then copy it into a .orig before
+	# performing the rsync and possibley overwriting it with new content.
+	# If the .orig file already exists, do not write over it.
+	#
+	for f in $(ls -rtd1 etcbk/{*,.*}); do
+		name=$(basename $f);
+		if [ -f $f ] && [ -f "$name" ]; then
+			[[ -f "$name".orig ]] \
+				|| cp -v $name "$name".orig 2>&1 | tee -a $logfile
+		fi
+	done
+
+	rsync -Pvat --cvs-exclude etcbk/ /etc/. 2>&1 | tee -a $logfile
+fi
+
 if [ "$remotename" == "root" ]; then
 	for file in \
 	"hosts" \
