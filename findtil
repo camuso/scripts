@@ -10,7 +10,7 @@ cat <<EOF
 
 $(basename $0) <path>
 
-Finds files of the type ??????~?.jpg anc copys them into the
+Finds files of the type ??????~?.jpg and copies them into the
 destination directory.
 
 path - directory into which to copy the files
