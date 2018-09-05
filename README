@@ -1,8 +1,8 @@
 
-Utility Scripts for various redundant tasks
-===========================================
+Utility Scripts for various repetitive tasks
+============================================
 
-cpu utilities
+CPU UTILITIES
 -------------
 cpucount	: number of cpu cores in the system
 cpumodel	: model and speed of the system cpus
@@ -11,46 +11,64 @@ cpuspeed	: cpu speed in Hz
 cputop		: similar to lscpu, but slightly different info
 cpuxspeed	: set the cpu speed parameters
 
-disk tools
+DISK TOOLS
 ----------
 blocksize	: prints the blocksize of a block device, e.g. /dev/sda
 distro2iso	: write a distro tree to a bootable iso file
 duh		: du -hs on current or optional other directory
+findblockdev	: locates all the block devices in the system
 
-environment init
+ENVIRONMENT INIT
 ----------------
 ark2host	: initializes a system with my environment
 delete-my-stuff	: delete my environment from a system
 
-log navigators
+GIT UTILITIES
+-------------
+extup		: extracts upstream commits from a range of rhel commits
+g2-envlist	: executes grub2-editenv list
+g2-mkconfig	: executes grub2-mkconfig -o <output-file-spec>
+g2-setdef	: executes grub2-set-default to the menu expression
+
+
+LOG NAVIGATORS
 --------------
 acpi-ipmi-msg	: greps dmesg for acpi and ipmi messages
 bldlog		: greps make.log (output of kmake) for errors and warnings
 
-misc utilities
+MISC UTILITIES
 --------------
 blacklist	: blacklists a driver
-braceprofiler	: prints { and } with line numbers to help locate missing
+braceprofiler	: prints { and } with line numbers to help locate any missing
 chkbit		: determines if a bit is set in the mask argument
 create-load	: load the system moving zeroes from /dev/zero to /dev/null
 diffdir		: diff matching files in two dirs and print files that diff
 dmitop		: extract basic hw and fw info from demidecode
 entropy		: creates system entropy
+fixup-rsync	: useful for chmod to owner after rsync
+foreachfile	: executes commands on a file specification
 
-patchtools
+PATCHTOOLS
 ----------
 cherp		: git cherry-picking tool
 dpat		: compare $1 with the patch in ../pat directory
 
-scripting tools
+SEARCH TOOLS
+------------
+braceprofiler	: prints { and } with line numbers to help locate any missing
+findinclude	: recursively search sources for a nested include file
+findtil		: Copies files named ??????~?.jpg into a destination dir
+getallinclude	: searches dir tree for #include declarations
+
+SCRIPTING TOOLS
 ---------------
 createoptions	: create an options parser template
 
-tests
+TESTS
 -----
 bootloop	: puts the system in a user controllable boot loop
 
-text manipulation
+TEXT MANIPULATION
 -----------------
 deleteline	: delete line containing string $1 in file $2
 deletelinen	: delete a 1-based line $1 from file $2
