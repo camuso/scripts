@@ -17,19 +17,27 @@ blocksize	: prints the blocksize of a block device, e.g. /dev/sda
 distro2iso	: write a distro tree to a bootable iso file
 duh		: du -hs on current or optional other directory
 findblockdev	: locates all the block devices in the system
+getuuids	: prints all uuids in system
 
 ENVIRONMENT INIT
 ----------------
 ark2host	: initializes a system with my environment
 delete-my-stuff	: delete my environment from a system
+getsystem	: captures basic system info
 
 GIT UTILITIES
 -------------
 extup		: extracts upstream commits from a range of rhel commits
+gitamselect	: selectively applies patch files in a directory
+git-backport	: prarit's git backporting script
+
+
+GRUB UTILITIES
+--------------
 g2-envlist	: executes grub2-editenv list
+g2-list		: list the menu entries in the grub menu
 g2-mkconfig	: executes grub2-mkconfig -o <output-file-spec>
 g2-setdef	: executes grub2-set-default to the menu expression
-
 
 LOG NAVIGATORS
 --------------
@@ -47,22 +55,28 @@ dmitop		: extract basic hw and fw info from demidecode
 entropy		: creates system entropy
 fixup-rsync	: useful for chmod to owner after rsync
 foreachfile	: executes commands on a file specification
+getbit.cpp	: getbit bit-number mask returns 1 if bit-number is set in mask
 
 PATCHTOOLS
 ----------
 cherp		: git cherry-picking tool
 dpat		: compare $1 with the patch in ../pat directory
+getarkpatch	: downloads patches from post-office.corp.redhat.com
+getpatchwork	: downloads patches from patchwork.lab.bos.redhat.com
 
 SEARCH TOOLS
 ------------
 braceprofiler	: prints { and } with line numbers to help locate any missing
 findinclude	: recursively search sources for a nested include file
 findtil		: Copies files named ??????~?.jpg into a destination dir
-getallinclude	: searches dir tree for #include declarations
+getallinclude	: searches dir tree for #include. Called by findinclude
+getinclude	: extracts filename including any path info from $include decl
+		: : called by findinclude
 
 SCRIPTING TOOLS
 ---------------
 createoptions	: create an options parser template
+getyn		: prints prompt and gets yes or no from user
 
 TESTS
 -----
