@@ -1,0 +1,118 @@
+#!/bin/bash
+#
+# hget
+#
+
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="[1m"
+unset UND && declare UND="[4m"
+unset OFF && declare OFF="[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD hget -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] hlink
+
+Arguments:
+  hlink -  web link to href you want to download locally
+
+Options:
+  -o out - if this option is omitted, the output will go to
+           /dev/stdour, else the out put is directed to the
+	   output path provided.
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+chkout() {
+	local dir=$(dirname $1)
+	[ -d $dir ] || mkdir -p $dir
+}
+
+main() {
+	declare hlink
+	declare out=/dev/stdout
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts o: OPTION; do
+    	    case "$OPTION" in
+		o ) out=$OPTARG
+		    chkout $out
+		    let ++optcount
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 1 ] || exitme $EXIT_INVARG
+
+	hlink="$1"
+	wget -qO $out $hlink
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
