@@ -1,0 +1,169 @@
+#!/bin/bash
+#
+# findpkgs
+#
+
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="[1m"
+unset UND && declare UND="[4m"
+unset OFF && declare OFF="[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD findpkgs -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] pkglist
+
+Description:
+
+  This script will crawl the RHEL7 and RHE8 latest builds and look for
+  packages listed in the pkglist argument. The links to the top of the
+  most recent builds are...
+
+  RHEL7: http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose/
+  RHEL8: http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose/
+
+Arguments:
+  pkglist - This is a file containing a list of packages to seek.
+
+Options:
+  -h  - Prints this help text to the terminal.
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+declare rh7link="http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose"
+declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
+declare x86_64="x86_64/os/Packages"
+
+declare -a rh8streams=(
+"AppStream"
+"BaseOS"
+"CRB"
+"HighAvailability"
+"NFV"
+"RT"
+"ResilientStorage"
+)
+declare -i rh8streamsnum=${#rh8streams[@]}
+
+declare -a rh7streams=(
+"Client-optional"
+"Client"
+"ComputeNode-optional"
+"ComputeNode"
+"Server-NFV"
+"Server-RT"
+"Server-SAP"
+"Server-optional"
+"Server"
+"Workstation-optional"
+"Workstation"
+)
+declare -i rh7streamsnum=${#rh8streams[@]}
+
+buildtrees() {
+	[ -d /tmp/rh7 ] || mkdir /tmp/rh7
+	[ -d /tmp/rh8 ] || mkdir /tmp/rh8
+
+	for ((i = 0; i < $rh7streamsnum; ++i)); do
+		stream=${rh7streams[$i]}
+		echo "Getting RHEL7 $stream packages..."
+		wget -qO /tmp/rh7/$stream $rh7link/$stream/$x86_64
+	done
+	echo
+	for ((i = 0; i < $rh8streamsnum; ++i)); do
+		stream=${rh8streams[$i]}
+		echo "Getting RHEL8 $stream packages..."
+		wget -qO /tmp/rh8/$stream $rh8link/$stream/$x86_64
+	done
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	declare pkglist
+
+	declare rh8BaseOS="$rh8link""BaseOS/"
+	while getopts h OPTION; do
+    	    case "$OPTION" in
+		h ) usage
+		    exitme 0
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 1 ] || exitme $EXIT_INVARG
+
+	pkglist="$1"
+	[ -f $pkglist ] || exitme $EXIT_INVFIL
+
+	buildtrees
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
