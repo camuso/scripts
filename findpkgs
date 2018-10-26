@@ -89,9 +89,9 @@ usage() {
 
 declare rh7link="http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose"
 declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
-declare x86_64="x86_64/os/Packages"
+declare pkg="os/Packages"
 
-declare -a rh8streams=(
+declare -a rh8stream=(
 "AppStream"
 "BaseOS"
 "CRB"
@@ -100,9 +100,9 @@ declare -a rh8streams=(
 "RT"
 "ResilientStorage"
 )
-declare -i rh8streamsnum=${#rh8streams[@]}
+declare -i rh8streamsiz=${#rh8stream[@]}
 
-declare -a rh7streams=(
+declare -a rh7stream=(
 "Client-optional"
 "Client"
 "ComputeNode-optional"
@@ -110,27 +110,87 @@ declare -a rh7streams=(
 "Server-NFV"
 "Server-RT"
 "Server-SAP"
+"Server-SAPHANA"
 "Server-optional"
 "Server"
 "Workstation-optional"
 "Workstation"
 )
-declare -i rh7streamsnum=${#rh8streams[@]}
+declare -i rh7streamsiz=${#rh7stream[@]}
+
+declare -a rh7arch=(
+"x86_64"
+"ppc64"
+"ppc64le"
+"s390x"
+)
+declare -i rh7archsiz=${#rh7arch[@]}
+
+declare -a rh8arch=(
+"x86_64"
+"ppc64le"
+"s390x"
+"aarch64"
+)
+declare -i rh8archsiz=${#rh8arch[@]}
+
+declare hcmd="elinks -dump -no-references"
+
+getpkglist() {
+	local distro="$1"
+	local stream="$2"
+	local arch="$3"
+	local link
+
+	[ $distro -eq 7 ] && link="$rh7link"
+	[ $distro -eq 8 ] && link="$rh8link"
+
+	subdir=$stream/$arch/$pkg
+	dir=/tmp/rh$distro/$subdir
+	[ -d $dir ] || mkdir -p $dir
+	$hcmd $link/$subdir > $dir/pkglist
+	echo "RHEL$distro $dir/pkglist"
+}
 
 buildtrees() {
-	[ -d /tmp/rh7 ] || mkdir /tmp/rh7
-	[ -d /tmp/rh8 ] || mkdir /tmp/rh8
 
-	for ((i = 0; i < $rh7streamsnum; ++i)); do
-		stream=${rh7streams[$i]}
-		echo "Getting RHEL7 $stream packages..."
-		wget -qO /tmp/rh7/$stream $rh7link/$stream/$x86_64
+	for ((j = 0; j < $rh7streamsiz; ++j)); do
+
+		stream=${rh7stream[$j]}
+
+		if [[ $stream == "Server" ]]          || \
+		   [[ $stream == "Server-optional" ]]
+		then
+			for ((k = 0; k < $rh7archsiz; ++k)); do
+				getpkglist 7 $stream ${rh7arch[$k]}
+			done
+		else
+			getpkglist 7 $stream "x86_64"
+		fi
 	done
+
 	echo
-	for ((i = 0; i < $rh8streamsnum; ++i)); do
-		stream=${rh8streams[$i]}
-		echo "Getting RHEL8 $stream packages..."
-		wget -qO /tmp/rh8/$stream $rh8link/$stream/$x86_64
+
+	for ((j = 0; j < $rh8streamsiz; ++j)); do
+
+		stream=${rh8stream[$j]}
+
+		if [[ $stream == "AppStream" ]] || \
+		   [[ $stream == "BaseOS" ]]    || \
+		   [[ $stream == "CRB" ]]
+		then
+			for ((k = 0; k < $rh8archsiz; ++k)); do
+				getpkglist 8 $stream ${rh8arch[k]}
+			done
+		elif [[ $stream == "HighAvailability" ]] ||
+		     [[ $stream == "ResilientStorage" ]]
+		then
+			for ((k = 0; k < ($rh8archsiz - 1); ++k)); do
+				getpkglist 8 $stream ${rh8arch[k]}
+			done
+		else
+			getpkglist 8 $stream "x86_64"
+		fi
 	done
 }
 
