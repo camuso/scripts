@@ -194,6 +194,17 @@ buildtrees() {
 	done
 }
 
+parse_pkglist() {
+	local pkglist="$1"
+
+	while read line; do
+		echo $line
+		grep -q -r -m1 $line /tmp/rh7
+		
+	done < $pkglist
+}
+
+
 main() {
         # Trap for control-c
         trap control_c SIGINT
@@ -219,6 +230,7 @@ main() {
 	[ -f $pkglist ] || exitme $EXIT_INVFIL
 
 	buildtrees
+	parse_pkglist $pkglist
 
 	exitme $EXIT_OK
 }
