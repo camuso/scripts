@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# getengpkg
+#
+
+declare gpkgdir="/tmp/gpkg"
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) manager
+
+Example
+  $(basename $0) peterm
+
+Description:
+  Obtain the list of all the package owners. Parse that list for
+  owners who report to the manager, passed as an argume
+  Each entry in the list will have two fields, the name of the
+  package forllowed by the email address of the package maintainer
+  and separated by a colon, e.g. package: maintainer@redhat.com
+
+  There will be two lists generated. One for RHEL7 and one for RHEL8.
+
+  The teamlist script is called to generate the list of engineers
+  reporting to the manager passed as the argument.
+
+  The following must be installed to run this script.
+    bugzilla
+    python-bugzilla
+    teamlist
+
+  You must be logged into bugzilla from the command line to use this
+  script.
+    $ bugzilla login
+
+Arguments:
+  manager - the manager for whom this report is generated
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+# waitonproc
+#
+# Prints a dot to the screen every half second until the passed PID
+# completes.
+#
+# $1 - PID of process we are waiting for.
+# $2 - optional time argument
+#
+waitonproc () {
+    __pid__=$1;
+    __time__=1
+
+    [ $# -eq 2 ] && __time__=$2
+    while kill -0 $__pid__ > /dev/null 2>&1; do
+        echo -n '.';
+        sleep $__time__;
+    done
+}
+
+clean_reports() {
+	declare reports="$1"
+	declare tmpreports=$gpkgdir/tmpreports
+
+	> $tmpreports
+
+	while read line; do
+		[[ "$line" == *"examining"* ]] && continue
+		echo "$line" >> $tmpreports
+	done < $reports
+
+	rm -f $reports
+	mv $tmpreports $reports
+}
+
+get_pkgs() {
+	declare distro=$1
+	declare fil=$gpkgdir/rh"$distro"pkgs
+	declare mypid
+
+	echo "Getting RHEL$distro Packages"
+	bugzilla info -o="Red Hat Enterprise Linux $distro" | sort -u > $fil &
+	mypid=$!
+	waitonproc $mypid .1
+	echo
+}
+
+main() {
+	declare manager="$1"
+	declare mypid
+
+	[ -d $gpkgdir ] || mkdir -p $gpkgdir
+	> $gpkgdir/reports
+	teamlist $manager | tee -a $gpkgdir/reports
+	clean_reports $gpkgdir/reports
+	get_pkgs 7
+	get_pkgs 8
+}
+
+main $@
+
+exit 0
+
