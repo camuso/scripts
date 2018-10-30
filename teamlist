@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+# This script provides a list of reports for a manager at Red Hat.
+# It takes the username of the manager as an argument.
+#
+# ex) ./teamlist peterm
+#
+
+get_manager_reports() {
+	local managerstr="manager=uid=$1,ou=users,dc=redhat,dc=com"
+	ldapsearch -x -h ldap.corp.redhat.com \
+		-b dc=redhat,dc=com \
+		-s sub $managerstr | \
+		grep mail | \
+		awk ' { print $2 } ' | \
+		awk -F '@' ' { print $1 }'
+}
+
+lineno=1
+user=$1
+
+[ -z $user ] && echo "need to specify a user please" && exit 1
+
+outfile=$(mktemp)
+echo $user > $outfile
+len=0
+
+while [ $len -ne $lineno ]
+do
+	# uncomment to debug
+	#echo "len=$len lineno=$lineno $user"
+	get_manager_reports $user >> $outfile
+	len=$(cat $outfile | wc -l)
+	((lineno++))
+	user=$(sed "${lineno}q;d" $outfile)
+	echo "examining $lineno of $len reports"
+done
+
+cat $outfile | sort -u
+
+#cleanup
+rm $outfile
