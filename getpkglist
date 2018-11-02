@@ -42,6 +42,9 @@ Example
   $(basename $0) peterm
 
 Description:
+
+  NOTE:	Requires prarit's teamlist script in the executable path
+
   Obtain the list of all the package owners. Parse that list for
   owners who report to the manager passed as an argument.
   Each entry in the list will have two fields, the name of the
@@ -56,10 +59,13 @@ Description:
   Output files are in /tmp/gpkg as follows.
     team:    list of engineers reporting to the manager passed as the
              argument.
-    rh7pkgs: list of all packages and their maintainers in RHEL7
-    rh8pkgs: list of all packages and their maintainers in RHEL8
-    teamrh7: list of packages maintained by team members in RHEL7
-    teamrh8: list of packages maintained by team members in RHEL8
+    rh7pkgs : list of all packages and their maintainers in RHEL7
+    rh8pkgs : list of all packages and their maintainers in RHEL8
+    teampkgs: list of packages maintained by team members, each line
+              containing the following colon separated fields.
+	      package : maintainer : rhel [: rhel]
+	      The optioinal [rhel] field at the end of the line appears
+	      when the package is found in both RHEL7 and RHEL8.
 
   The following must be installed to run this script.
     bugzilla
