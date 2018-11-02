@@ -76,6 +76,7 @@ Arguments:
   pkglist - This is a file containing a list of packages to seek.
 
 Options:
+  -b  - Builds the RHEL7 and RHEL8 distro directory trees.
   -h  - Prints this help text to the terminal.
 
 \0
@@ -87,6 +88,7 @@ usage() {
 	exitme 0
 }
 
+declare b_buildtrees=false
 declare rh7link="http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose"
 declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
 declare pkg="os/Packages"
@@ -136,6 +138,89 @@ declare -i rh8archsiz=${#rh8arch[@]}
 
 declare hcmd="elinks -dump -no-references"
 
+# ui_strtok - tokenizes a string and returns an array
+#
+# $1 - the string to tokenize
+# $2 - the string of delimiters
+# $3 - returns the tokenized string as an array
+#
+# examples:
+#
+# ui_strtok kernel-pegas-4.11.0-2.el7.x86_64 ".-" array
+#
+# ${array[@]} will contain all the tokens separated by delimiters "."
+# and "-", and the delimiters will be replaced by spaces.
+#
+ui_strtok() {
+	IFS="$2" read -r -a $3 <<< "$1"
+}
+
+# get_pkgname - extract the n from nvr
+#
+# Tokenize the package name.
+# There are packages with names like this..
+#
+#   java-1.6.0-openjdk-demo-1.6.0.41-1.13.13.1.el7_3.x86_64.rpm
+#
+# ..where splitting on the last hyphen isn't good enough to isolate the
+# package name.
+#
+# The last token is automatically dropped, since it's the distro and arch.
+# It's the second to last token that must be examined. If it begins with a
+# number, it will be dropped and all preceding tokens will be recombined to
+# the package name.
+#
+get_pkgname(){
+    local p="$1"
+    local pary
+    local pn
+    local j
+    local k
+    local f
+
+    ui_strtok "$p" "-" pary
+
+    # We will always use the first token.
+    #
+    pn=${pary[0]}
+
+    # Get the index to the second to last token. If its first char is a
+    # number, then drop it and set the index to the next token.
+    #
+    k=$((${#pary[@]} - 2))
+    f=${pary[k]}
+    [[ ${f:0:1} =~ ^-?[0-9]+$ ]] && let --k
+
+    # Now get the remaining tokens.
+    #
+    for ((j = 1; j <= k; ++j)); do
+	    pn="$pn""-""${pary[j]}"
+    done
+
+    eval $2="$pn"
+}
+
+clean_pkglist() {
+	local path=$1
+	local dir=$(dirname $path)
+	local name
+	local lary
+
+	echo $path
+	> $dir/tmp
+
+	while read line; do
+		[[ $line == *".rpm"* ]] || continue
+		ui_strtok "$line" "] " lary
+		line=${lary[3]}
+		get_pkgname "$line" name
+		echo $name >> $dir/tmp
+	done < $path
+
+	mv -f $dir/tmp $path
+	rm -f $dir/tmp
+}
+
 getpkglist() {
 	local distro="$1"
 	local stream="$2"
@@ -147,12 +232,19 @@ getpkglist() {
 
 	subdir=$stream/$arch/$pkg
 	dir=/tmp/rh$distro/$subdir
+
 	[ -d $dir ] || mkdir -p $dir
+
 	$hcmd $link/$subdir > $dir/pkglist
-	echo "RHEL$distro $dir/pkglist"
+	clean_pkglist "$dir/pkglist"
 }
 
 buildtrees() {
+	local j
+	local k
+
+	echo "RHEL7"
+	echo "-----"
 
 	for ((j = 0; j < $rh7streamsiz; ++j)); do
 
@@ -170,6 +262,9 @@ buildtrees() {
 	done
 
 	echo
+
+	echo "RHEL8"
+	echo "-----"
 
 	for ((j = 0; j < $rh8streamsiz; ++j)); do
 
@@ -194,13 +289,41 @@ buildtrees() {
 	done
 }
 
+process_stream() {
+	local stream="$1"
+	local s
+	local sary
+
+	while read s; do
+		ui_strtok "$s" "/" sary
+		printf "\t%-21s%s\n" ${sary[3]} ${sary[4]}
+	done <<< "$stream"
+
+}
+
+get_stream() {
+	local distro=$1
+	local pkg=$2
+	local stream
+
+	stream="$(grep -r -m1 "^$pkg$" /tmp/rh$distro)"
+	if [ $? -eq 0 ]; then
+		process_stream "$stream"
+	else
+		echo "$pkg NOT FOUND in RHEL$distro"
+	fi
+}
+
 parse_pkglist() {
 	local pkglist="$1"
+	local stream
 
 	while read line; do
-		echo $line
-		grep -q -r -m1 $line /tmp/rh7
-		
+		line=$(echo "$line" | cut -d':' -f1)
+		echo "$line"
+		get_stream 7 "$line"
+		get_stream 8 "$line"
+		echo
 	done < $pkglist
 }
 
@@ -211,11 +334,13 @@ main() {
 
 	declare pkglist
 
-	declare rh8BaseOS="$rh8link""BaseOS/"
-	while getopts h OPTION; do
+	while getopts bh OPTION; do
     	    case "$OPTION" in
 		h ) usage
 		    exitme 0
+		    ;;
+		b ) b_buildtrees=true
+		    let ++optcount
 		    ;;
 		* ) echo "unrecognized option -$OPTION"
 		    echo -e "$usagestr"
@@ -229,7 +354,10 @@ main() {
 	pkglist="$1"
 	[ -f $pkglist ] || exitme $EXIT_INVFIL
 
-	buildtrees
+	$b_buildtrees && buildtrees
+	echo
+	echo "Parsing the Package List in $pkglist"
+	echo "---------------------------"
 	parse_pkglist $pkglist
 
 	exitme $EXIT_OK
