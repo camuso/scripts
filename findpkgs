@@ -91,6 +91,8 @@ usage() {
 declare b_buildtrees=false
 declare rh7link="http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose"
 declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
+declare br7link="http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest"
+declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest"
 declare pkg="os/Packages"
 
 declare -a rh8stream=(
