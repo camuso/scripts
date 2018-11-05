@@ -185,7 +185,7 @@ get_pkgname(){
     pn=${pary[0]}
 
     # Get the index to the second to last token. If its first char is a
-    # number, then drop it and set the index to the next token.
+    # number, then drop it and set the index to the previous token.
     #
     k=$((${#pary[@]} - 2))
     f=${pary[k]}
