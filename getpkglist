@@ -119,7 +119,7 @@ Cleaning up and exiting.
 }
 
 usage() {
-	echo -en $usagestr
+	echo -en "$usagestr"
 	exitme 0
 }
 
@@ -256,8 +256,8 @@ map_pkgs2engs() {
 
 	while read eng; do
 		echo $eng
-		l7="$(grep $eng $rh7)"
-		l8="$(grep $eng $rh8)"
+		l7="$(grep -w $eng $rh7)"
+		l8="$(grep -w $eng $rh8)"
 		# echo "$l7"
 		# echo "$l8"
 		([[ "$l7" ]] || [[ "$l8" ]]) \
