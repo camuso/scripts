@@ -74,8 +74,10 @@ Description:
 
 Arguments:
   pkglist - This is a file containing a list of packages to seek.
+            Use the getpkglist script to create this list.
 
 Options:
+  -a  - List arches along with the directories
   -b  - Builds the RHEL7 and RHEL8 distro directory trees.
   -h  - Prints this help text to the terminal.
 
@@ -89,10 +91,11 @@ usage() {
 }
 
 declare b_buildtrees=false
+declare b_arches=false
 declare rh7link="http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose"
 declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
-declare br7link="http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest"
-declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest"
+declare br7link="http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest/x86_64/pkglist"
+declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist"
 declare pkg="os/Packages"
 
 declare -a rh8stream=(
@@ -220,7 +223,6 @@ clean_pkglist() {
 	done < $path
 
 	mv -f $dir/tmp $path
-	rm -f $dir/tmp
 }
 
 getpkglist() {
@@ -241,12 +243,47 @@ getpkglist() {
 	clean_pkglist "$dir/pkglist"
 }
 
+
+clean_brpkglist() {
+	local path="$1"
+	local name
+	local tfil=/tmp/tfil
+
+	echo $path
+	> $tfil
+
+	while read line; do
+		[[ $line == *".rpm"* ]] || continue
+		line=$(basename $line)
+		get_pkgname "$line" name
+		echo $name >> $tfil
+	done < $path
+
+	mv -f $tfil $path
+}
+
+get_brpkglist() {
+	local distro="$1"
+	dir="/tmp/rh$distro/BUILDROOT"
+	local link
+
+	[ $distro -eq 7 ] && link="$br7link"
+	[ $distro -eq 8 ] && link="$br8link"
+
+	[ -d $dir ] || mkdir -p $dir
+
+	$hcmd $link > $dir/pkglist
+	clean_brpkglist "$dir/pkglist"
+}
+
 buildtrees() {
 	local j
 	local k
 
 	echo "RHEL7"
 	echo "-----"
+
+	get_brpkglist 7
 
 	for ((j = 0; j < $rh7streamsiz; ++j)); do
 
@@ -267,6 +304,8 @@ buildtrees() {
 
 	echo "RHEL8"
 	echo "-----"
+
+	get_brpkglist 8
 
 	for ((j = 0; j < $rh8streamsiz; ++j)); do
 
@@ -295,10 +334,19 @@ process_stream() {
 	local stream="$1"
 	local s
 	local sary
+	local prev=
 
 	while read s; do
 		ui_strtok "$s" "/" sary
-		printf "\t%-21s%s\n" ${sary[3]} ${sary[4]}
+
+		if $b_arches; then
+			printf "    RHEL-$distro %-21s%s\n" ${sary[3]} ${sary[4]}
+		else
+			if [[ $prev != ${sary[3]} ]]; then
+				printf "    RHEL-$distro %-21s\n" ${sary[3]}
+			fi
+			prev="${sary[3]}"
+		fi
 	done <<< "$stream"
 
 }
@@ -312,19 +360,27 @@ get_stream() {
 	if [ $? -eq 0 ]; then
 		process_stream "$stream"
 	else
-		echo "$pkg NOT FOUND in RHEL$distro"
+		echo -e "    RHEL-$distro $pkg NOT FOUND"
 	fi
 }
 
 parse_pkglist() {
 	local pkglist="$1"
 	local stream
+	local line
+	local lary
+	local pkg
+	local mnt
 
 	while read line; do
-		line=$(echo "$line" | cut -d':' -f1)
-		echo "$line"
-		get_stream 7 "$line"
-		get_stream 8 "$line"
+		ui_strtok "$line" ":" lary
+		pkg="${lary[0]}"
+		mnt="${lary[1]}"
+		printf "%-24s%s\n" $pkg $mnt
+		#line=$(echo "$line" | cut -d':' -f1)
+		#echo "$line"
+		get_stream 7 "$pkg"
+		get_stream 8 "$pkg"
 		echo
 	done < $pkglist
 }
@@ -336,10 +392,13 @@ main() {
 
 	declare pkglist
 
-	while getopts bh OPTION; do
+	while getopts abh OPTION; do
     	    case "$OPTION" in
 		h ) usage
 		    exitme 0
+		    ;;
+		a ) b_arches=true
+		    let ++optcount
 		    ;;
 		b ) b_buildtrees=true
 		    let ++optcount
@@ -358,8 +417,9 @@ main() {
 
 	$b_buildtrees && buildtrees
 	echo
-	echo "Parsing the Package List in $pkglist"
-	echo "---------------------------"
+	echo "List of Packages in Platform Enablement"
+	echo "---------------------------------------"
+	echo
 	parse_pkglist $pkglist
 
 	exitme $EXIT_OK
