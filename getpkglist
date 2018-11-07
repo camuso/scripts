@@ -101,7 +101,7 @@ exitme() {
 		echo -e "$BLD$strarg$exitmsg$OFF"
 
 		[ $exitval -ne 0 ] && echo -e \
-			"Type$BLD findpkgs -h$OFF for help."
+			"Type$BLD $(basename $0) -h$OFF for help."
 	fi
 
 	exit $exitval
