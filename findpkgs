@@ -61,7 +61,7 @@ declare -i optcount=0
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options] pkglist
+$(basename $0) [options] pkglist outdir
 
 Description:
 
@@ -69,12 +69,16 @@ Description:
   packages listed in the pkglist argument. The links to the top of the
   most recent builds are...
 
-  RHEL7: http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose/
-  RHEL8: http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose/
+  http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose
+  http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest/x86_64/pkglist
+  http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose
+  http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist
 
 Arguments:
   pkglist - This is a file containing a list of packages to seek.
             Use the getpkglist script to create this list.
+  outdir  - The directory into which the RHEL7 and RHEL8 distro trees will
+            be copied.
 
 Options:
   -a  - List arches along with the directories
@@ -97,6 +101,7 @@ declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-
 declare br7link="http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest/x86_64/pkglist"
 declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist"
 declare pkg="os/Packages"
+declare outdir=
 
 declare -a rh8stream=(
 "AppStream"
@@ -235,7 +240,8 @@ getpkglist() {
 	[ $distro -eq 8 ] && link="$rh8link"
 
 	subdir=$stream/$arch/$pkg
-	dir=/tmp/rh$distro/$subdir
+	# outdir is global
+	dir=$outdir/rh$distro/$subdir
 
 	[ -d $dir ] || mkdir -p $dir
 
@@ -263,8 +269,9 @@ clean_brpkglist() {
 }
 
 get_brpkglist() {
+	# outdir is global
 	local distro="$1"
-	dir="/tmp/rh$distro/BUILDROOT"
+	dir="$outdir/rh$distro/BUILDROOT"
 	local link
 
 	[ $distro -eq 7 ] && link="$br7link"
@@ -277,6 +284,8 @@ get_brpkglist() {
 }
 
 buildtrees() {
+	# outdir is global
+
 	local j
 	local k
 
@@ -391,6 +400,7 @@ main() {
         trap control_c SIGINT
 
 	declare pkglist
+	declare args=1
 
 	while getopts abh OPTION; do
     	    case "$OPTION" in
@@ -402,6 +412,7 @@ main() {
 		    ;;
 		b ) b_buildtrees=true
 		    let ++optcount
+		    args=2
 		    ;;
 		* ) echo "unrecognized option -$OPTION"
 		    echo -e "$usagestr"
@@ -410,14 +421,18 @@ main() {
 	done
 
 	shift $optcount
-	[ $# -eq 1 ] || exitme $EXIT_INVARG
+	[ $# -eq $args ] || exitme $EXIT_INVARG
 
 	pkglist="$1"
 	[ -f $pkglist ] || exitme $EXIT_INVFIL
 
-	$b_buildtrees && buildtrees
+	if $b_buildtrees; then
+		outdir="$2"
+		[ -d $outdir ] || mkdir -p $outdir
+		buildtrees $outdir
+	fi
+
 	echo
-	echo "List of Packages in Platform Enablement"
 	echo "---------------------------------------"
 	echo
 	parse_pkglist $pkglist
