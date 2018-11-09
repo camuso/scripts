@@ -61,7 +61,7 @@ declare -i optcount=0
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options] pkglist outdir
+$(basename $0) [options] pkglist topdir
 
 Description:
 
@@ -77,7 +77,7 @@ Description:
 Arguments:
   pkglist - This is a file containing a list of packages to seek.
             Use the getpkglist script to create this list.
-  outdir  - The directory into which the RHEL7 and RHEL8 distro trees will
+  topdir  - The directory into which the RHEL7 and RHEL8 distro trees will
             be copied.
 
 Options:
@@ -96,14 +96,20 @@ usage() {
 
 declare b_buildtrees=false
 declare b_arches=false
+
 declare rh7link="http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose"
-declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
+declare su7link="http://download.eng.bos.redhat.com/rel-eng/latest-Supp-7-RHEL-7/compose"
 declare br7link="http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest/x86_64/pkglist"
+
+declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
+declare su8link="http://download.eng.bos.redhat.com/rel-eng/latest-Supp-8.0-RHEL-8/compose"
 declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist"
+
 declare pkg="os/Packages"
-declare outdir=
+declare topdir=
 
 declare -a rh8stream=(
+"Supplementary"
 "AppStream"
 "BaseOS"
 "CRB"
@@ -115,6 +121,7 @@ declare -a rh8stream=(
 declare -i rh8streamsiz=${#rh8stream[@]}
 
 declare -a rh7stream=(
+"Supplementary"
 "Client-optional"
 "Client"
 "ComputeNode-optional"
@@ -230,25 +237,27 @@ clean_pkglist() {
 	mv -f $dir/tmp $path
 }
 
+# getpkglist - acquire a list of packages at the url
+#
+# Globals
+#   topdir    - top directory for the RHEL7 and RHEL8 trees
+#
+# Arguments
+#   distro    - 7 or 8
+#   stream    - Server, Client, Workstation, etc.
+#   arch      - x86_64, ppc, etc
+#   link      - url for the given stream
+#   dir       - directory into wich the packages go
+#
 getpkglist() {
-	local distro="$1"
-	local stream="$2"
-	local arch="$3"
-	local link
+	local link="$1"
+	local outsubdir="$2"
 
-	[ $distro -eq 7 ] && link="$rh7link"
-	[ $distro -eq 8 ] && link="$rh8link"
+	[ -d $outsubdir ] || mkdir -p $outsubdir
 
-	subdir=$stream/$arch/$pkg
-	# outdir is global
-	dir=$outdir/rh$distro/$subdir
-
-	[ -d $dir ] || mkdir -p $dir
-
-	$hcmd $link/$subdir > $dir/pkglist
-	clean_pkglist "$dir/pkglist"
+	$hcmd $link > $outsubdir/pkglist
+	clean_pkglist "$outsubdir/pkglist"
 }
-
 
 clean_brpkglist() {
 	local path="$1"
@@ -269,9 +278,9 @@ clean_brpkglist() {
 }
 
 get_brpkglist() {
-	# outdir is global
+	# topdir is global
 	local distro="$1"
-	dir="$outdir/rh$distro/BUILDROOT"
+	dir="$topdir/rh$distro/BUILDROOT"
 	local link
 
 	[ $distro -eq 7 ] && link="$br7link"
@@ -283,29 +292,72 @@ get_brpkglist() {
 	clean_brpkglist "$dir/pkglist"
 }
 
+# buildtrees() - build the RHEL7 and RHEL8 trees from the distros
+#
+# Globals
+#   pkg          - os/Packages
+#   topdir       - top directory for RHEL trees
+#   rh7link      - url of rh7 distro tree
+#   br7link      - url of rh7 BUILDROOOT
+#   su7link      - url of rh7 Supplementary
+#   rh7stream    - array of streams in RHEL7
+#   rh7streamsiz - number of elements in the the rh7stream array
+#   rh8link      - url of rh8 distro tree
+#   br8link      - url of rh8 BUILDROOT
+#   su8link      - url of rh8 Supplemental
+#   rh8stream    - array of streams in RHEL8
+#   rh8streamsiz - number of elements in the rh8stream array
+#
 buildtrees() {
-	# outdir is global
+	# topdir is global
 
-	local j
-	local k
+	local j	        # - iterating variables
+	local k         # - :
+	local stream    # - extracted from given stream array
+	local arch      # - extracted from given arch array
+	local urlsubdir # - composite subdir of the url distro tree
+	local outsubdir # - composite subdir of the destination dir
+	local link      # - copmosite of appropriate link and urlsubdir
 
 	echo "RHEL7"
 	echo "-----"
 
 	get_brpkglist 7
 
+	# loop through streams
+	#
 	for ((j = 0; j < $rh7streamsiz; ++j)); do
 
 		stream=${rh7stream[$j]}
 
 		if [[ $stream == "Server" ]]          || \
-		   [[ $stream == "Server-optional" ]]
-		then
+		   [[ $stream == "Server-optional" ]]; then
+
+			# loop through arches
+			#
 			for ((k = 0; k < $rh7archsiz; ++k)); do
-				getpkglist 7 $stream ${rh7arch[$k]}
+				arch=${rh7arch[$k]}
+				link=$rh7link/$stream/$arch/$pkg
+				outsubdir=$topdir/rh7/$stream/$arch
+				getpkglist $link $outsubdir
+			done
+
+		elif [[ $stream == "Supplementary" ]]; then
+
+			# loop through arches
+			#
+			for ((k = 0; k < $rh7archsiz; ++k)); do
+				arch=${rh7arch[$k]}
+				link=$su7link/Server/$arch/$pkg
+				outsubdir=$topdir/rh7/$stream/$arch
+				getpkglist $link $outsubdir
 			done
 		else
-			getpkglist 7 $stream "x86_64"
+			# Other streams only support arch x86_64
+			#
+			link=$rh7link/$stream/x86_64/$pkg
+			outsubdir=$topdir/rh7/$stream/x86_64
+			getpkglist $link $outsubdir
 		fi
 	done
 
@@ -316,25 +368,49 @@ buildtrees() {
 
 	get_brpkglist 8
 
+	# Loop through streams
+	#
 	for ((j = 0; j < $rh8streamsiz; ++j)); do
 
 		stream=${rh8stream[$j]}
 
 		if [[ $stream == "AppStream" ]] || \
 		   [[ $stream == "BaseOS" ]]    || \
-		   [[ $stream == "CRB" ]]
-		then
+		   [[ $stream == "CRB" ]]; then
+
+			# Loop through arches
+			#
 			for ((k = 0; k < $rh8archsiz; ++k)); do
-				getpkglist 8 $stream ${rh8arch[k]}
+				arch=${rh8arch[k]}
+				link=$rh8link/$stream/$arch/$pkg
+				outsubdir=$topdir/rh8/$stream/$arch
+				getpkglist $link $outsubdir
 			done
+
 		elif [[ $stream == "HighAvailability" ]] ||
-		     [[ $stream == "ResilientStorage" ]]
-		then
+		     [[ $stream == "ResilientStorage" ]]; then
+
+			# Loop through arches
+			#
 			for ((k = 0; k < ($rh8archsiz - 1); ++k)); do
-				getpkglist 8 $stream ${rh8arch[k]}
+				arch=${rh8arch[k]}
+				link=$rh8link/$stream/$arch/$pkg
+				outsubdir=$topdir/rh8/$stream/$arch
+				getpkglist $link $outsubdir
+			done
+
+		elif [[ $stream == "Supplementary" ]]; then
+
+			# Loop through arches
+			#
+			for ((k = 0; k < $rh8archsiz; ++k)); do
+				arch=${rh8arch[k]}
+				link=$su8link/$stream/$arch/$pkg
+				outsubdir=$topdir/rh8/$stream/$arch
+				getpkglist $link $outsubdir
 			done
 		else
-			getpkglist 8 $stream "x86_64"
+			getpkglist 8 $stream "x86_64" $rh8link
 		fi
 	done
 }
@@ -361,11 +437,12 @@ process_stream() {
 }
 
 get_stream() {
+	# topdir is global
 	local distro=$1
 	local pkg=$2
 	local stream
 
-	stream="$(grep -r -m1 "^$pkg$" /tmp/rh$distro)"
+	stream="$(grep -r -m1 "^$pkg$" $topdir/rh$distro)"
 	if [ $? -eq 0 ]; then
 		process_stream "$stream"
 	else
@@ -400,7 +477,7 @@ main() {
         trap control_c SIGINT
 
 	declare pkglist
-	declare args=1
+	declare args=2
 
 	while getopts abh OPTION; do
     	    case "$OPTION" in
@@ -426,11 +503,10 @@ main() {
 	pkglist="$1"
 	[ -f $pkglist ] || exitme $EXIT_INVFIL
 
-	if $b_buildtrees; then
-		outdir="$2"
-		[ -d $outdir ] || mkdir -p $outdir
-		buildtrees $outdir
-	fi
+	topdir="$2"
+	[ -d $topdir ]  || exitme $EXIT_INVDIR
+
+	$b_buildtrees && buildtrees $topdir
 
 	echo
 	echo "---------------------------------------"
