@@ -10,6 +10,8 @@ function usage() {
 	echo "If no parameter is passed in, defaults to 0"
 }
 
+saved_entry=$(grub2-editenv list | grep "^saved_entry=" | awk -F "=" ' { print $2 }')
+
 grubvalue=0
 
 if [ $# -gt 1 ]; then
@@ -27,14 +29,44 @@ if [ $# -eq 1 ]; then
 	fi
 fi
 
-value=0
-cat $(find /boot -name grub.cfg) | grep 'menuentry ' | awk -F "'" ' { print $2 } ' | while read ENTRY
+display() {
+value=-1
+
+# Oct 7 2018: The old pre-grub BLS call was
+# list=$(cat $GRUBFILE | grep 'menuentry ' | awk -F "'" ' { print $2 } ')
+# but 'grubby --info=ALL' appears to work on pre-grub2 BLS installations.
+list=$(grubby --info=ALL | grep "^title=" | awk -F "title=" ' { print $2 } ')
+
+echo "$list" | while read ENTRY
 do
 	if [ ! -z "$ENTRY" ]; then
-		echo $value " " $ENTRY
-		value=`expr $value + 1`
+		NEXT=0
+		DEFAULT=0
+		((value++))
+		[ "$grubvalue" -eq "$value" ] && NEXT=1
+		# saved_entry can be numeric or (by default) the entry string
+		[ "$ENTRY" == "$saved_entry" ] || [ "$value" == "$saved_entry" ] && DEFAULT=1
+
+		# TODO: add an option to print the full entry?
+		echo $ENTRY | grep rescue >& /dev/null
+		if [ $? -ne 0 ]; then
+			ENTRY=$(echo $ENTRY | awk -F "(" ' {print $2} ')
+			ENTRY=$(echo $ENTRY | awk -F ")" ' {print $1} ')
+			# TODO: optionally output 'kernel'
+			#ENTRY="kernel $ENTRY"
+		fi
+
+		[ "$NEXT" -eq "1" ] && [ "$DEFAULT" -eq "1" ] && echo "*D |$value  $ENTRY" && continue
+		[ "$DEFAULT" -eq "1" ] && echo " D |$value  $ENTRY" && continue
+		[ "$NEXT" -eq "1" ] && echo "*  |$value  $ENTRY" && continue
+		echo "   |$value  $ENTRY"
 	else
 		echo "empty?"
 	fi
 done
+}
+
+cols=$(tput cols)
+display | awk -v cols=$cols -v cols4=$cols4 'length > (cols-4){$0=substr($0,0,(cols-3))"..."}1'
 grub2-reboot $grubvalue
+
