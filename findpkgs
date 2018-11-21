@@ -69,16 +69,26 @@ Description:
   packages listed in the pkglist argument. The links to the top of the
   most recent builds are...
 
+  RHEL7
   http://download.eng.bos.redhat.com/rel-eng/latest-RHEL-7/compose
+  http://download.eng.bos.redhat.com/rel-eng/latest-Supp-7-RHEL-7/compose
   http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/latest/x86_64/pkglist
+
+  RHEL8
   http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose
+  http://download.eng.bos.redhat.com/rel-eng/latest-Supp-8.0-RHEL-8/compose
   http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist
 
 Arguments:
   pkglist - This is a file containing a list of packages to seek.
+            The format of the package list is a colon-separated list as
+            follows.
+            package : maintainer : rhel : [rhel]
+            The optional rhel as a fourth field will appear if the package
+            is found in both RHEL7 and RHEL8.
             Use the getpkglist script to create this list.
-  topdir  - The directory into which the RHEL7 and RHEL8 distro trees will
-            be copied.
+  topdir  - Only useful with the -b option. It's the directory into which
+            the RHEL7 and RHEL8 distro trees will be copied.
 
 Options:
   -a  - List arches along with the directories
@@ -415,39 +425,78 @@ buildtrees() {
 	done
 }
 
+# process_stream()
+#
+# Globals
+#   b_arches - whether to process for each arch
+#   topdir   - where the rh7 and rh8 distre trees are located
+#
+# Arguments
+#   stream - the stream of strings passed by get_stream() passed as an array
+#
 process_stream() {
+	# echo "process_stream"
 	local stream="$1"
-	local s
-	local sary
-	local prev=
+	td=${topdir%/}	# topdir stripped of any trailing slash
+	local line	# a line read from the stream array
+	local lary	# the tokenized line read from the stream
+	local dary	# the tokenized directory of the distro
+	local darysize	# the number of tokens in the tokenized directory
+	local lindex	# index to the first token in the line after the directory
+	local prev=	# used to prevent multiple output when b_arches is not set
+
+	ui_strtok "$td" "/" dary
+	darysize=${#dary[@]}
+	lindex=$((darysize+1))	# index to 1st token past the dir
 
 	while read s; do
-		ui_strtok "$s" "/" sary
-
+		s=$(echo $s | sed 's|//|/|')	# subs // with /
+		ui_strtok "$s" "/" lary
 		if $b_arches; then
-			printf "    RHEL-$distro %-21s%s\n" ${sary[3]} ${sary[4]}
+			printf "    RHEL-$distro %-21s%s\n" ${lary[lindex]} ${sary[$((lindex+1))]}
 		else
-			if [[ $prev != ${sary[3]} ]]; then
-				printf "    RHEL-$distro %-21s\n" ${sary[3]}
+			if [[ $prev != ${lary[lindex]} ]]; then
+				printf "    RHEL-$distro %s\n" ${lary[lindex]}
 			fi
-			prev="${sary[3]}"
+			prev="${lary[lindex]}"
 		fi
 	done <<< "$stream"
-
 }
 
-get_stream() {
-	# topdir is global
-	local distro=$1
-	local pkg=$2
-	local stream
+grep_pkg() {
+	local pkg="$1"
 
-	stream="$(grep -r -m1 "^$pkg$" $topdir/rh$distro)"
+	stream=($(grep -r -m1 "^$pkg" $topdir/rh$distro))
+
 	if [ $? -eq 0 ]; then
 		process_stream "$stream"
 	else
 		echo -e "    RHEL-$distro $pkg NOT FOUND"
 	fi
+}
+
+get_stream() {
+	# echo "get_stream"
+	# topdir is global
+	local distro=$1
+	local pkg=$2
+	local stream
+
+	stream=($(grep -r -m1 "^$pkg$" $topdir/rh$distro))
+
+	if [ $? -eq 0 ]; then
+		process_stream "$stream"
+	else
+		echo -e "    RHEL-$distro $pkg NOT FOUND"
+	fi
+
+	stream="$(grep -r -m1 "^$pkg-" $topdir/rh$distro)"
+	if [ $? -eq 0 ]; then
+		echo "$stream"
+		printf "%s%s\n" $pkg
+		process_stream "$stream"
+	fi
+
 }
 
 parse_pkglist() {
@@ -463,11 +512,10 @@ parse_pkglist() {
 		pkg="${lary[0]}"
 		mnt="${lary[1]}"
 		printf "%-24s%s\n" $pkg $mnt
-		#line=$(echo "$line" | cut -d':' -f1)
-		#echo "$line"
 		get_stream 7 "$pkg"
 		get_stream 8 "$pkg"
 		echo
+	exit
 	done < $pkglist
 }
 
