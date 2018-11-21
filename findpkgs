@@ -436,7 +436,7 @@ buildtrees() {
 #
 process_stream() {
 	# echo "process_stream"
-	local stream="$1"
+	local stream=($1)
 	td=${topdir%/}	# topdir stripped of any trailing slash
 	local line	# a line read from the stream array
 	local lary	# the tokenized line read from the stream
@@ -444,14 +444,17 @@ process_stream() {
 	local darysize	# the number of tokens in the tokenized directory
 	local lindex	# index to the first token in the line after the directory
 	local prev=	# used to prevent multiple output when b_arches is not set
+	local j		# loop index
 
 	ui_strtok "$td" "/" dary
 	darysize=${#dary[@]}
 	lindex=$((darysize+1))	# index to 1st token past the dir
 
-	while read s; do
-		s=$(echo $s | sed 's|//|/|')	# subs // with /
-		ui_strtok "$s" "/" lary
+	for ((j = 0; j < ${#stream[@]}; ++j)); do
+		line=${stream[j]}
+		line=$(echo $line | sed 's|//|/|')	# subs // with /
+		ui_strtok "$line" "/:" lary
+		# echo "#stream: ${#stream[@]} j: $j lary: ${lary[@]}"
 		if $b_arches; then
 			printf "    RHEL-$distro %-21s%s\n" ${lary[lindex]} ${sary[$((lindex+1))]}
 		else
@@ -460,7 +463,7 @@ process_stream() {
 			fi
 			prev="${lary[lindex]}"
 		fi
-	done <<< "$stream"
+	done
 }
 
 grep_pkg() {
@@ -481,20 +484,21 @@ get_stream() {
 	local distro=$1
 	local pkg=$2
 	local stream
+	local ltindex		# index to last token
 
 	stream=($(grep -r -m1 "^$pkg$" $topdir/rh$distro))
 
 	if [ $? -eq 0 ]; then
-		process_stream "$stream"
+		process_stream $stream
 	else
 		echo -e "    RHEL-$distro $pkg NOT FOUND"
 	fi
 
-	stream="$(grep -r -m1 "^$pkg-" $topdir/rh$distro)"
+	stream=($(grep -r -m1 "^$pkg-" $topdir/rh$distro))
 	if [ $? -eq 0 ]; then
 		echo "$stream"
 		printf "%s%s\n" $pkg
-		process_stream "$stream"
+		process_stream $stream
 	fi
 
 }
