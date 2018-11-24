@@ -165,6 +165,14 @@ declare -i rh8archsiz=${#rh8arch[@]}
 
 declare hcmd="elinks -dump -no-references"
 
+declare -i fstate_none=0
+declare -i fstate_base=6 # 8-6 = 2, 7-6 = 1 converts fstate_rh* to bit offset
+declare -i fstate_rh7=1
+declare -i fstate_rh8=2
+declare -i ftable	# two bit truth table for fstate
+declare -a farray	# array of discovered or not found packages
+
+
 # ui_strtok - tokenizes a string and returns an array
 #
 # $1 - the string to tokenize
@@ -253,7 +261,7 @@ clean_pkglist() {
 #   topdir    - top directory for the RHEL7 and RHEL8 trees
 #
 # Arguments
-#   distro    - 7 or 8
+#   outsubdir - the rh7 or rh8 path in the repo at the link
 #   stream    - Server, Client, Workstation, etc.
 #   arch      - x86_64, ppc, etc
 #   link      - url for the given stream
@@ -429,14 +437,17 @@ buildtrees() {
 #
 # Globals
 #   b_arches - whether to process for each arch
-#   topdir   - where the rh7 and rh8 distre trees are located
+#   topdir   - where the rh7 and rh8 distro trees are located
+#   farray   - array of discovered or not found packages
 #
 # Arguments
-#   stream - the stream of strings passed by get_stream() passed as an array
+#   $1 - stream - the stream of paths to pkg passed as an array
+#   $2 - distro - 7 or 8 for rhel7 or rhel8
 #
 process_stream() {
 	# echo "process_stream"
-	local stream=($1)
+	local st=$1[@]  # stream is passed as an array of strings
+	local distro=$2	# 7 or 8 for rhel7 or rhel8
 	td=${topdir%/}	# topdir stripped of any trailing slash
 	local line	# a line read from the stream array
 	local lary	# the tokenized line read from the stream
@@ -444,11 +455,17 @@ process_stream() {
 	local darysize	# the number of tokens in the tokenized directory
 	local lindex	# index to the first token in the line after the directory
 	local prev=	# used to prevent multiple output when b_arches is not set
+	local tstr	# temp string
 	local j		# loop index
 
 	ui_strtok "$td" "/" dary
 	darysize=${#dary[@]}
 	lindex=$((darysize+1))	# index to 1st token past the dir
+
+	# convert the stream to an array
+	#
+	stream=("${!st}")
+	# echo ${stream[@]}
 
 	for ((j = 0; j < ${#stream[@]}; ++j)); do
 		line=${stream[j]}
@@ -456,53 +473,107 @@ process_stream() {
 		ui_strtok "$line" "/:" lary
 		# echo "#stream: ${#stream[@]} j: $j lary: ${lary[@]}"
 		if $b_arches; then
-			printf "    RHEL-$distro %-21s%s\n" ${lary[lindex]} ${sary[$((lindex+1))]}
+			tstr=$(printf "    RHEL-$distro %-21s%s\n" \
+				${lary[lindex]} ${sary[$((lindex+1))]})
+			farray+=("$tstr")
 		else
 			if [[ $prev != ${lary[lindex]} ]]; then
-				printf "    RHEL-$distro %s\n" ${lary[lindex]}
+				tstr=$(printf "    RHEL-$distro %s\n" ${lary[lindex]})
+				farray+=("$tstr")
 			fi
 			prev="${lary[lindex]}"
 		fi
 	done
 }
 
-grep_pkg() {
-	local pkg="$1"
-
-	stream=($(grep -r -m1 "^$pkg" $topdir/rh$distro))
-
-	if [ $? -eq 0 ]; then
-		process_stream "$stream"
-	else
-		echo -e "    RHEL-$distro $pkg NOT FOUND"
-	fi
-}
-
+# get_stream - grep the files in the directory for the pkg
+#
+# Creates an array of strings (stream) to be parsed by process_stream().
+#
+# Globals:
+#   topdir	- where the rh7 and rh8 distro trees are located
+#   farray	- array of discovered or not found packages
+#   fstate	- two bit truth table
+#   fstate_none	- package not present in either rh7 or rh8
+#   fstate_rh7	- package found in rh7
+#   fstate_rh8	- package found in rh8
+#
 get_stream() {
 	# echo "get_stream"
 	# topdir is global
-	local distro=$1
-	local pkg=$2
-	local stream
-	local ltindex		# index to last token
+	local distro=$1	# 8 or 7 for rhel8 and rhel7 respectively
+	local pkg=$2	# name of the package being sought
+	local mnt=$3	# name of the maintainer of the package
+	local b_hyph=$4 # name of package + hypen to seek ancillary pkgs
+	local stream	# will get array of strings resulting from grep of pkg
+	local pary	# tokenized package string as an array
+	local parysize	# size of the token array
+	local ltindex	# index to last token
+	local stat	# status of grep call
+	local tstr	# temp string
 
-	stream=($(grep -r -m1 "^$pkg$" $topdir/rh$distro))
-
-	if [ $? -eq 0 ]; then
-		process_stream $stream
+	# Bugzilla doesn't give us pakcage : maintainer for things like
+	# 'package-devel, so We must look for them separately.
+	#
+	if $b_hyph; then
+		stream=($(grep -r -m1 "^$pkg-" $topdir/rh$distro))
+		stat=$?
 	else
-		echo -e "    RHEL-$distro $pkg NOT FOUND"
+		stream=($(grep -r -m1 "^$pkg$" $topdir/rh$distro))
+		stat=$?
 	fi
 
-	stream=($(grep -r -m1 "^$pkg-" $topdir/rh$distro))
-	if [ $? -eq 0 ]; then
-		echo "$stream"
-		printf "%s%s\n" $pkg
-		process_stream $stream
-	fi
+	if [ $stat -eq 0 ]; then
 
+		# If the package was sucessfully grept ...
+		# set the corresponding fstate bit
+		#
+		fstate=$((fstate |= (distro - fstate_base)))
+
+		# tokenize the stream pathname and acquire the index to
+		# the package name.
+		#
+		ui_strtok ${stream[0]} ":" pary
+		ltindex=$(( ${#pary[@]} -1 ))
+
+		# save the prospective output string to the farray
+		#
+		tstr=$(printf "%-24s%s\n" ${pary[ltindex]} $mnt)
+		farray+=("$tstr")
+
+		# process the array of paths to package
+		#
+		process_stream stream $distro
+	else
+		# if the package was not grept, save the NOT FOUND string
+		# wo the farray
+		#
+		farray+=("    RHEL-$distro NOT FOUND")
+	fi
+	return $stat
 }
 
+
+dump_farray() {
+	declare farysize=${#farray[@]}
+	declare k
+
+	for ((k = 0; k < farysize; ++k)); do
+		echo ${farray[k]}
+	done
+	echo
+}
+
+# parse_pkglist - seek each of the packages in the pkglist
+#
+# Globals
+#   topdir	- where the rh7 and rh8 distro trees are located
+#   farray	- array of discovered or not found packages
+#   fstate	- two bit truth table
+#   fstate_none	- package not present in either rh7 or rh8
+#   fstate_rh7	- package found in rh7
+#   fstate_rh8	- package found in rh8
+#
 parse_pkglist() {
 	local pkglist="$1"
 	local stream
@@ -510,19 +581,25 @@ parse_pkglist() {
 	local lary
 	local pkg
 	local mnt
+	local stat
 
 	while read line; do
 		ui_strtok "$line" ":" lary
 		pkg="${lary[0]}"
 		mnt="${lary[1]}"
-		printf "%-24s%s\n" $pkg $mnt
-		get_stream 7 "$pkg"
-		get_stream 8 "$pkg"
-		echo
-	exit
+		# printf "%-24s%s\n" $pkg $mnt
+		fstate=fstate_none
+		farray=()
+		get_stream 7 "$pkg" "$mnt" false
+		get_stream 8 "$pkg" "$mnt" false
+		dump_farray
+		fstate=fstate_none
+		farray=()
+		get_stream 7 "$pkg" "$mnt" true
+		get_stream 8 "$pkg" "$mnt" true
+		dump_farray
 	done < $pkglist
 }
-
 
 main() {
         # Trap for control-c
