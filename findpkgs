@@ -116,8 +116,9 @@ declare su8link="http://download.eng.bos.redhat.com/rel-eng/latest-Supp-8.0-RHEL
 declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist"
 
 declare pkg="os/Packages"
-declare topdir=
-
+declare topdir=		# dir where rh7 and rh8 subdirs are created
+declare tdindex		# index to first dir after topdir/rh[7|8], which is where the
+			# : path to the packages starts.
 declare -a rh8stream=(
 "Supplementary"
 "AppStream"
@@ -439,6 +440,7 @@ buildtrees() {
 # Globals
 #   b_arches - whether to process for each arch
 #   topdir   - where the rh7 and rh8 distro trees are located
+#   tdindex  - index beyond topdir/rh[7|8] to the path to the packages
 #   farray   - array of discovered or not found packages
 #
 # Arguments
@@ -449,22 +451,14 @@ process_stream() {
 	# echo; echo "process_stream"
 	local st=$1[@]  # stream is passed as an array of strings
 	local distro=$2	# 7 or 8 for rhel7 or rhel8
-	td=${topdir%/}	# topdir stripped of any trailing slash
 	local line	# a line read from the stream array
 	local lary	# the tokenized line read from the stream
-	local dary	# the tokenized directory of the distro
-	local darysize	# the number of tokens in the tokenized directory
-	local lindex	# index to the first token in the line after the topdir
 	local prev=	# used to prevent multiple output when b_arches is not set
 	local tstr	# temp string
 	local pkg=	# taken from the last token in the lary
 	local pindex	# index to last token in lary, which is the pkg name
 	local prevpkg	# tracking if the package name changes in the stream
 	local j		# loop index
-
-	ui_strtok "$td" "/" dary
-	darysize=${#dary[@]}
-	lindex=$((darysize+1))	# index to 1st token past the topdir is the path
 
 	# convert the stream to an array
 	#
@@ -481,7 +475,7 @@ process_stream() {
 
 		if $b_arches; then
 			tstr=$(printf "    RHEL-$distro %-21s%s\n" \
-				${lary[lindex]} ${sary[$((lindex+1))]})
+				${lary[tdindex]} ${sary[$((lindex+1))]})
 			farray+=("$tstr")
 		else
 			#if [ $fstate -eq $fstate_rh7 ]  && [[ $pkg != $prevpkg ]]; then
@@ -491,14 +485,110 @@ process_stream() {
 				farray+=("$tstr")
 			fi
 
-			if [[ $prev != ${lary[lindex]} ]]; then
-				tstr=$(printf "    RHEL-$distro %s\n" ${lary[lindex]})
+			if [[ $prev != ${lary[tdindex]} ]]; then
+				tstr=$(printf "    RHEL-$distro %s\n" ${lary[tdindex]})
 				farray+=("$tstr")
 			fi
-			prev="${lary[lindex]}"
+			prev="${lary[tdindex]}"
 			prevpkg=$pkg
 		fi
 	done
+}
+
+rm_arches() {
+	local pkgstr="$1"
+	local retstr
+
+	retstr=$(
+		while read line; do
+			[[ $line == *BUILDROOT* ]] \
+				&& { echo "$line "; continue;} \
+				|| echo $(echo $line | cut --complement -d'/' -f5)
+		done <<< $flap
+		)
+	eval "$2='$retstr'"
+}
+
+sort_pkgs() {
+	local pkgstr="$1"
+	local tmpstr
+	local retstr
+
+	tmpstr=$(echo "$pkgstr" | sort -t'/' -k $tdindex)
+	retstr=$(echo "$tmpstr" | sort -t':' -k2)
+
+	eval "$2='$retstr'"
+}
+
+fill_hypharray() {
+	local pkgstr="$1"
+	local mnt="$2"
+	local distro=$3
+	local apkg
+	local prev
+	local pdir
+	local tstr
+
+	while read line; do
+
+		# Get the directory where the package is located
+		# fields in cut are 1-based, not 0-based, ergo tdindex+1
+		#
+		pdir=$(echo "$line" | cut -d'/' -f$((tdindex+1)))
+		apkg=$(echo "$line" | awk -F ":" '{print $2}')
+
+		if [[ $apkg != $prev ]]; then
+			tstr=$(printf "%-32s%s\n" $apkg $mnt
+			farray+=("$tstr")
+		fi
+
+		tstr=$(printf "    RHEL-$distro %s\n" $pdir)
+		farray+=("$tstr")
+
+}
+
+check_other() {
+	local apkg="$1"
+	local pkgstr="$2"
+	local stream
+	local b_found
+
+	stream=$(grep -m1 ^$pkg$
+}
+
+# get_hyphpkgs() - get the hyphenated anciallary packages of the pkg
+#
+# Globals
+#   topdir	- passed as argument $2 to this script
+#
+
+get_hyphpkgs() {
+	local pkg="$1"
+	local mnt="$2"
+	local distro=$3
+	local dary
+	local fee7
+	local fee8
+	local fie7
+	local fie8
+	local foe7
+	local foe8
+	local pary7
+	local pary8
+	local b_found=false
+
+	fee7=$(grep -r -m1 ^$pkg- $topdir/rh7)	# all the instances in rh7
+	fee8=$(grep -r -m1 ^$pkg- $topdir/rh7)	# all the instances in rh8
+
+	rm_arches "$fee7" fie7		# remove the arch component of the path
+	rm_arches "$fee8" fie8
+
+	sort_pkgs "$fie7" foe7		# sort unique on paths, and then sort
+	sort_pkgs "$fie8" foe8		# : on package
+
+	pary7=($(echo "$foe7"))		# convert to arrays
+	pary8=($(echo "$foe8"))
+
 }
 
 # get_stream - grep the files in the directory for the pkg
@@ -646,6 +736,10 @@ main() {
 	declare pkglist
 	declare args=2
 
+	local td
+	local dary
+	local darysize
+
 	while getopts abh OPTION; do
     	    case "$OPTION" in
 		h ) usage
@@ -672,6 +766,14 @@ main() {
 
 	topdir="$2"
 	[ -d $topdir ]  || exitme $EXIT_INVDIR
+
+	# get the global index to the beginning of the path to the packages
+	#
+	td=${topdir%/}  # topdir stripped of any trailing slash
+	ui_strtok "$td" "/" dary
+	darysize=${#dary[@]}
+	tdindex=$((darysize+1))	# index to 2nd token past the topdir is the path,
+				# : because the 1st token is rh[7|8]
 
 	$b_buildtrees && buildtrees $topdir
 
