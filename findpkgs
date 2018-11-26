@@ -553,7 +553,7 @@ check_other() {
 	local stream
 	local b_found
 
-	stream=$(grep -m1 ^$pkg$
+	stream=$(echo $grep ^$pkg$ 
 }
 
 # get_hyphpkgs() - get the hyphenated anciallary packages of the pkg
