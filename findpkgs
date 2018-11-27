@@ -613,7 +613,9 @@ fill_hypharray() {
 	local pdir		# dir path to the package
 	local tstr		# scratch string to be added to array
 	local line		# string captured in each loop pass
+	local current		# 7 is rhel7, 8 is rhel8
 
+	current=7
 	while read line; do
 
 		pdir=$(extract_strmname "$line") # location of pkg
@@ -699,6 +701,11 @@ get_hyphpkgs() {
 	fie=$(rm_arches "$fie")		# remove arch component of the path
 	foe=$(sort_pkgs "$fie") 	# sort unique on paths and pkg
 
+	# TODO:
+	# Need to create a separate string-of-strings or string array for
+	# each of the different hyphenated packages, e.g. one for mpich,
+	# another for mpich-doc, etc.
+	#
 	pary7=($(echo "$foe7"))		# convert to arrays
 	pary8=($(echo "$foe8"))
 
