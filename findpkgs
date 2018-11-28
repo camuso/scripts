@@ -174,7 +174,6 @@ declare -i fstate_rh8=2
 declare -i ftable	# two bit truth table for fstate
 declare -a farray	# array of discovered or not found packages
 
-
 # ui_strtok - tokenizes a string and returns an array
 #
 # $1 - the string to tokenize
@@ -609,11 +608,11 @@ fill_hypharray() {
 	local mnt="$2"		# maintainer
 	local distro
 	local apkg		# package name extracted from each line
-	local prev		# previous package name in the loop
+	local prevpkg		# previous package name in the loop
 	local pdir		# dir path to the package
 	local tstr		# scratch string to be added to array
 	local line		# string captured in each loop pass
-	local current		# 7 is rhel7, 8 is rhel8
+	local prevrhel=7	# 7 is rhel7, 8 is rhel8
 
 	current=7
 	while read line; do
@@ -622,15 +621,33 @@ fill_hypharray() {
 		apkg=$(extract_pkgname "$line")  # name of pkg
 		distro=$(extract_rhel "$line")   # 7 or 8
 
-		if [[ $apkg != $prev ]]; then
-			
+		# If the package name changes, then we're on to a new
+		# package.
+		#
+		if [[ $apkg != $prevpkg ]]; then
+
+			# If the previous package is rhel 7, and the new pkg
+			# is also rhel7, then it means the previous package
+			# does not exist in rhel8
+			#
+			[ $prevrhel -eq 7 ] && [ $distro -eq 7 ] && \
+				farray+=("    RHEL-8 NOT FOUND")
+
+			# If the previous package is rhel8, and the new pkg
+			# is also rhel8, it means that the previous package
+			# does not exist in rhel 7
+			#
+			[ $prevrhel -eq 8 ] && [ $distro -eq 8 ] && \
+				farray+=("    RHEL-7 NOT FOUND")
+
 			tstr=$(printf "\n%-32s%s\n" $apkg $mnt
 			farray+=("$tstr")
 		fi
 
 		tstr=$(printf "    RHEL-$distro %s\n" $pdir)
 		farray+=("$tstr")
-		prev="$apkg"
+		prevpkg="$apkg"
+		prevrhel=$distro
 	done <<< "$pkgstr"
 }
 
@@ -701,11 +718,6 @@ get_hyphpkgs() {
 	fie=$(rm_arches "$fie")		# remove arch component of the path
 	foe=$(sort_pkgs "$fie") 	# sort unique on paths and pkg
 
-	# TODO:
-	# Need to create a separate string-of-strings or string array for
-	# each of the different hyphenated packages, e.g. one for mpich,
-	# another for mpich-doc, etc.
-	#
 	pary7=($(echo "$foe7"))		# convert to arrays
 	pary8=($(echo "$foe8"))
 
