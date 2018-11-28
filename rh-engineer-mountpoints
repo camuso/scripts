@@ -1,0 +1,69 @@
+#!/bin/bash
+
+function do_bos_mountpoints () {
+cat << EOF >> /etc/fstab
+ntap-bos-c01-eng01-nfs01b.storage.bos.redhat.com:/devops_engineering_nfs /mnt/engineering nfs nfsvers=3 0 0
+ntap-bos-c01-eng01-nfs01a.storage.bos.redhat.com:/devops_engarchive2_nfs /mnt/engarchive2 nfs nfsvers=3 0 0
+# PRARIT: This is the one that really matters.  Everything points at this!
+# The other mountpoints are necessary, however, as dirs point to the other
+# mountpoints.
+ntap-bos-c01-eng01-nfs01b.storage.bos.redhat.com:/devops_engineering_nfs/devarchive/redhat /mnt/redhat nfs nfsvers=3 0 0
+# This mount point makes /scratch_builds work
+ntap-bos-c01-eng01-nfs01a.storage.bos.redhat.com:/devops_brew_scratch_nfs /mnt/brew_scratch nfs nfsvers=3 0 0
+EOF
+
+mkdir /mnt/{redhat,engarchive2,engineering,brew_scratch}
+
+# create soft links to mountpoints
+ln -sf /mnt/redhat/brewroot/packages /packages
+ln -sf /mnt/redhat/nightly /nightly_compose
+ln -sf /mnt/redhat/released /released
+ln -sf /mnt/redhat/brewroot/scratch /scratch_builds
+}
+
+function do_rdu_mountpoints () {
+cat << EOF >> /etc/fstab
+vtap-eng01.storage.rdu2.redhat.com:/vol/engarchive2 /mnt/engarchive2 nfs defaults 0 0
+EOF
+
+mkdir /mnt/{redhat,engarchive2,brew_scratch}
+
+# create soft links to mountpoints
+ln -sf /mnt/redhat/brewroot/packages /packages
+ln -sf /mnt/redhat/nightly /nightly_compose
+ln -sf /mnt/redhat/released /released
+ln -sf /mnt/redhat/brewroot/scratch /scratch_builds
+}
+
+function do_brq_mountpoints () {
+cat << EOF >> /etc/fstab
+vtap-eng01.storage.rdu2.redhat.com:/vol/engineering/devarchive/redhat /mnt/redhat nfs ro,intr,nofail 0 0
+vtap-eng01.storage.rdu2.redhat.com:/vol/engarchive2 /mnt/engarchive2 nfs ro,intr,nofail 0 0
+nfs-01.eng.brq.redhat.com:/pub /mnt/globalsync nfs ro,intr,nofail 0 0
+EOF
+
+mkdir -p /mnt/{redhat,engarchive2,globalsync}
+
+# create soft links to mountpoints
+ln -sf /mnt/redhat/brewroot/packages /packages
+ln -sf /mnt/globalsync/rhel/nightly /nightly_compose
+ln -sf /mnt/globalsync/rhel/released /released
+ln -sf /mnt/redhat/brewroot/scratch /scratch_builds
+}
+
+#
+# MAIN
+#
+
+# check hostname for subnet.
+fstab_updated=0
+hostname | grep ".bos.redhat.com" >& /dev/null
+[ $? -eq 0 ] && do_bos_mountpoints && fstab_updated=1
+hostname | grep ".rdu.redhat.com" >& /dev/null
+[ $? -eq 0 ] && do_rdu_mountpoints && fstab_updated=1
+hostname | grep ".brq.redhat.com" >& /dev/null
+[ $? -eq 0 ] && do_brq_mountpoints && fstab_updated=1
+
+[ $fstab_updated != 1 ] && echo "unknown subdomain .... forcing .bos.redhat.com update..." && do_bos_mountpoints
+
+mount -a
