@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# packages
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+# /mnt/engineering/devarchive/redhat/composes/finished/latest-RHEL-7/compose/Server/s390x/os/Packages/opencryptoki-icsftok-3.10.0-2.el7.s390.rpm
+
+
+
+path="/mnt/engineering/devarchive/redhat/composes/finished/latest-RHEL-7/compose"
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+> tempfile
+
+main() {
+
+	find $path \
+	-type f -name \*.rpm \
+	-exec sh -c '\
+	declare rpmfil="$1"; \
+	declare path="$2"; \
+	declare pname; \
+	declare tmpstr; \
+	declare sname; \
+	pname=$(rpm -qp --nosignature --queryformat "%{NAME}\n" "$rpmfil"); \
+	tmpstr="${rpmfil#$path}"; \
+	[[ ${tmpstr:0:1} == "/" ]] && tmpstr=${tmpstr:1}; \
+	sname="${tmpstr%%/*}"; \
+	echo "$sname $pname" | tee -a tempfile; \
+	' sh {} $path \;
+
+}
+
+main $@
+
+exit 0
+
