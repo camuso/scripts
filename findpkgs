@@ -165,13 +165,6 @@ declare -a rh8arch=(
 declare -i rh8archsiz=${#rh8arch[@]}
 
 declare hcmd="elinks -dump -no-references"
-
-declare -i fstate=
-declare -i fstate_none=0
-declare -i fstate_base=6 # 8-6 = 2, 7-6 = 1 converts fstate_rh* to bit offset
-declare -i fstate_rh7=1
-declare -i fstate_rh8=2
-declare -i ftable	# two bit truth table for fstate
 declare -a farray	# array of discovered or not found packages
 
 # ui_strtok - tokenizes a string and returns an array
@@ -486,66 +479,6 @@ extract_rhel() {
 	echo ${rheldir: -1}
 }
 
-# process_stream()
-#
-# Globals
-#   b_arches - whether to process for each arch
-#   topdir   - where the rh7 and rh8 distro trees are located
-#   tdindex  - index beyond topdir/rh[7|8] to the path to the packages
-#   farray   - array of discovered or not found packages
-#
-# Arguments
-#   $1 - stream - the stream of paths to pkg passed as an array
-#   $2 - distro - 7 or 8 for rhel7 or rhel8
-#
-process_stream() {
-	# echo; echo "process_stream"
-	local st=$1[@]  # stream is passed as an array of strings
-	local distro=$2	# 7 or 8 for rhel7 or rhel8
-	local line	# a line read from the stream array
-	local lary	# the tokenized line read from the stream
-	local prev=	# used to prevent multiple output when b_arches is not set
-	local tstr	# temp string
-	local pkg=	# taken from the last token in the lary
-	local pindex	# index to last token in lary, which is the pkg name
-	local prevpkg	# tracking if the package name changes in the stream
-	local j		# loop index
-
-	# convert the stream to an array
-	#
-	stream=("${!st}")
-	# echo ${stream[@]}
-
-	for ((j = 0; j < ${#stream[@]}; ++j)); do
-		line=${stream[j]}
-		line=$(echo $line | sed 's|//|/|')	# subs // with /
-		ui_strtok "$line" "/:" lary
-		pindex=$((${#lary[@]} - 1))
-		pkg=${lary[pindex]}
-		# echo "#stream: ${#stream[@]} j: $j lary: ${lary[@]}"
-
-		if $b_arches; then
-			tstr=$(printf "    RHEL-$distro %-21s%s\n" \
-				${lary[tdindex]} ${sary[$((lindex+1))]})
-			farray+=("$tstr")
-		else
-			#if [ $fstate -eq $fstate_rh7 ]  && [[ $pkg != $prevpkg ]]; then
-			if [[ $pkg != $prevpkg ]]; then
-				# echo "pkg: $pkg  prevpkg: $prevpkg"
-				tstr=$(printf "%-32s%s\n" ${lary[pindex]} $mnt)
-				farray+=("$tstr")
-			fi
-
-			if [[ $prev != ${lary[tdindex]} ]]; then
-				tstr=$(printf "    RHEL-$distro %s\n" ${lary[tdindex]})
-				farray+=("$tstr")
-			fi
-			prev="${lary[tdindex]}"
-			prevpkg=$pkg
-		fi
-	done
-}
-
 # rm_arches() - remove the arch component of the path in each string of pkgstr
 #
 # Globals
@@ -589,6 +522,12 @@ sort_pkgs() {
 	echo "$retstr"
 }
 
+check_fstate() {
+	(($1 == 0)) && { farray+=("    RHEL-8 NOT FOUND" "    RHEL-7 NOT FOUND"); return; }
+	(($1 == 1)) && { farray+=("    RHEL-8 NOT FOUND"); return; }
+	(($1 == 2)) && { farray+=("    RHEL-7 NOT FOUND"); return; }
+}
+
 # fill_hypharray - fills an array of hyphenated packages for a given distro
 #
 # Arguments
@@ -597,7 +536,6 @@ sort_pkgs() {
 #            each hyphenated package discovered. Additionally there can be
 #            more than one genus of hypenated package, e.g. mpich-devel
 #            mpich-doc, mpich-autoload, etc.
-#
 # Globals
 #   tdindex - 0-based index to path of each package on each line of pkgstr
 #   farray  - an array intended to contain the strings extrackted from
@@ -606,53 +544,40 @@ sort_pkgs() {
 fill_hypharray() {
 	local pkgstr="$1"	# sorted package string-of-strings
 	local mnt="$2"		# maintainer
-	local distro
+	local distro		# the current distro in the loop
 	local apkg		# package name extracted from each line
 	local prevpkg		# previous package name in the loop
 	local pdir		# dir path to the package
 	local tstr		# scratch string to be added to array
 	local line		# string captured in each loop pass
-	local prevrhel		# 7 is rhel7, 8 is rhel8
 	local b_done=false	# bool to detect last line
-	local b_notfound=false	# bool to detect if pkg was in both rhels
-
-	current=7
-
-
-	#while read line; do
+	local fstate=3		# bits: 1 rhel7 only, 2 rhel8 only, 3 both
+	local fsos=6		# offset from fstate value to rhel value
 
 	until $b_done; do
 
-		b_done=false
 		read line || b_done=true
 
-		pdir=$(extract_strmname "$line") # location of pkg
-		apkg=$(extract_pkgname "$line")  # name of pkg
-		distro=$(extract_rhel "$line")   # 7 or 8
-		b_notfound=false
+		# Only extract the info if we actually were able to read
+		# a line.
+		$b_done || {
+			pdir=$(extract_strmname "$line") # location of pkg
+			apkg=$(extract_pkgname "$line")  # name of pkg
+			distro=$(extract_rhel "$line")   # 7 or 8
+		}
 
 		# If the package name changes, then we're on to a new
 		# package.
 		#
 		if [[ $apkg != $prevpkg ]]; then
 
-			# If the previous package is rhel 7, and the new pkg
-			# is also rhel7, then it means the previous package
-			# does not exist in rhel8
-			#
-			(($prevrhel == $distro && $distro == 7))  && \
-				farray+=("    RHEL-8 NOT FOUND")
-
-			(($prevrhel == $distro && $distro == 8))  && \
-				farray+=("    RHEL-7 NOT FOUND")
-
-			#($b_done && (($prevrhel == 7)) ) && 
-			#	farray+=("    RHEL-8 NOT FOUND")
-
 			$b_done || {
+				check_fstate $fstate
 				tstr=$(printf "\n%-32s%s\n" $apkg $mnt)
 				farray+=("$tstr")
 			}
+
+			fstate=$((distro - $fsos))
 		fi
 
 		$b_done || {
@@ -660,10 +585,11 @@ fill_hypharray() {
 			farray+=("$tstr")
 			prevpkg="$apkg"
 			prevrhel=$distro
+			fstate=$((fstate | (distro-$fsos)))
 		}
 	done <<< "$pkgstr"
 
-	for ((j=0; j < ${#farray[@]}; ++j)); do echo "${farray[j]}"; done
+	check_fstate $fstate
 }
 
 # get_hyphpkgs() - get the hyphenated anciallary packages of the pkg
@@ -686,119 +612,42 @@ fill_hypharray() {
 # Globals
 #   topdir	- passed as argument $2 to this script
 #
-
 get_hyphpkgs() {
 	local pkg="$1"
 	local mnt="$2"
-	local fee	# grept packages in rhel8 and rhel8 distros
+	local bhyp=$3
+	local fee	# grept packages in distros
 	local fie
 	local foe
 	local fum
-	local b_found=false
 
-	fee=$(grep -r -m1 ^$pkg- $topdir)	# generate string-of-strings
+	if $bhyp; then
+		fee=$(grep -r -m1 "^$pkg-" $topdir)
+		(($? != 0)) && return 1
+	else
+		fee=$(grep -r -m1 "^$pkg$" $topdir)
+		(($? != 0)) && {
+			tstr=$(printf "\n%-32s%s\n" $pkg $mnt)
+			farray+=("$tstr")
+			check_fstate 0
+			return 1
+		}
+	fi
+
 	fie=$(rm_arches "$fee")		# remove arch component of the path
 	foe=$(sort_pkgs "$fie") 	# sort unique on paths and pkg
 
 	fill_hypharray "$foe" $mnt
-}
-
-# get_stream - grep the files in the directory for the pkg
-#
-# Creates an array of strings (stream) to be parsed by process_stream().
-#
-# Globals:
-#   topdir	- where the rh7 and rh8 distro trees are located
-#   farray	- array of discovered or not found packages
-#   fstate	- two bit truth table
-#   fstate_none	- package not present in either rh7 or rh8
-#   fstate_rh7	- package found in rh7
-#   fstate_rh8	- package found in rh8
-#
-get_stream() {
-	# echo; echo "get_stream"
-	# topdir is global
-	local distro=$1	# 8 or 7 for rhel8 and rhel7 respectively
-	local pkg=$2	# name of the package being sought
-	local mnt=$3	# name of the maintainer of the package
-	local b_hyph=$4 # name of package + hypen to seek ancillary pkgs
-	local stream	# will get array of strings resulting from grep of pkg
-	local pary	# tokenized package string as an array
-	local parysize	# size of the token array
-	local ltindex	# index to last token
-	local stat	# status of grep call
-	local tstr	# temp string
-
-	# echo -n "rh$distro: "
-	# $b_hyph && echo "$pkg-hyphen" || echo "$pkg"
-
-	# Bugzilla doesn't give us package : maintainer for things like
-	# 'package-devel, so We must look for them separately.
-	#
-	if $b_hyph; then
-		stream=$(grep -r -m1 "^$pkg-" $topdir/rh$distro)
-		stat=$?
-	else
-		#if [ $distro -eq 7 ]; then
-		#	tstr=$(printf "%-24s%s\n" $pkg $mnt)
-		#	farray+=("$tstr")
-		#fi
-		stream=$(grep -r -m1 "^$pkg$" $topdir/rh$distro)
-		stat=$?
-	fi
-
-	# Sort the stream and convert it to an array.
-	#
-	stream=($(echo "$stream" | sort -t":" -k2))
-	# for ((i = 0; i < ${#stream[@]}; ++i)); do echo "${stream[i]}"; done
-
-	if [ $stat -eq 0 ]; then
-
-		# tokenize the stream pathname and acquire the index to
-		# the package name.
-		#
-		# echo "stream: ${stream[@]}"
-		# echo "call strtok pary"
-		ui_strtok ${stream[0]} ":" pary
-		ltindex=$(( ${#pary[@]} -1 ))
-
-		# save the prospective output string to the farray, but only
-		# for rhel7.
-		#
-		# if ($b_hyph && [ $distro -eq 7 ]); then
-		#	tstr=$(printf "%-24s%s\n" ${pary[ltindex]} $mnt)
-		#	farray+=("$tstr")
-		# fi
-
-		# If the package was sucessfully grept ...
-		# set the corresponding fstate bit
-		#
-		fstate=$((fstate |= (distro - fstate_base)))
-
-		# process the array of paths to package
-		#
-		process_stream stream $distro
-	else
-		# if the package was not grept, save the NOT FOUND string
-		# in the farray
-		#
-		[ "${pkg: -1}" == "-" ] || farray+=("    RHEL-$distro NOT FOUND")
-	fi
-	return $stat
+	return 0
 }
 
 dump_farray() {
-	local b_hyph=$1
 	local farysize=${#farray[@]}
 	local k
-
-	# echo "pkg: $pkg"
-	([ $fstate -eq 0 ] && $b_hyph) &&  return
 
 	for ((k = 0; k < farysize; ++k)); do
 		echo "${farray[k]}"
 	done
-	echo
 }
 
 # parse_pkglist - seek each of the packages in the pkglist
@@ -824,23 +673,10 @@ parse_pkglist() {
 		ui_strtok "$line" ":" lary
 		pkg="${lary[0]}"
 		mnt="${lary[1]}"
-		# printf "%-24s%s\n" $pkg $mnt
-		fstate=fstate_none
 		farray=()
-		# printf "test: %-24s%s\n" "$pkg" "$mnt"
-		get_hyphpkgs mpich 'jarod@redhat.com'
+		get_hyphpkgs "$pkg" $mnt false
+		get_hyphpkgs "$pkg" $mnt true
 		dump_farray true
-		exit
-
-		get_stream 7 "$pkg" "$mnt" false
-		get_stream 8 "$pkg" "$mnt" false
-		dump_farray "$pkg"
-		fstate=fstate_none
-		farray=()
-		# printf "test: %-24s%s\n" "$pkg-hypen" "$mnt"
-		get_stream 7 "$pkg" "$mnt" true
-		get_stream 8 "$pkg" "$mnt" true
-		dump_farray "$pkg" true
 	done < $pkglist
 }
 
@@ -891,10 +727,6 @@ main() {
 				# : because the 1st token is rh[7|8]
 
 	$b_buildtrees && buildtrees $topdir
-
-	echo
-	echo "---------------------------------------"
-	echo
 	parse_pkglist $pkglist
 
 	exitme $EXIT_OK
