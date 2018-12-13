@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# gitmodified
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+
+	find include/ -iname \*ipmi\*.h -exec sh -c  \
+		'printf "%-40s\n" $1; \
+		git log -1 --pretty="format:%h %cd" $1;' \
+		sh '{}' \;
+}
+
+main $@
+
+exit 0
+
