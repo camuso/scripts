@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# hidlist
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	xinput list | cut -f2 | cut -f2 -d'=' | xargs -d $'\n' -I'{}' sh -c \
+		"xinput list-props '{}' | grep -iq scroll && (echo Listing dev id '{}'; xinput list-props '{}')"
+}
+
+main $@
+
+exit 0
+
