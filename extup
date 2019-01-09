@@ -7,7 +7,7 @@ declare -a alist		# alternate branch list
 declare -a blist		# current branch list
 declare show_b
 declare cmtdat=
-declare notupstream="*******"
+declare notupstream="---------"
 
 while getopts :p:rb OPTION; do
     case "$OPTION" in
@@ -39,7 +39,9 @@ for ((i=0; i < ${#blist[@]}; ++i)); do
 	fi
 
 	if $show_b; then
-		printf " %-9s%s\n" "${blist[$i]}" "$astr"
+		uc=$(echo $astr | cut -d' ' -f1)
+		as=$(echo $astr | cut -d' ' -f2-)
+		printf " %-9.9s %-9.9s %s\n" "${blist[$i]}" "$uc" "$as"
 	else
 		echo " $astr "
 	fi
