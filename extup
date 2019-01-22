@@ -1,13 +1,45 @@
 #!/bin/bash
 
-rev=""
-show_b=true
+declare rev=""
 declare -i optcount=0
 declare -a alist		# alternate branch list
 declare -a blist		# current branch list
-declare show_b
+declare show_b=true
 declare cmtdat=
 declare notupstream="---------"
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [OPTIONS] commit-expr path
+
+Example
+   $(basename $0) c68432e802b11..HEAD drivers/char/ipmi
+
+Description
+
+   Displays the current branch commit followed by the upstream branch
+   commit as well as the upstream commit date (NOT the author date).
+
+   The script assumes that the first commit hash it encounters in the
+   commit log will be the upstream commit.
+
+   If there is no upstream commit found, then a series of dashes is
+   printed to the screen in its place, and the current branch commit's
+   date is printed, since there is no upstream commit.
+
+Options
+
+   r - reverse order
+   b - do not show downstream branch commit
+   h - this help text
+\0
+EOF
+)
+
+exitme() {
+	echo -e "$usagestr"
+	exit 0
+}
 
 while getopts :p:rb OPTION; do
     case "$OPTION" in
@@ -18,12 +50,16 @@ while getopts :p:rb OPTION; do
 	b ) show_b=false
 	    optcount=$((optcount+1))
 	    ;;
+	h ) exitme
+	    ;;
     esac
 done
 
 shift $optcount
 commit_expr="$1"
 pathspec="$2"
+
+[ $# -eq 2 ] || exitme
 
 blist=($(git log --oneline $rev --pretty=format:%h $commit_expr $pathspec))
 
