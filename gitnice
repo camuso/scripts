@@ -106,3 +106,5 @@ if [ "$cmdline" ]; then
 else
 	git log $reverse --date=short --pretty=format:"$fmtstr" -1
 fi
+
+exit $?
