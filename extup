@@ -2,11 +2,12 @@
 
 declare rev=""
 declare -i optcount=0
-declare -a alist		# alternate branch list
+declare -a alist		# alternate (upstream) branch list
 declare -a blist		# current branch list
 declare show_b=true
 declare cmtdat=
 declare notupstream="---------"
+declare  invalidcmt="-badobj--"
 declare usagestr=$(
 cat <<EOF
 
@@ -24,7 +25,7 @@ Description
    commit log will be the upstream commit.
 
    If there is no upstream commit found, then a series of dashes is
-   printed to the screen in its place, and the current branch commit's
+   printed to the screen in its place, and the current branch commit
    date is printed, since there is no upstream commit.
 
 Options
@@ -62,13 +63,21 @@ pathspec="$2"
 [ $# -eq 2 ] || exitme
 
 blist=($(git log --oneline $rev --pretty=format:%h $commit_expr $pathspec))
+# echo -e "${blist[@]}"
 
 for ((i=0; i < ${#blist[@]}; ++i)); do
 	log=$(git log -1 ${blist[$i]} | tail -n +2)
 	alist[$i]=$(echo "$log" | egrep -o "\b[0-9a-f]{40}\b")
 
 	if [ $? -eq 0 ]; then
-		astr=$(gitnice -c -1 ${alist[$i]})
+		astr=$(gitnice -c -1 ${alist[$i]} 2> /dev/null)
+
+		if [ $? -ne 0 ]; then
+			tmp="$(gitnice -c -1 ${blist[$i]} | cut -d' ' -f2-)"
+			echo -e " ##\n ## Commit ${alist[$i]:0:9} identified in"\
+			        "${blist[$i]} cannot be found in any branch."
+			astr="$notupstream $tmp"
+		fi
 	else
 		tmp="$(gitnice -c -1 ${blist[$i]} | cut -d' ' -f2-)"
 		astr="$notupstream $tmp"
