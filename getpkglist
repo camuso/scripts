@@ -49,9 +49,9 @@ Description:
   in the directory passed as the first argument for RHEL7 and RHEL8.
 
   Parse the lists for owners who report to the manager passed as the
-  first argument.  Each entry in the list will have two fields, the
+  second argument.  Each entry in the list will have two fields, the
   name of the package forllowed by the email address of the package
-  maintainer and separated by a colon, e.g.
+  maintainer, separated by a colon, e.g.
 
      package: maintainer@redhat.com
 
