@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# pkg-extract-status
+#
+
+shopt -s extglob
+
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="[1m"
+unset UND && declare UND="[4m"
+unset OFF && declare OFF="[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD pkg-extract-status -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+
+declare -i optcount=0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] status pkg-file
+
+Description:
+
+  Extracts the status of packages between releases from a pkg-file
+  formatted by the findpkgs script.
+
+Arguments:
+  status   - one of removed, moved, new
+  pkg-file - file containg packages according to format
+
+Options:
+  -h  - help
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+declare pkgstat=
+declare pkglist=
+declare pkg=
+declare notfound="    RHEL-8 NOT FOUND"
+
+parse_pkgstat() {
+	echo "parse_pkgstat"
+	case "$pkgstat" in
+		"removed" ) find_removed ;;
+		"moved"   ) find_moved ;;
+		"new"     ) find_new ;;
+	esac
+}
+
+find_removed() {
+	echo "find_removed"
+	declare process_pkg=false
+	# set -x
+	while IFS= read "line"; do
+		if [ ${line:0:1} ]; then
+			pkg=$(echo $line | cut -d' ' -f1)
+			#echo $pkg
+		else
+			#echo $line
+			[ "$line" == "$notfound" ] && echo "$pkg"
+		fi
+	done < $pkglist
+	# set +x
+}
+
+main() {
+	echo "main"
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts h OPTION; do
+    	    case "$OPTION" in
+		h ) usage
+		    let ++optcount
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 2 ] || exitme $EXIT_INVARG
+
+	pkgstat="$1"
+	pkglist="$2"
+
+	parse_pkgstat
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
