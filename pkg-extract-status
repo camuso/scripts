@@ -75,6 +75,8 @@ Arguments:
   pkg-file - file containg packages according to format
 
 Options:
+  -y  - puts a leading hypen and quotes around the package names
+        for yaml files.
   -h  - help
 \0
 EOF
@@ -88,10 +90,11 @@ usage() {
 declare pkgstat=
 declare pkglist=
 declare pkg=
-declare notfound="    RHEL-8 NOT FOUND"
+declare notfoundstr="    RHEL-8 NOT FOUND"
+declare b_yaml=false
 
 parse_pkgstat() {
-	echo "parse_pkgstat"
+	# echo "parse_pkgstat"
 	case "$pkgstat" in
 		"removed" ) find_removed ;;
 		"moved"   ) find_moved ;;
@@ -100,7 +103,7 @@ parse_pkgstat() {
 }
 
 find_removed() {
-	echo "find_removed"
+	# echo "find_removed"
 	declare process_pkg=false
 	# set -x
 	while IFS= read "line"; do
@@ -109,20 +112,26 @@ find_removed() {
 			#echo $pkg
 		else
 			#echo $line
-			[ "$line" == "$notfound" ] && echo "$pkg"
+			if [ "$line" == "$notfoundstr" ]; then
+				$b_yaml && echo -n "- \""
+				echo -n "$pkg"
+				$b_yaml && echo "\"" || echo
+			fi
 		fi
 	done < $pkglist
 	# set +x
 }
 
 main() {
-	echo "main"
         # Trap for control-c
         trap control_c SIGINT
 
-	while getopts h OPTION; do
+	while getopts hy OPTION; do
     	    case "$OPTION" in
 		h ) usage
+		    let ++optcount
+		    ;;
+		y ) b_yaml=true
 		    let ++optcount
 		    ;;
 		* ) echo "unrecognized option -$OPTION"
