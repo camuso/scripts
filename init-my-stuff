@@ -340,10 +340,12 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 				git checkout -b rh7 rh7/master
 				git checkout -b pegas pegas/master
 				;;
-			"8" )	git remote add rh8 git://git.host.prod.eng.bos.redhat.com/kernel-rhel8.git
+			"8" )	git config --global http.sslVerify false
+				git remote add rh8 https://code.engineering.redhat.com/gerrit/kernel-rhel
+				# git remote add rh8 git://git.host.prod.eng.bos.redhat.com/kernel-rhel8.git
 				git remote update
-				git fetch
-				git checkout -b rh8 rh8/master
+				git checkout -b 800 rh8/rhel-8.0.0
+				git checkout -b 810 rh8/rhel-8.1.0
 				;;
 		esac
 	fi
