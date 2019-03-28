@@ -61,9 +61,12 @@ file=""
 user=""
 pushpriv=""
 installer=false
+nolinuxrepo=""
 
-while getopts "iphf:" OPTION; do
+while getopts "giphf:" OPTION; do
 	case "$OPTION" in
+		g )	nolinuxrepo="-g"
+			;;
 		f )	file="$OPTARG"
 			[ -f "$file" ] || err_exit $ERR_NOFIL "$file"
 			;;
@@ -80,12 +83,11 @@ user="$(echo "$remote" | cut -d'@' -f1)"
 hos="$(echo $remote | cut -d'@' -f2)"
 
 echo "connecting with $remote..."
-$rsyncmd ~/ark/$file $remote:ark/$file
 
 if $installer; then
-	runremote $user $hos ~/bin/init-my-stuff $pushpriv $user "install"
+	runremote $user $hos ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user "install"
 else
-	runremote $user $hos ~/bin/init-my-stuff $pushpriv $user
+	runremote $user $hos ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user
 fi
 
 echo
