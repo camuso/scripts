@@ -12,6 +12,11 @@ declare b_gitrepo=true
 declare clonestr
 declare distro
 declare installagent
+declare fetched=false
+
+echo "Installing environment on ..."
+hostname
+echo
 
 while getopts hpg OPTION; do
     case "$OPTION" in
@@ -125,8 +130,7 @@ echo "* Clone or update bin scripts  *" >> "$logfile" 2>&1
 echo "*******************************" >> "$logfile" 2>&1
 echo
 
-# Update the bin directory, if needed, and delete the newly cloned
-# scripts directory.
+# Update or create the bin directory.
 #
 if [ -d bin/.git ]; then
 	cd bin
@@ -211,6 +215,8 @@ if [ "$remotename" ]; then
 fi
 cd -
 
+echo
+
 # If we are running as root and install has been requested, then install
 # the development tools.
 #
@@ -278,12 +284,10 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	OpenIPMI \
 	watchdog \
 	hostname \
-	kmmod \
+	kmod \
 	kmod-libs \
-	kmodtool \
 	krb5-workstation \
 	krb5-libs \
-	krb5-auth-dialog \
 	elinks \
 	flex \
 	lynx \
@@ -293,64 +297,72 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	texinfo \
 	trousers \
 	trousers-devel \
-	rhpkg \
 	vim \
 	vim-enhanced \
-	vim-powerline \
 	vim-filesystem \
-	koji \
-	brewkoji \
-	http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
+
+	# orphaned packages
+	#
+	# koji \
+	# brewkoji \
+	# http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
+	# vim-powerline \
+	# rhpkg \
+	# krb5-auth-dialog \
+	# kmodtool \
 
 	mkdir -p /work/us
 	cd /work/us
-	git clone https://github.com/HewlettPackard/netperf.git
-	cd netperf
-	./autogen.sh
-	./configure
-	make
-	make install
-	cd -
-	git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
-	cd /work/us/linux
+
+	[ -d /work/us/netperf ] || {
+		git clone https://github.com/HewlettPackard/netperf.git
+		cd netperf
+		./autogen.sh
+		./configure
+		make
+		make install
+	}
 
 	# If the caller passed a -g option, it means no git repo,
 	# so return to the top directory and exit.
 	#
 	$b_gitrepo || { cd; exit; }
 
-	if [[ "$arch" == "aarch64" ]]; then
-		git remote add pegas http://git.app.eng.bos.redhat.com/git/kernel-alt.git/
-		git remote add rhelsa git://git.app.eng.bos.redhat.com/rhelsa7.git
-		git remote update
-		git fetch
-		git checkout -b rhelsa rhelsa/master
-		git checkout -b pegas pegas/master
-	else
-		case $majversion in
-			"6" ) 	git remote add rh6 git://git.app.eng.bos.redhat.com/rhel6.git
-				git remote update
-				git fetch
+	cd /work/us
+	[ -d /work/us/linux ] || \
+		git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+
+	echo
+	cd /work/us/linux
+
+	case $majversion in
+		"6" ) 	[ $(git branch | grep rh6) ] || {
+				git remote add rh6 git://git.app.eng.bos.redhat.com/rhel6.git
+				git fetch rh6
 				git checkout -b rh6 rh6/master
-				;;
-			"7" )	git remote add rh7 git://git.app.eng.bos.redhat.com/rhel7.git
-				git remote add pegas http://git.app.eng.bos.redhat.com/git/kernel-alt.git/
-				git remote update
-				git fetch --all
+				fetched=true
+			}
+			;;
+		"7" )	[ $(git branch | grep rh7) ] || {
+				git remote add rh7 git://git.app.eng.bos.redhat.com/rhel7.git
+				git fetch rh7
 				git checkout -b rh7 rh7/master
-				git checkout -b pegas pegas/master
-				;;
-			"8" )	git config --global http.sslVerify false
+				fetched=true
+			}
+			;;
+		"8" )	git config --global http.sslVerify false
+			[ $(git branch | grep 8.0) ] || {
 				git remote add rh8 https://code.engineering.redhat.com/gerrit/kernel-rhel
-				# git remote add rh8 git://git.host.prod.eng.bos.redhat.com/kernel-rhel8.git
-				git remote update
+				git fetch rh8
 				git checkout -b 800 rh8/rhel-8.0.0
 				git checkout -b 810 rh8/rhel-8.1.0
-				;;
-		esac
-	fi
+				fetched=true
+			}
+			;;
+	esac
+
+	$fetched || git remote update
 	cd
 fi
 
-# set +x
 exit 0
