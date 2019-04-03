@@ -1,0 +1,68 @@
+#!/bin/bash
+#
+# insertbzbrewfile
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) patchdir insertfile
+
+Description:
+  Inserts a file after the subject line in each patch file in the patchdir.
+
+Arguments:
+  patchdir   - directory containing the patchfiles
+  insertfile - file to be inserted after the subject line
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+declare dir="$1"	# directory containing the patch files
+declare fins="$2"	# the file to insert into each of the patchfiles
+declare filelist=/dev/shm/insertbrewfile.list
+declare index
+
+getpastsubjline() {
+	local thefile="$1"
+	local lcount=0
+	local b_subject=false
+
+	while read line; do
+		let lcount++
+		( $b_subject && [ "$line" ] ) && continue || break
+		[ "${line:0:8}" == "Subject:" ] && b_subject=true
+	done
+
+	echo $lcount
+}
+
+main() {
+	[ $# -eq 2 ] || usage
+
+	ls -1 "$dir"/*.patch > $filelist
+
+	[ -s "$filelist" ] || {
+		echo -e "\n\tNo patch files detected in directory: $dir\n"
+		exit 1
+	}
+
+	while read pfile; do
+		[ -s "$pfile" ] || continue
+		index=$(getpastsubjline pfile)
+		sed -i ""$index"r $fins" < $pfile $pfile
+	done < $filelist
+
+	rm -f "$filelist"
+	exit 0
+}
+
+main $@
+
+exit 0
+
