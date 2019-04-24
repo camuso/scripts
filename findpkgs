@@ -112,7 +112,7 @@ declare br7link="http://download.devel.redhat.com/brewroot/repos/rhel-7.0-build/
 
 declare rh8link="http://download-node-02.eng.bos.redhat.com/rel-eng/latest-RHEL-8/compose"
 declare su8link="http://download.eng.bos.redhat.com/rel-eng/latest-Supp-8.0-RHEL-8/compose"
-declare br8link="http://download.devel.redhat.com/brewroot/repos/rhel-8.0-build/latest/x86_64/pkglist"
+declare br8link="http://download.eng.bos.redhat.com/brewroot/repos/brew-rhel-8-build/latest/x86_64/pkglist"
 
 declare pkg="os/Packages"
 declare topdir=		# dir where rh7 and rh8 subdirs are created
