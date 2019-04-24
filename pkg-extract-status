@@ -109,11 +109,11 @@ find_removed() {
 	while IFS= read "line"; do
 		if [ ${line:0:1} ]; then
 			pkg=$(echo $line | cut -d' ' -f1)
-			#echo $pkg
+			# echo $pkg
 		else
-			#echo $line
+			# echo $line
 			if [ "$line" == "$notfoundstr" ]; then
-				$b_yaml && echo -n "- \""
+				$b_yaml && echo -en "\t- \""
 				echo -n "$pkg"
 				$b_yaml && echo "\"" || echo
 			fi
@@ -123,6 +123,9 @@ find_removed() {
 }
 
 main() {
+
+	# echo "main execution"
+
         # Trap for control-c
         trap control_c SIGINT
 
@@ -145,6 +148,9 @@ main() {
 
 	pkgstat="$1"
 	pkglist="$2"
+
+	# echo "pkgstat: $1"
+	# echo "pkglist: $2"
 
 	parse_pkgstat
 
