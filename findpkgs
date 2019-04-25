@@ -166,6 +166,16 @@ declare -i rh8archsiz=${#rh8arch[@]}
 declare hcmd="elinks -dump -no-references"
 declare -a farray	# array of discovered or not found packages
 
+# ui_strindex string-1 string-2
+#
+# Return zero-based index of the first instance of string-2 in string-1
+# Returns -1 if string-2 is not found in string-1
+#
+function ui_strindex {
+	local x="${1%%$2*}"
+	[[ $x = $1 ]] && echo -1 || echo ${#x}
+}
+
 # ui_strtok - tokenizes a string and returns an array
 #
 # $1 - the string to tokenize
@@ -603,30 +613,33 @@ fill_farray() {
 	check_fstate $fstate
 }
 
+# normalize_pkgstr() - not interested in hypenated variants of the package.
+#
+# For example, AppStream/x86_64/pkglist:alsa-plugins-pulseaudio will be reduced
+# to AppStream/x86_64/pkglist:alsa-plugins
+#
+# $1 - the generic package name
+# $2 - the string of strings containing all the packages that start with the
+#      generic package name.
+#
+normalize_pkgstr()
+{
+	local pkg="$1"
+	local pkgstr="$2"
+	local pkgstr
+	local retstr
+	local idx
+
+	retstr=$(
+		while read line; do
+			idx=$(ui_strindex "$line" "$pkg")
+			echo "${line:0:idx}""$pkg"
+		done <<< "$pkgstr"
+		)
+	echo "$retstr"
+}
+
 # find_pkgs() - use grep to find the packages in the rhel7 and rhel8 trees
-#
-# We must handle the generic package and any of its hyphenated ancillaries
-# differently, because the generic package must be printed to the screen
-# with its maintainer, whether or not it's in either tree.
-# The hyphenated ancillaries may or may not exist, so if none are found
-# in any tree, then there is nothing to print to the screen.
-#
-# There can be more than one hyphenated package for a given package.
-# For example, grepping for mpich with a hyphen, "mpich-", will create
-# a string of strings separated by IFS for mpic-devel, mpich-3.0-autoload,
-# mpich-doc, etc, each string containing the path in the distro to the
-# package.
-#
-# Additionally, the patch also contains the arch for which the package
-# was built. This function will call the rm_arches function to remove
-# the arch portion of the path from each string in the string-of-strings,
-# so that the string-of-strings can then be sorted for unique paths at
-# the top level, e.g. Server, Workstation, etc, so that one path for each
-# instance of the package is preserved in the string-of-strings and sorted
-# by path.
-#
-# For example, all of the Worstation/[arch]/package strings will be reduced
-# to simply one Workstation/package string in the string-of-strings.
 #
 # Globals
 #   topdir - the location of the rhel7 and rhel8 trees
@@ -635,33 +648,35 @@ fill_farray() {
 #
 #  $1 - the generic package name
 #  $2 - the maintainer of the package
-#  $3 - bool that enables search of hyphenated versions of the generic
-#       package name.
 #
 find_pkgs() {
 	local pkg="$1"
 	local mnt="$2"
-	local bhyp=$3
 	local fee	# grept packages in distros
+	local foo	# grept packages normalized to pkg
 	local fie	# fee with the arches stripped from the paths
 	local foe	# fie sorted unique on paths and then pkg
+	local stat	# exit status of commands
 
-	if $bhyp; then
-		fee=$(grep -r -m1 "^$pkg-" $topdir)
-		(($? != 0)) && return 1
-	else
-		fee=$(grep -r -m1 "^$pkg$" $topdir)
-		(($? != 0)) && {
-			tstr=$(printf "\n%-32s%s\n" $pkg $mnt)
-			farray+=("$tstr")
-			check_fstate 0
-			return 1
-		}
-	fi
+	# [[ $pkg == "alsa"* ]] && echo "$pkg" >> ptest
 
-	fie=$(rm_arches "$fee")		# remove arch component of the path
+	fee=$(grep -r -m1 "^$pkg" $topdir)
+	stat=$?
+	# [[ $pkg == "alsa"* ]] && echo "fee: $fee" >> ptest
+	(($stat != 0)) && {
+		[[ $pkg == "alsa"* ]] && echo "$fee not found" >> ptest
+		tstr=$(printf "\n%-32s%s\n" $pkg $mnt)
+		farray+=("$tstr")
+		check_fstate 0
+		return 1
+	}
+
+	foo=$(normalize_pkgstr "$pkg" "$fee")
+	fie=$(rm_arches "$foo")		# remove arch component of the path
 	foe=$(sort_pkgs "$fie") 	# sort unique on paths and pkg
 
+	# [[ $pkg == "alsa"* ]] && echo "fie: $fie" >> ptest
+	# [[ $pkg == "alsa"* ]] && echo "foe: $foe" >> ptest
 	fill_farray "$foe" $mnt
 	return 0
 }
@@ -687,13 +702,16 @@ parse_pkglist() {
 	local pkg
 	local mnt
 
+	# echo "topdir:  $topdir"
+	# echo "pkglist: $pkglist"
+	# read
+	# > ptest
 	while read line; do
 		ui_strtok "$line" ":" lary
 		pkg="${lary[0]}"
 		mnt="${lary[1]}"
 		farray=()
-		find_pkgs "$pkg" $mnt false # find generic package name
-		find_pkgs "$pkg" $mnt true  # find hyphenated ancillaries
+		find_pkgs "$pkg" $mnt	# find generic package name
 		dump_farray
 	done < $pkglist
 }
