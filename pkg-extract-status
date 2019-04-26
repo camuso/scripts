@@ -113,7 +113,7 @@ find_removed() {
 		else
 			# echo $line
 			if [ "$line" == "$notfoundstr" ]; then
-				$b_yaml && echo -en "\t- \""
+				$b_yaml && echo -en "    - \""
 				echo -n "$pkg"
 				$b_yaml && echo "\"" || echo
 			fi
