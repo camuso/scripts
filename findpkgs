@@ -92,6 +92,7 @@ Arguments:
 
 Options:
   -b  - Builds the RHEL7 and RHEL8 distro directory trees.
+        This is only needed once, or if you need to refresh the distro trees.
   -h  - Prints this help text to the terminal.
 
 \0
@@ -658,13 +659,9 @@ find_pkgs() {
 	local foe	# fie sorted unique on paths and then pkg
 	local stat	# exit status of commands
 
-	# [[ $pkg == "alsa"* ]] && echo "$pkg" >> ptest
-
 	fee=$(grep -r -m1 "^$pkg" $topdir)
 	stat=$?
-	# [[ $pkg == "alsa"* ]] && echo "fee: $fee" >> ptest
 	(($stat != 0)) && {
-		[[ $pkg == "alsa"* ]] && echo "$fee not found" >> ptest
 		tstr=$(printf "\n%-32s%s\n" $pkg $mnt)
 		farray+=("$tstr")
 		check_fstate 0
@@ -675,8 +672,6 @@ find_pkgs() {
 	fie=$(rm_arches "$foo")		# remove arch component of the path
 	foe=$(sort_pkgs "$fie") 	# sort unique on paths and pkg
 
-	# [[ $pkg == "alsa"* ]] && echo "fie: $fie" >> ptest
-	# [[ $pkg == "alsa"* ]] && echo "foe: $foe" >> ptest
 	fill_farray "$foe" $mnt
 	return 0
 }
@@ -702,10 +697,6 @@ parse_pkglist() {
 	local pkg
 	local mnt
 
-	# echo "topdir:  $topdir"
-	# echo "pkglist: $pkglist"
-	# read
-	# > ptest
 	while read line; do
 		ui_strtok "$line" ":" lary
 		pkg="${lary[0]}"
