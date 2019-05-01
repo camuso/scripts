@@ -1633,6 +1633,7 @@ directory,\
 hashlist,\
 help,\
 history,\
+ibuild,\
 new,\
 pick:,\
 pop:,\
@@ -1681,6 +1682,9 @@ else
 			;;
 		"--history" )
 			show_history
+			;;
+		"--ibuild" )
+			b_ibuild=true	# set the incremental build flag
 			;;
 		"--new" )
 			init_newsession
