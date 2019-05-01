@@ -7,6 +7,7 @@ declare -i argcount=2
 declare -i optcount=0
 declare cletter="--no-cover-letter"
 declare reroll="--reroll-count=0"
+declare startnumber=1
 
 declare usagestr=$(
 cat <<EOF
@@ -23,6 +24,7 @@ $(basename $0) [OPTIONS] directory commitspec -- pathspec
   OPTIONS:
   -c      - generate a cover letter
   -v n    - version number of the patch
+  -s n    - start patch series from number n
 
   The patch set will be created with the following git command.
 
@@ -30,9 +32,13 @@ $(basename $0) [OPTIONS] directory commitspec -- pathspec
 
 	--no-renames \\\
 
+	--numbered \\\
+
 	--signoff \\\
 
 	--stat=80 \\\
+
+	--start-number=n \\\
 
 	--output-directory <directory> \\\
 
@@ -46,13 +52,16 @@ usage() {
 	exit $1
 }
 
-while getopts :cv: OPTION; do
+while getopts :cv:s: OPTION; do
     case "$OPTION" in
 
 	c ) cletter="--cover-letter"
 	    optcount=$((optcount+1))
 	    ;;
 	v ) reroll="--reroll-count=$OPTARG"
+	    optcount=$((optcount+1))
+	    ;;
+	s ) startnumber=$OPTARG
 	    optcount=$((optcount+1))
 	    ;;
 	* ) echo "unrecognized option -$OPTION"
@@ -76,6 +85,7 @@ git format-patch \\
 	--numbered \\
 	--signoff \\
 	--stat=80 \\
+	--start-number=$startnumber \\
 	--output-directory $directory \\
 	$commitspec
 "
@@ -90,6 +100,7 @@ git format-patch \
 	--numbered \
 	--signoff \
 	--stat=80 \
+	--start-number=$startnumber \
 	--output-directory "$directory" \
 	$commitspec
 
