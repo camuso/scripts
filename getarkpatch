@@ -8,7 +8,7 @@ declare -i number=1	# assume single patch
 declare homelink
 declare homebase
 declare patchfile="/dev/shm/getarkpatchfile"
-declare directory="$PWD"
+declare directory="$PWD"
 declare patlist
 declare line
 declare hrefstr='href="'
@@ -97,7 +97,7 @@ renapatch(){
 
 			# Create the new name
 			#
-			newname=$(printf "%s.patch" "$temp")
+			newname=$(printf "%s/%s.patch" "$dir" "$temp")
 
 			echo "*********************"
 			echo $newname
@@ -151,6 +151,10 @@ while getopts n:d:h OPTION; do
 	    optcount=$((optcount+1))
 	    ;;
 	d ) directory=$OPTARG
+	    [ -d "$directory" ] || {
+		echo "$directory is not a valid directory"
+		exit 1
+	    }
 	    optcount=$((optcount+2))
 	    ;;
 	h ) optcount=$((optcount+1))
@@ -240,5 +244,7 @@ count=$index
 for ((index=0; index < count; ++index)); do
 	getapatch "${hrefary[$index]}" "$patchfile"
 done
+
+patrmhead $directory
 
 exit 0
