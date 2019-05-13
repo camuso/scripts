@@ -8,6 +8,11 @@ unset BLD && declare BLD="[1m"
 unset UND && declare UND="[4m"
 unset OFF && declare OFF="[0m"
 
+declare -i tcols=$(tput cols)   # number of columns in the terminal
+declare CL1="\e["$tcols"D"	# column 1 of the current line
+declare CCR="\e[K"    		# clear line and carriage return
+declare UP1="\e[1A"		# move cursor up one line
+
 # Contlol-C exit code
 # see http://www.tldp.org/LDP/abs/html/exitcodes.html
 unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
@@ -79,22 +84,123 @@ usage() {
 	exitme 0
 }
 
+# strtok - tokenizes a string and returns an array
+#
+# $1 - the string to tokenize
+# $2 - the string of delimiters
+# $3 - returns the tokenized string as an array
+#
+# examples:
+#
+# ui_strtok kernel-pegas-4.11.0-2.el7.x86_64 ".-" array
+#
+# ${array[@]} will contain all the tokens separated by delimiters "."
+# and "-", and the delimiters will be replaced by spaces.
+#
+strtok() {
+	IFS="$2" read -r -a $3 <<< "$1"
+}
+
+fixup_addr ()
+{
+    local line="$1"
+    local b_front=false
+    local b_mid=false
+    local retlin=
+
+    for word in $line
+    do
+        [ ${word:0:1} == "<" ] && b_front=true
+
+	if $b_front; then
+            retlin="$retlin $word@"
+	    b_front=false
+            b_mid=true;
+            continue;
+        elif $b_mid; then
+            if [ ${word: -1} == ">" ]; then
+                b_mid=false
+                retlin="$retlin$word"
+            else
+                retlin="$retlin$word."
+            fi
+            continue;
+        fi
+        [ -z "$retlin" ] && retlin="$word" || retlin="$retlin $word"
+    done;
+    echo "$retlin"
+}
+
+parse_file() {
+	declare filename=$1
+	declare tempfile="./.tempfile"
+	# declare hdrend="Head-of-Message"
+	declare hdrend="From: "
+	declare b_hdrend=false
+	declare b_patend=false
+	declare b_cmtlog=true
+	declare cmtlogend="---"
+	declare patend="-- "
+	declare mod
+	declare lint
+
+	echo $filename
+	lint=$(cat $filename | wc -l)
+	mod=$(( (lint / tcols) + 1 ))
+	> $tempfile
+
+	while IFS= read -r line; do
+
+		# Print dots to the screen in proportion to the file size
+		#
+		[ $(( lcnt % mod )) -eq 0 ] && echo -n "." && let lcnt++
+
+		# Skip all the cruft at the top of the file until we get to
+		# something of substance.
+		#
+		[[ "${line:0:6}" == "$hdrend" ]] && b_hdrend=true
+		$b_hdrend || continue
+
+		if $b_cmtlog; then
+			# The patch archive removes dots from email
+			# addresses so they can't be farmed, but leaves
+			# the angle brackets. This freaks out git am,
+			# so just remove any angle brackets in the log.
+			#
+			# line="${line//[<>]/}"
+
+			[[ "$line" == "Head-of-Message-End" ]] && continue
+			[[ "$line" == "Head-Body-Sep-Begin" ]] && continue
+			[[ "$line" == "Head-Body-Sep-End"   ]] && continue
+			[[ "$line" == "Body-of-Message"     ]] && continue
+			[[ "$line" == "$cmtlogend" ]] && b_cmtlog=false
+			line=$(fixup_addr "$line")
+		fi
+
+		$b_patend || echo "$line" >> $tempfile
+		[ "$line" == "$patend" ] && b_patend=true
+
+	done < $filename
+
+	mv -f $tempfile $filename
+}
+
+
 
 main() {
 	declare -i lint			# line total
 	declare -i mod			# modulus divisor
 	declare -i lcnt			# line counter
-	declare -i tcols=$(tput cols)   # number of columns in the terminal
-	declare CL1="\e["$tcols"D"	# column 1 of the current line
-	declare CCR="\e[K"    		# clear line and carriage return
-	declare UP1="\e[1A"		# move cursor up one line
 
-	declare tempfile="./.tempfile"
 	declare hdrend="Head-of-Message"
 	declare bdyend="Body-of-Message-End"
 	declare b_hdrend
 	declare filename
 	declare dir
+	declare b_start
+	declare b_patend
+	declare cmtlogend="---"
+	declare patend="-- "
 
         # Trap for control-c
         trap control_c SIGINT
@@ -118,33 +224,8 @@ main() {
 	for filename in $(find $dir -maxdepth 1 -not -type d -name "*.patch");
 	do
 		[ $(grep -m1 "Head-of-Message" $filename) ] || continue
-		> $tempfile
 
-		echo $filename
-		lint=$(cat $filename | wc -l)
-		mod=$(( (lint / tcols) + 1 ))
-		b_hdrend=false
-
-		while IFS= read -r line; do
-			[ $(( lcnt % mod )) -eq 0 ] && echo -n "." && let lcnt++
-
-			# If we found the end of the header, set the flag and continue
-			# Once the flag is set, copy each line into the tempfile.
-			# Skip any residual xml/html lines.
-			# When we detect the end of the body, break the loop.
-			#
-			[[ "$line" == "$hdrend" ]] && b_hdrend=true && continue
-			$b_hdrend || continue
-
-			[[ "$line" == "Head-of-Message-End" ]] && continue
-			[[ "$line" == "Head-Body-Sep-Begin" ]] && continue
-			[[ "$line" == "Head-Body-Sep-End"   ]] && continue
-			[[ "$line" == "Body-of-Message"     ]] && continue
-			[[ "$line" == "$bdyend" ]] && break
-			echo "$line" >> $tempfile
-		done < $filename
-
-		mv -f $tempfile $filename
+		parse_file "$filename"
 
 		# Erase the filename and all the dots and put the cursor back
 		# in the first column of the prevous line. Leave them as
