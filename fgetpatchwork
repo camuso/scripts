@@ -1,0 +1,112 @@
+#!/bin/bash
+#
+# fgetpatchwork
+#
+source ~/bin/lib/ui.source
+
+declare pusagestr=$(
+cat <<EOF
+
+$(basename $0) file-of-links [directory]
+
+file-of-links : a file containing a list of hypertext links, one for
+                each patch.
+
+directory     : an optional directory into which to write the patch files.
+
+Creates a set of patches from patchworks archive given a file containing
+a list of links to the patches. The number at the end of each link will
+be used to construct the full mbox link to each patch.
+
+Extracted patch files wil be named according to their respective subject
+lines with a leading zero-padded number for the order in which each
+patch file was encountered in the list file
+
+RHEL patchworks is at http://patchwork.lab.bos.redhat.com/
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+(( $# >= 1 && $# <= 2)) || usage
+
+declare listfile="$1"
+declare tempfile="/dev/shm/fgetpatchwork.tmp"
+
+extract_subjectline() {
+	local filename="$1"
+	local subject=
+
+	# Extract the subject line.
+	#
+	subject=$(grep -m1 "Subject: " "$filename")
+
+	# Remove any asterisks from the subject line.
+	#
+	subject=$(sed 's/\*//g' <<< "$subject")
+
+	# Remove the word "Subject: " from the line
+	#
+	subject=$(echo "$subject" | cut -d' ' -f2-)
+
+	# Replace non-alphanumerics with a hyphen, then delete the leading
+	# hyphen that replaced the left bracket '['
+	#
+	subject=$(echo "$subject" | sed 's/[^[:alnum:]]\+/-/g')
+	subject=$(echo "$subject" | sed 's/^-//')
+
+	# If the last character is a hyphen, remove it.
+	#
+	[ "${subject:(-1)}" = "-" ] && subject=${subject%?}
+
+	echo "$subject.patch"
+}
+
+extract_patchfile() {
+	local link="$1"
+	local count=$2
+	local dir="$3"
+	local newfile
+
+	[ -z "$dir" ] || {
+		[ ${dir:(-1)} == '/' ] || dir="$dir/"
+	}
+
+	wget -q $link -O "$tempfile"
+	newfile=$(extract_subjectline "$tempfile")
+	newfile=$(printf "%04d-%s" $count $newfile)
+	> $dir$newfile
+
+	echo "$link -> $dir$newfile"
+
+	while IFS= read -r line; do
+		echo "$line" >> "$dir$newfile"
+	done < $tempfile
+}
+
+read_links() {
+	local linkfile="$1"
+	local directory="$2"
+
+	[ -z "$directory" ] || {
+		ui_verifydir "$directory"
+		[ $? -ne 0 ] && usage
+	}
+
+	local count=1
+
+	while read link; do
+		link="$link/mbox"
+		extract_patchfile "$link" $count $directory
+		let ++count
+	done < $linkfile
+}
+
+read_links "$@"
+rm -f $tempfile
+
