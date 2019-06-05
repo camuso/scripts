@@ -78,6 +78,7 @@ extract_patchfile() {
 	}
 
 	wget -q $link -O "$tempfile"
+
 	newfile=$(extract_subjectline "$tempfile")
 	newfile=$(printf "%04d-%s" $count $newfile)
 	> $dir$newfile
@@ -101,6 +102,7 @@ read_links() {
 	local count=1
 
 	while read link; do
+		[ ${link:(-1)} == '/' ] && link="${link%?}"
 		link="$link/mbox"
 		extract_patchfile "$link" $count $directory
 		let ++count
