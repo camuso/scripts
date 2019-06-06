@@ -4,15 +4,44 @@
 #
 source ~/bin/lib/ui.source
 
+declare -i optcount=0
+declare patchend="-- "
+declare linkfile
+declare linklist
+declare directory="./"
+declare b_fil=false
+declare b_lst=false
+declare tmpfile="/dev/shm/fgetpatchwork.tmp"
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=$ui_err_invargc
+declare -i EXIT_INVFIL=$ui_err_invfile
+declare -i EXIT_INVDIR=$ui_err_invdir
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) file-of-links [directory]
+$(basename $0) [options]
 
-file-of-links : a file containing a list of hypertext links, one for
-                each patch.
+Options:
+  -l linklist   - comma separated list of patchwork links
+  -n numberlist - comma separated list of patchwork numbers
+  -f linkfile   - file containing a list of patchwork links, one on
+                  each line
+  -d directory  - optional directory into which to write the patches.
+                  default is PWD.
 
-directory     : an optional directory into which to write the patch files.
+NOTE:
+  The -l, -n, and -f options are mutually exclusive. You must use one,
+  but only one can be chosen.
 
 Creates a set of patches from patchworks archive given a file containing
 a list of links to the patches. The number at the end of each link will
@@ -28,6 +57,33 @@ RHEL patchworks is at http://patchwork.lab.bos.redhat.com/
 EOF
 )
 
+exitme() {
+        local exitval=$1
+        local strarg=""
+        local exitmsg
+
+        if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+                [ $# -eq 2 ] && strarg=$2
+                [ ${#exitmsgary[@]} -gt $exitval ] \
+                        && exitmsg="${exitmsgary[$exitval]}"
+
+                echo -e "$BLD$strarg$exitmsg$OFF"
+
+                [ $exitval -ne 0 ] && echo -e \
+                        "Type$BLD '$ofile' -h$OFF for help."
+        fi
+
+        exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+        echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+        exitme $CTLC_EXIT
+}
+
 usage() {
 	echo -e "$usagestr"
 	exit
@@ -36,7 +92,6 @@ usage() {
 (( $# >= 1 && $# <= 2)) || usage
 
 declare listfile="$1"
-declare tempfile="/dev/shm/fgetpatchwork.tmp"
 
 extract_subjectline() {
 	local filename="$1"
@@ -67,7 +122,7 @@ extract_subjectline() {
 	echo "$subject.patch"
 }
 
-extract_patchfile() {
+extract_patchfile_mbox() {
 	local link="$1"
 	local count=$2
 	local dir="$3"
@@ -88,6 +143,86 @@ extract_patchfile() {
 	while IFS= read -r line; do
 		echo "$line" >> "$dir$newfile"
 	done < $tempfile
+}
+
+extract_patchfile_mbox2() {
+
+	patchstr="/patch/"
+
+	lentopatch=$(($(ui_strindex "$link" "$patchstr") + ${#patchstr} ))
+	linkhead=${link:0:$lentopatch}
+	linktail=${link:$lentopatch}
+	# echo "$linkhead --- $linktail"
+
+	patchnumlen=$(ui_strindex "$linktail" "/")
+	patchnum=${linktail:0:$patchnumlen}
+	linktail=${linktail:$patchnumlen}
+	# echo "$patchnum --- $linktail"
+
+    for ((index=1; index <= number; index++)); do
+	declare found=false
+	declare newname=""
+	declare temp=""
+
+	link="$linkhead""$patchnum""$linktail"
+	wget -q $link
+	lastto=''
+	lastfrom=''
+
+	while IFS= read -r line; do
+		if ! $found  \
+			&& [ $(ui_strindex "$line" "To:") -ge 0 ]; then
+			lastto=$line
+		fi
+		if ! $found  \
+			&& [ $(ui_strindex "$line" "From:") -ge 0 ]; then
+			lastfrom=$line
+		fi
+		if ! $found  \
+			&& [ $(ui_strindex "$line" "Subject: ") -ge 0 ] \
+			&& [ $(ui_strindex "$line" "RHEL") -ge 0 ]; then
+
+			found=true
+
+			# Remove the word "Subject: " from the temp
+			#
+			temp=$(echo "$line" | cut -d' ' -f2-)
+
+			# Remove any brackets, parentheses, and quotes
+			#
+			temp=$(echo "$temp" | sed 's/[][{}<>(),"]//g')
+			temp=$(echo "$temp" | sed "s/'//g")
+
+			# Replace spaces, slashes, colons and semicolons
+			# with hyphens
+			#
+			temp=$(echo "$temp" | sed "s\[/:; ]\-\g")
+
+			# Create the new name
+			#
+			newname=$(printf "%s.patch" "$temp")
+
+			echo "$newname"
+			echo $lastto > "$newname"
+			echo $lastfrom >> "$newname"
+			echo $line >> "$newname"
+			continue
+		fi
+
+		# Quit copying lines at the end of the patch.
+		#
+		if $found && [ $(ui_strindex "$line" "$patchend") -ge 0 ]; then
+		    break
+		fi
+
+		$found && echo "$line" >> "$newname"
+
+	done < index.html
+
+	rm -f index.html
+	let patchnum++
+    done
+
 }
 
 read_links() {
@@ -111,4 +246,37 @@ read_links() {
 
 read_links "$@"
 rm -f $tempfile
+
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts l:f:d: OPTION; do
+    	    case "$OPTION" in
+		l ) linklist=$OPTARG
+		    let ++optcount
+		    ;;
+		f ) linkfile=$OPTARG
+		    let ++optcount
+		    ;;
+		d ) directory=$OPTARG
+		    let ++optcount
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 0 ] || exitme $EXIT_INVARG
+
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
 
