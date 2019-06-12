@@ -6,12 +6,12 @@ source ~/bin/lib/ui.source
 
 declare -i optcount=0
 declare patchend="-- "
-declare linkfile
-declare linklist
+declare linkfile=
+declare linklist=
 declare directory="./"
-declare b_fil=false
-declare b_lst=false
-declare tmpfile="/dev/shm/fgetpatchwork.tmp"
+declare b_file=false
+declare b_list=false
+declare tempfile="/dev/shm/fgetpatchwork.tmp"
 
 # Other exit codes
 declare -i EXIT_OK=0
@@ -35,9 +35,9 @@ Options:
   -l linklist   - comma separated list of patchwork links
   -n numberlist - comma separated list of patchwork numbers
   -f linkfile   - file containing a list of patchwork links, one on
-                  each line
+		  each line
   -d directory  - optional directory into which to write the patches.
-                  default is PWD.
+		  default is PWD.
 
 NOTE:
   The -l, -n, and -f options are mutually exclusive. You must use one,
@@ -58,40 +58,36 @@ EOF
 )
 
 exitme() {
-        local exitval=$1
-        local strarg=""
-        local exitmsg
+	local exitval=$1
+	local strarg=""
+	local exitmsg
 
-        if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
-                [ $# -eq 2 ] && strarg=$2
-                [ ${#exitmsgary[@]} -gt $exitval ] \
-                        && exitmsg="${exitmsgary[$exitval]}"
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
 
-                echo -e "$BLD$strarg$exitmsg$OFF"
+		echo -e "$BLD$strarg$exitmsg$OFF"
 
-                [ $exitval -ne 0 ] && echo -e \
-                        "Type$BLD '$ofile' -h$OFF for help."
-        fi
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD '$ofile' -h$OFF for help."
+	fi
 
-        exit $exitval
+	exit $exitval
 }
 
 # run if user hits control-c
 #
 control_c()
 {
-        echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
-        exitme $CTLC_EXIT
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	exitme $CTLC_EXIT
 }
 
 usage() {
 	echo -e "$usagestr"
 	exit
 }
-
-(( $# >= 1 && $# <= 2)) || usage
-
-declare listfile="$1"
 
 extract_subjectline() {
 	local filename="$1"
@@ -146,88 +142,88 @@ extract_patchfile_mbox() {
 }
 
 extract_patchfile_mbox2() {
+# set -x
+	local link="$1"
+	local dir="$2"
+	local newfile
 
-	patchstr="/patch/"
-
-	lentopatch=$(($(ui_strindex "$link" "$patchstr") + ${#patchstr} ))
-	linkhead=${link:0:$lentopatch}
-	linktail=${link:$lentopatch}
-	# echo "$linkhead --- $linktail"
-
-	patchnumlen=$(ui_strindex "$linktail" "/")
-	patchnum=${linktail:0:$patchnumlen}
-	linktail=${linktail:$patchnumlen}
-	# echo "$patchnum --- $linktail"
-
-    for ((index=1; index <= number; index++)); do
 	declare found=false
-	declare newname=""
-	declare temp=""
+	declare newname=
+	declare temp=
+	declare lastfrom=
+	declare lastto=
+	declare lastsub=
+	declare lastdat=
+	declare lastmid=
+	declare b_header=true
 
-	link="$linkhead""$patchnum""$linktail"
-	wget -q $link
-	lastto=''
-	lastfrom=''
+	wget -q $link -O "$tempfile"
 
 	while IFS= read -r line; do
-		if ! $found  \
-			&& [ $(ui_strindex "$line" "To:") -ge 0 ]; then
-			lastto=$line
+		if ! $found; then
+			[ "${line:0:5}"  == "From:"       ] && lastfrom="$line"
+			[ "${line:0:3}"  == "To:"         ] && lastto="$line"
+			[ "${line:0:8}"  == "Subject:"    ] && lastsub="$line"
+			[ "${line:0:5}"  == "Date:"       ] && lastdat="$line"
+
+			if [ "${line:0:11}" == "Message-Id:" ]; then
+				if [ "${line:13:5}" == "dummy" ]; then
+					continue
+				else
+					lastmid="$line"
+					found=true
+				fi
+			fi
+		else
+			if $b_header; then
+				# Remove the word "Subject: " from the lastsub
+				#
+				temp=$(echo "$lastsub" | cut -d' ' -f2-)
+
+				# Remove any brackets, parentheses, and quotes
+				#
+				temp=$(echo "$temp" | sed 's/[][{}<>(),"]//g')
+				temp=$(echo "$temp" | sed "s/'//g")
+
+				# Replace spaces, slashes, colons and semicolons
+				# with hyphens
+				#
+				temp=$(echo "$temp" | sed "s\[/:; ]\-\g")
+
+				# Create the new name
+				#
+				newname=$(printf "%s.patch" "$temp")
+
+				echo "$newname"
+				echo "$lastfrom" > "$newname"
+				echo "$lastto"  >> "$newname"
+				echo "$lastsub" >> "$newname"
+				echo "$lastdat" >> "$newname"
+				b_header=false
+			fi
 		fi
-		if ! $found  \
-			&& [ $(ui_strindex "$line" "From:") -ge 0 ]; then
-			lastfrom=$line
-		fi
-		if ! $found  \
-			&& [ $(ui_strindex "$line" "Subject: ") -ge 0 ] \
-			&& [ $(ui_strindex "$line" "RHEL") -ge 0 ]; then
 
-			found=true
-
-			# Remove the word "Subject: " from the temp
-			#
-			temp=$(echo "$line" | cut -d' ' -f2-)
-
-			# Remove any brackets, parentheses, and quotes
-			#
-			temp=$(echo "$temp" | sed 's/[][{}<>(),"]//g')
-			temp=$(echo "$temp" | sed "s/'//g")
-
-			# Replace spaces, slashes, colons and semicolons
-			# with hyphens
-			#
-			temp=$(echo "$temp" | sed "s\[/:; ]\-\g")
-
-			# Create the new name
-			#
-			newname=$(printf "%s.patch" "$temp")
-
-			echo "$newname"
-			echo $lastto > "$newname"
-			echo $lastfrom >> "$newname"
-			echo $line >> "$newname"
-			continue
-		fi
+		! $b_header && echo "$line" >> "$newname"
 
 		# Quit copying lines at the end of the patch.
 		#
-		if $found && [ $(ui_strindex "$line" "$patchend") -ge 0 ]; then
-		    break
+		if $found && [ "$line" == "$patchend" ]; then
+			break
 		fi
 
-		$found && echo "$line" >> "$newname"
+	done < "$tempfile"
 
-	done < index.html
-
-	rm -f index.html
-	let patchnum++
-    done
-
+	rm -f "$tempfile"
 }
 
-read_links() {
-	local linkfile="$1"
-	local directory="$2"
+
+# read_linkfile - read the list of links from the linkfile
+#
+# GLOBALS
+#   linkfile
+#   directory
+#
+read_linkfile() {
 
 	[ -z "$directory" ] || {
 		ui_verifydir "$directory"
@@ -237,16 +233,17 @@ read_links() {
 	local count=1
 
 	while read link; do
+
+		# If the last char in the link is a '/', then remove it.
+		#
 		[ ${link:(-1)} == '/' ] && link="${link%?}"
-		link="$link/mbox"
-		extract_patchfile "$link" $count $directory
-		let ++count
+
+		# Add the '/mbox2
+		link="$link/mbox2"
+		extract_patchfile_mbox2 "$link" $directory
+
 	done < $linkfile
 }
-
-read_links "$@"
-rm -f $tempfile
-
 
 main() {
         # Trap for control-c
@@ -255,10 +252,12 @@ main() {
 	while getopts l:f:d: OPTION; do
     	    case "$OPTION" in
 		l ) linklist=$OPTARG
-		    let ++optcount
+		    let optcount+=2
+		    b_list=true
 		    ;;
 		f ) linkfile=$OPTARG
-		    let ++optcount
+		    let optcount+=2
+		    b_file=true
 		    ;;
 		d ) directory=$OPTARG
 		    let ++optcount
@@ -272,6 +271,9 @@ main() {
 	shift $optcount
 	[ $# -eq 0 ] || exitme $EXIT_INVARG
 
+	($b_list && b_file) && $EXIT_INVARG
+
+	$b_file && read_linkfile
 
 	exitme $EXIT_OK
 }
