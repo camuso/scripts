@@ -6,12 +6,9 @@ source ~/bin/lib/ui.source
 
 declare -i optcount=0
 declare patchend="-- "
-declare linkfile=
-declare linklist=
 declare directory="./"
-declare b_file=false
-declare b_list=false
 declare tempfile="/dev/shm/fgetpatchwork.tmp"
+declare linkfile=
 
 # Other exit codes
 declare -i EXIT_OK=0
@@ -29,19 +26,15 @@ declare -a exitmsgary=(
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) [options]
+$(basename $0) linkfile [directory]
 
-Options:
-  -l linklist   - comma separated list of patchwork links
-  -n numberlist - comma separated list of patchwork numbers
-  -f linkfile   - file containing a list of patchwork links, one on
-		  each line
-  -d directory  - optional directory into which to write the patches.
-		  default is PWD.
 
-NOTE:
-  The -l, -n, and -f options are mutually exclusive. You must use one,
-  but only one can be chosen.
+  linkfile   - file containing a list of patchwork links, one on
+               each line of the following form.
+               http://patchwork.lab.bos.redhat.com/patch/262503/
+
+  directory  - optional directory into which to write the patches.
+               default is PWD.
 
 Creates a set of patches from patchworks archive given a file containing
 a list of links to the patches. The number at the end of each link will
@@ -142,7 +135,7 @@ extract_patchfile_mbox() {
 }
 
 extract_patchfile_mbox2() {
-# set -x
+
 	local link="$1"
 	local dir="$2"
 	local newfile
@@ -190,9 +183,14 @@ extract_patchfile_mbox2() {
 				#
 				temp=$(echo "$temp" | sed "s\[/:; ]\-\g")
 
+				# Put a slash at the end of the dir if it's not
+				# already there.
+				#
+				[ "${dir:(-1)}" == "/" ] || dir="$dir/"
+
 				# Create the new name
 				#
-				newname=$(printf "%s.patch" "$temp")
+				newname=$(printf "%s%s.patch" "$dir" "$temp")
 
 				echo "$newname"
 				echo "$lastfrom" > "$newname"
@@ -249,31 +247,15 @@ main() {
         # Trap for control-c
         trap control_c SIGINT
 
-	while getopts l:f:d: OPTION; do
-    	    case "$OPTION" in
-		l ) linklist=$OPTARG
-		    let optcount+=2
-		    b_list=true
-		    ;;
-		f ) linkfile=$OPTARG
-		    let optcount+=2
-		    b_file=true
-		    ;;
-		d ) directory=$OPTARG
-		    let ++optcount
-		    ;;
-		* ) echo "unrecognized option -$OPTION"
-		    echo -e "$usagestr"
-		    exit 127
-	    esac
-	done
+	[ $# -ge 1 ] || exitme $EXIT_INVARG
 
-	shift $optcount
-	[ $# -eq 0 ] || exitme $EXIT_INVARG
+	linkfile=$1
+	[ -f $linkfile ] || exitme $EXIT_INVFIL $linkfile
 
-	($b_list && b_file) && $EXIT_INVARG
+	[ "$2" ] && directory=$2
+	[ -d $directory ] || exitme $EXIT_INVDIR $directory
 
-	$b_file && read_linkfile
+	read_linkfile
 
 	exitme $EXIT_OK
 }
