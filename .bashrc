@@ -28,18 +28,39 @@ export LS_COLORS
 # export GREP_COLORS='ms=01;31:mc=01;31:sl=:cx=:fn=01;32:ln=01;32:bn=32:se=36'
 export GREP_COLORS='ms=01;31:mc=01;31:sl=:cx=:fn=95:ln=32:bn=32:se=36'
 
-declare magenta_bold='\[\e[1;35m\]'
-declare   green_bold='\[\e[1;32m\]'
-declare  yellow_bold='\[\e[1;33m\]'
-declare     red_bold='\[\e[31;1m\]'
-declare     attr_off='\[\e[0m\]'
-declare    underline='\[\e[3m\]'
+#
+# Text Attributes
+#
+unset BLD && declare BLD="\033[1m"
+unset UND && declare UND="\033[4m"
+unset OFF && declare OFF="\033[0m"
+#
+# Text color definitions
+#
+unset BLK && declare BLK='\e[0;30m'
+unset RED && declare RED='\e[0;31m'
+unset GRN && declare GRN='\e[0;32m'
+unset YEL && declare YEL='\e[0;33m'
+unset BLU && declare BLU='\e[0;34m'
+unset MGT && declare MGT='\e[0;35m'
+unset CYN && declare CYN='\e[0;36m'
+unset WHT && declare WHT='\e[0;37m'
+#
+# Bright colors
+#
+unset BBLK && declare BBLK='\e[1;90m'
+unset BRED && declare BRED='\e[1;91m'
+unset BGRN && declare BGRN='\e[1;92m'
+unset BYEL && declare BYEL='\e[1;93m'
+unset BBLU && declare BBLU='\e[1;94m'
+unset BMGT && declare BMGT='\e[1;95m'
+unset BCYN && declare BCYN='\e[1;96m'
+unset BWHT && declare BWHT='\e[1;97m'
 
 if [ $(id -u) -eq 0 ]; then # you are root, set root prompt
-	export PS1="[$underline$red_bold\u$attr_off$red_bold@$green_bold\h $yellow_bold\W$attr_off]$red_bold# $attr_off"
+	export PS1="[$BRED\u$BRED@$BGRN\h $BYEL\W$OFF]$BRED# $OFF"
 else # normal user
-	# export PS1="[\[\e[1;35m\]\u\[\e[31;1m\]@\[\e[1;32m\]\h \[\e[1;33m\]\W]\[\e[1;35m\]$\[\e[0m\] "
-	export PS1="[$magenta_bold\u$red_bold@$green_bold\h $yellow_bold\W$attr_off]$magenta_bold$ $attr_off"
+	export PS1="[$BMGT\u$BRED@$BGRN\h $BYEL\W$OFF]$BMGT$ $OFF"
 fi
 
 # User specific aliases and functions
