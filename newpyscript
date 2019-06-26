@@ -1,0 +1,45 @@
+#!/usr/bin/python
+
+import sys
+import os
+import tty
+import termios
+
+from pathlib import Path
+
+def getch():
+
+    """ getch() -> key character
+
+    Read a single keypress from stdin and return the resulting character.
+    Nothing is echoed to the console. This call will block if a keypress
+    is not already available, but will not wait for Enter to be pressed.
+
+    If the pressed key was a modifier key, nothing will be detected; if
+    it were a special function key, it may return the first character of
+    of an escape sequence, leaving additional characters in the buffer.
+    """
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+	tty.setraw(fd)
+	ch = sys.stdin.read(1)
+    finally:
+	termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+
+def create_file(scriptname):
+    overwrite=false
+
+    if os.path.isfile(scriptname):
+        print("Script %s exists." scriptname)
+        print("Do you want to overwrite? [y/N]: ")
+
+
+    with open(scriptname, 'w') as newscript
+
+
+def main():
+    create_file(sys.argv[1])
+
+main()
