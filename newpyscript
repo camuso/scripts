@@ -1,45 +1,66 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 import sys
 import os
-import tty
-import termios
+# import tty
+# import termios
 
 from pathlib import Path
 
-def getch():
+shebang = ("\
+#!/usr/bin/python3\n\
+#\n\
+")
 
-    """ getch() -> key character
+mainstr = ("\
+import sys\n\
+import os\n\
+\n\
+\n\
+\n\
+def main():\n\
+\n\
+    return 0\n\
+\n\
+exit(main())\n\
+")
 
-    Read a single keypress from stdin and return the resulting character.
-    Nothing is echoed to the console. This call will block if a keypress
-    is not already available, but will not wait for Enter to be pressed.
+def get_yn(prompt):
+    while True:
+        yn = input("%s [y/n]: " % prompt)
+        if yn and yn in "yYnN":
+            break
 
-    If the pressed key was a modifier key, nothing will be detected; if
-    it were a special function key, it may return the first character of
-    of an escape sequence, leaving additional characters in the buffer.
-    """
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-	tty.setraw(fd)
-	ch = sys.stdin.read(1)
-    finally:
-	termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-    return ch
+    if yn in "yY":
+        return True
+    else:
+        return False
 
-def create_file(scriptname):
-    overwrite=false
+def check_file(scriptname):
 
     if os.path.isfile(scriptname):
-        print("Script %s exists." scriptname)
-        print("Do you want to overwrite? [y/N]: ")
+        print("Script %s exists." % scriptname)
+        if not get_yn("Do you want to overwrite?"):
+            print("You chose not to overwrite existing script: %s" % scriptname)
+            print("Exiting ...")
+            return False
 
+    return True
 
-    with open(scriptname, 'w') as newscript
-
+def create_file(scriptname):
+    with open(scriptname, 'w') as newscript:
+        newscript.write(shebang)
+        newscript.write("# %s\n#\n\n" % scriptname)
+        newscript.write(mainstr)
+    return 0
 
 def main():
-    create_file(sys.argv[1])
+    scriptname = sys.argv[1]
+    if not check_file(scriptname):
+        return(1)
+    create_file(scriptname)
+    os.system("chmod +x %s" % scriptname)
 
-main()
+    return 0
+
+exit(main())
