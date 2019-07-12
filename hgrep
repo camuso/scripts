@@ -3,17 +3,30 @@
 # hgrep 0.2
 #
 
+declare usagestr=$(
+cat <<EOF
+
+hgrep [options] string [dir/file | dir]
+
+options - any valid grep option
+
+string  - string or regex to grep
+
+dir/fil - the directory or filename(s) to search, where the dir/fil
+          argument can include a regex, like: ./drivers/\\*.[ch]
+
+	  Backslash is required to escape special characters, like *.
+	  If you omit the dir/fil argument, the grep will be performed
+	  for every file in the current directory and any of its
+	  subdirectories.
+
+	  You can specify a directory without a file, but you cannot
+	  specify a file without a directory.
+EOF
+)
+
 function usage {
-	echo
-	echo "hgrep [options] string dir/file | dir"
-	echo -e "\tWhere filespec can include a regexp, like \"drivers/*.[hc]\""
-	echo -e "\tOptions must come first and can be any valid grep options."
-	echo -e "\tIf you omit the \"dir/file\" argument, the grep will be done for"
-	echo -e "\tevery file in every directory from the PWD."
-	echo
-	echo -e "\tNOTE: You can have a directory without a file specification,"
-	echo -e "\t      but you cannot have a file specification without a"
-	echo -e "\t      directory."
+	echo -e "$usagestr"
 	echo
 	exit
 }
@@ -102,7 +115,17 @@ execstr="find "$dirspec" -type f -iname "$filespec" \
 #	-exec grep -Hns$te --color $optstr "$grepstr" '{}' \;
 # set -x
 find "$dirspec" -type f -iname "$filespec" \
-	-exec sh -c 'grep -q "$2" $3; if [ $? -eq 0 ]; then echo $3; \
-	grep -ns --color $1 "$2" $3; fi' \
-	sh "$optstr""$topt" "$grepstr" '{}' \;
+	-exec sh -c '\
+	declare CCR="\e[K"   	# clear line and carriage return
+	declare UP1="\e[1A"	# move cursor up one line
+	echo $3
+	grep -q -m1 "$2" $3
+	if [ $? -eq 0 ]; then
+		grep -ns --color $1 "$2" $3
+	else
+		echo -en "$UP1"
+		echo -en "$CCR"
+	fi' \
+	sh "$optstr$topt" "$grepstr" '{}' \;
 # set +x
+
