@@ -36,12 +36,14 @@ pathspec="./*"	# Last space-separated token in the command line
 filespec="*"	# Last '/' separated token in the command line
 dirspec="./"	# '/' separated tokens excluding the filespec
 
+declare b_quiet=false
 declare -a optstr=""
 declare -i index=0
 declare -i n_opts=0
 declare -i n_nonopts=0
 declare -a grepstr
 declare -i gpos
+declare -a qstr=
 
 [ "$1" == "?" ] && usage
 
@@ -69,10 +71,18 @@ case $n_nonopts in
 		gpos=$((argc - 1))
 		grepstr="${!gpos}"
 		;;
+	3 )	qstr="${!argc}"
+		ppos=$((argc - 1))
+		gpos=$((argc - 2))
+		pathspec="${!ppos}"
+		grepstr="${!gpos}"
+		;;
 	* )	usage
 		;;
 esac
 # echo "pathspec: $pathspec, grepstr: $grepstr"
+
+[ "$qstr" == "q" ] && b_quiet=true
 
 # If the entire path is a directory, then the filespec defaults
 # to the "*" wildcard.
@@ -118,14 +128,15 @@ find "$dirspec" -type f -iname "$filespec" \
 	-exec sh -c '\
 	declare CCR="\e[K"   	# clear line and carriage return
 	declare UP1="\e[1A"	# move cursor up one line
-	echo $3
+	[ "$4" != "q" ] && echo $3
 	grep -q -m1 "$2" $3
 	if [ $? -eq 0 ]; then
+		[ "$4" == "q" ] && echo $3
 		grep -ns --color $1 "$2" $3
-	else
+	elif [ "$4" != "q" ]; then
 		echo -en "$UP1"
 		echo -en "$CCR"
 	fi' \
-	sh "$optstr$topt" "$grepstr" '{}' \;
+	sh "$optstr$topt" "$grepstr" '{}' $qstr \;
 # set +x
 
