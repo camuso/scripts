@@ -1,0 +1,272 @@
+#!/bin/bash
+#
+
+# Need path for script to run in cron
+#
+PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/root/bin
+
+countdown=20
+mindelay=20
+maxdelay=600
+action="$@"	# action consists of all the parameters
+stat=1
+bootloopfile="/tmp/bootloop.log"
+rebootlogfile="/root/reboot.log"
+stopfile="/root/stop"
+crashcountfile="/tmp/crashcount.log"
+crashcount=$(ls /var/crash/* 2> /dev/null | wc -l)
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) [script]
+
+	"script" is an optional script to be executed on every loop.
+
+	The bootloop is accomplished by creating a cron job that calls
+	this script and the optional script, if present, on every boot.
+
+	The number of boots is printed on the serial console along
+	with other messages, e.g. the seconds remaining to reboot.
+
+	The boot loop is terminated when any one of the following
+	conditions is met.
+
+	1. bootloop finds finds a file named "stop" in /root. The root
+	   user can simply type "touch stop" in the root directory to
+   	   do this.
+
+	2. bootloop detects a new crash dump under /var/crash.
+
+	3. The optional script returns with a zero status.
+
+	When the boot loop is terminated, its temp files are deleted,
+	the cron job is deleted from crontab, leaving any other cron
+	jobs intact, and a log file is left in "$rebootlogfile".
+
+	The default timeout before the next reboot is 20 seconds. You
+	will be given an opportunity to change this before starting,
+	but the minimum delay is 20 seconds, to allow enough time to
+	manually terminate the bootloop.
+\0
+EOF
+)
+
+userstr="
+Must be root to invoke $(basename $0)
+"
+
+# putcon() - ouput to serial console
+#
+# 	Write strings to the console and optionally write the same
+# 	string to a file.
+#
+# $1 - the string
+# $2 - optional file
+# $3 - new, any string in this argument will cause the file to be
+#	opened for writing, which deletes the previous contents.
+#
+putcon()
+{
+	echo -e "$1" > $console
+	if [[ $2 ]]; then
+		if [[ $3 ]]; then
+			echo -e "$1" > $2
+		else
+			echo -e "$1" >> $2
+		fi
+	fi
+}
+
+# getchar()
+#
+# Returns character in $1
+#
+getchar() {
+	local char
+	read -n1 char
+	echo
+	[ $# -gt 0 ] && eval $1=$char
+}
+
+# promptgetchar()
+#
+# Prints a prompt passed in $1 and returns the char in $2
+#
+promptgetchar() {
+	local prompt=$1
+	echo -ne "$prompt"
+	getchar $2
+}
+
+function getuser {
+	local promptstring="$1"
+	local var
+
+	echo -ne "$promptstring"
+	read var
+	eval $2=$var
+}
+
+# loop_yn()
+#
+# Loop until user gives either a y or n answer.
+#
+# $1 - prompt string
+# $2 - the character to be returned
+#
+loop_yn() {
+	local ans
+	local x
+	while true; do
+		promptgetchar "$1" ans
+		for x in {y,Y,n,N}; do
+			[[ $x == $ans ]] && eval $2=$ans && return
+		done
+		echo -e "Please enter 'y' or 'n'."
+	done
+}
+
+# loop_range()
+#
+# Loop until user gives a number in the range defined by the args
+#
+# $1 - prompt string
+# $2 - the value to be returned
+# $3 - minimum
+# $4 - maximum
+#
+loop_range() {
+	local number
+	local min=$3
+	local max=$4
+	while true; do
+		getuser "$1" number
+		if [[ $number =~ ^-?[0-9]+$ ]]  && \
+		   [[ $number -ge $min ]]       && \
+		   [[ $number -le $max ]]; then
+			eval $2=$number
+			return 0
+		fi
+		echo -e "Please enter a number between $min and $max."
+	done
+}
+
+# start_bootloop() - query the user.
+#
+# If user wants to continue, present option to change default timeout
+# between boots.
+#
+start_bootloop() {
+	local answer
+
+	echo -e "$usagestr"
+	loop_yn "Do you want to continue? [y/n]: " answer
+	if [[ $answer == "n" ]] || [[ $answer == "N" ]]; then
+		exit_bootloop 0
+	fi
+
+	echo "Current delay between reboots is $countdown seconds."
+	loop_yn "Do you want to change it? [y/n] : " answer
+	if [[ $answer == "y" ]] || [[ $answer == "Y" ]]; then
+		loop_range "Seconds delay between reboots: " countdown $mindelay $maxdelay
+	fi
+}
+
+exit_bootloop() {
+	[[ -e "$bootloopfile" ]] && mv "$bootloopfile" "$rebootlogfile"
+	[[ -e "$stopfile" ]] && rm -f "$stopfile"
+	[[ -e "$crashcountfile" ]] && rm -f "$crashcountfile"
+	crontab -l | grep -v "@reboot /root/bin/bootloop "$action"" | crontab -
+	exit $1
+}
+
+#####################################
+# Start of Execution
+####################################
+
+# EFI stuff to assure reboot of the zeroth entry in the grub.cfg
+#
+os_boot_entry=$(efibootmgr | awk '/BootCurrent/ { print $2 }')
+echo "bootentry: $os_boot_entry"
+os_boot_entry=$(</root/EFI_BOOT_ENTRY.TXT)
+echo "root efi bootentry: $os_boot_entry"
+logger -s "efibootmgr -n $os_boot_entry"
+efibootmgr -n $os_boot_entry
+
+[ $(id -u) -eq 0 ] || { echo -e "$userstr";  exit 1; }
+
+[ "$1" == "-h" ] && { echo -e "$usagestr"; exit 1; }
+
+# Find the serial console
+# If we can't find an active console, direct output to /dev/null
+#
+console=$(cat /proc/tty/driver/serial | grep RTS | grep CTS | grep DTR)
+if [[ $console ]]; then
+	console="/dev/ttyS"$(echo $console | cut -d':' -f1)
+else
+	console="/dev/null"
+fi
+
+putcon "bootloop pid: "$$""
+
+# If the bootloopfile exists, then update it.
+# Else, create the cron job for the bootloop. initialize the bootcount,
+# and create the bootloop file and the crashcountfile, and query the
+# user.
+#
+if [ -f $bootloopfile ]; then
+	bootcount=$(( $(cat $bootloopfile | cut -d':' -f2) + 1 ))
+else
+	echo "@reboot /root/bin/bootloop $action" | crontab
+	bootcount=1
+	> $bootloopfile
+	echo $crashcount > $crashcountfile
+	start_bootloop
+fi
+
+putcon "boot count: "$bootcount"" $bootloopfile new
+
+# If there's been a crash, then exit with nonzero status.
+# We can tell there's been a crash if there are any files under
+# /var/crash.
+#
+oldcount=$(cat $crashcountfile)
+if [[ $crashcount != $oldcount ]]; then
+	putcon "New core dump detected. Exiting bootloop." $bootloopfile
+	exit_bootloop 1
+fi
+
+if [ "$action" ]; then
+	# wall -n "Executing: "$action""
+	putcon "Executing: "$action""
+	$action
+	stat=$?
+fi
+
+# If "action" returns nonzero status, or if there was no "action"
+# passed, then reboot. Default value of stat is 1, so it can
+# only be 0 if an "action" was executed and it returned a 0.
+#
+if [ $stat -ne 0 ]; then
+	putcon "Starting countdown to next reboot ..."
+
+	for (( i=$countdown; i > 0; --i )); do
+		# (( $i % 20 )) || wall -n  " $i"
+		(( $i % 20 )) || putcon " $i"
+		sleep 1
+
+		if [[ -e $HOME/stop ]]; then
+			putcon "\"stop\" file detected.\nbootloop exiting ...\n" $bootloopfile
+			exit_bootloop 0
+		fi
+	done
+
+	putcon " $i\nRebooting now ..."
+	shutdown -r now
+else
+	putcon ""$action": returned zero status." $bootloopfile
+	putcon "Boot loop halted." $bootloopfile
+	putcon "Number of boot loops: "$bootcount"\n" $rbootloopfile
+	exit_bootloop 0
+fi
