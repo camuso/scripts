@@ -264,7 +264,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	#curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
 	#curl -L -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
 
-	$installagent groupinstall -y 'X Window System' 'GNOME'
+	# $installagent groupinstall -y 'X Window System' 'GNOME'
 
 	$installagent install -y --nogpgcheck --skip-broken \
 	automake \
