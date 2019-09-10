@@ -8,6 +8,7 @@
 # cscope command line searches
 # cscope.out should have been built.
 #
+# cscope -d -R -L<n> where n is one of ...
 # 0: Find this C symbol
 # 1: Find this definition
 # 2: Find functions called by this function
@@ -80,11 +81,16 @@ cat <<EOF
 
 $(basename $0) [options] function directory
 
-NOTE: must have hgrep script in executable path
+Trace callers of the named function. Without a named directory, the trace
+will be kernel-wide.
+
+NOTE: Must have cscope.out in the Current Working Directory.
+      PWD must be the top of a linux kernel tree.
+      Current Working Directory: $BLD$PWD$OFF
 
 Arguments:
-  function  - 
-  directory - 
+  function  - function to trace
+  directory - limits search to the named directory and its subdirectories
 
 Options:
   -h  - help
@@ -96,6 +102,7 @@ usage() {
 	echo -en "$usagestr"
 	exitme 0
 }
+
 
 
 main() {
