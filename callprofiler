@@ -21,11 +21,19 @@
 #
 ###########################################################################
 
+#
+# Find the callers at the first tier and store them in a list.
+#
+
 import sys
 import os
+import subprocess
+from subprocess import Popen, PIPE, STDOUT
+import array
 import numpy as np  # efficient memory management
 
 scriptname = os.path.basename(__file__)
+# scriptname = sys.argv[0]
 
 usagestr = """
 Trace callers of the named function. Without a named directory, the trace
@@ -47,9 +55,26 @@ def usage():
     print("\n%s function [directory]" % scriptname)
     print(usagestr)
 
+def get_callers(func):
+    print("Getting ", func)
+    args = ["cscope", "-d", "-R", "-L3", func]
+    p = Popen(args, shell=True, stdout=PIPE)
+    output = p.communicate()
+    #callers = str(output)
+    #callers = callers.split('\\n')
+
+    # callers = process.communicate()
+
+    #print("length: ", len(callers))
+
+    #for line in range(len(callers)):
+    #    print(callers[line])
+
 def main():
 
-    usage()
+    # usage()
+    func = sys.argv[1]
+    get_callers(func)
 
     return 0
 
