@@ -21,7 +21,10 @@ declare -a exitmsgary=(
 "Invalid number of arguments."
 " is an invalid filename."
 " is an invalid directory name."
+" ctl-c exit ..."
 )
+
+declare -i extmsgarysiz=${#exitmsgary[@]}
 
 declare usagestr=$(
 cat <<EOF
@@ -50,21 +53,28 @@ RHEL patchworks is at http://patchwork.lab.bos.redhat.com/
 EOF
 )
 
+# exitme() - print an exit message and exit gracefully
+#
+# $1 - exit code
+# $2 - optional arg, e.g. filename for EXIT_INVFIL
+#
 exitme() {
 	local exitval=$1
 	local strarg=""
 	local exitmsg
 
 	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
-		[ $# -eq 2 ] && strarg=$2
+		[ $# -eq $EXIT_INVFIL ] && strarg=$2
 		[ ${#exitmsgary[@]} -gt $exitval ] \
 			&& exitmsg="${exitmsgary[$exitval]}"
 
 		echo -e "$BLD$strarg$exitmsg$OFF"
 
-		[ $exitval -ne 0 ] && echo -e \
-			"Type$BLD '$ofile' -h$OFF for help."
+		[ $exitval -ne $EXIT_OK ] && echo -e "$usagestr"
 	fi
+
+	[ $exitval -eq $CTLC_EXIT ] && \
+		echo -e "$BLD${exitmsgary[$eximsgarysiz]}"$OFF
 
 	exit $exitval
 }
