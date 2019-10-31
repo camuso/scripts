@@ -12,6 +12,7 @@ declare b_gitrepo=true
 declare clonestr
 declare distro
 declare installagent
+declare installflags
 declare fetched=false
 
 echo "Installing environment on ..."
@@ -59,6 +60,7 @@ if [ -f /etc/os-release ]; then
 
 	if [[ "$distro" == "fedora" ]]; then
 		installagent=dnf
+		installflags="--allowerasing --best"
 	elif [[ "$distro" == "rhel" ]]; then
 		# Get the major version and strip off any leading double quotes
 		#
@@ -67,13 +69,20 @@ if [ -f /etc/os-release ]; then
 
 		# Determine the install agent based on the major version
 		#
-		[ $majversion -lt 8 ] && installagent="yum" || installagent="dnf"
+		if [ $majversion -lt 8 ]; then
+			installagent="yum"
+			installflags="--nogpgcheck --skip-broken"
+		else
+			installagent="dnf"
+			installflags="--allowerasing --best"
+		fi
 	fi
 
 else
-	echo "No /etc/os-release file. Assuming distro is RHEL."
+	echo "No /etc/os-release file. Assuming distro is RHEL less than 8."
 	distro="rhel"
 	installagent="yum"
+	installflags="--nogpgcheck --skip-broken"
 fi
 
 # ========================================================================
@@ -266,7 +275,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	# $installagent groupinstall -y 'X Window System' 'GNOME'
 
-	$installagent install -y --nogpgcheck --skip-broken \
+	$installagent install -y $installflags \
 	automake \
 	elfutils-libelf-devel \
 	gcc \
@@ -301,6 +310,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	vim \
 	vim-enhanced \
 	vim-filesystem \
+	2>&1 | tee -a $logfile
 
 	# orphaned packages
 	#
@@ -316,12 +326,12 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	cd /work/us
 
 	[ -d /work/us/netperf ] || {
-		git clone https://github.com/HewlettPackard/netperf.git
+		git clone https://github.com/HewlettPackard/netperf.git 2>&1 | tee -a $logfile
 		cd netperf
-		./autogen.sh
-		./configure
-		make
-		make install
+		./autogen.sh 2>&1 | tee -a $logfile
+		./configure 2>&1 | tee -a $logfile
+		make 2>&1 | tee -a $logfile
+		make install 2>&1 | tee -a $logfile
 	}
 
 	# If the caller passed a -g option, it means no git repo,
@@ -331,38 +341,38 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	cd /work/us
 	[ -d /work/us/linux ] || \
-		git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+		git clone \
+		git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+		2>&1 | tee -a $logfile
 
-	echo
+	echo 2>&1 | tee -a $logfile
+
 	cd /work/us/linux
+	rhrepo="rh$majversion"
+	git branch -r | grep $rhrepo
+	stat=$?
 
-	case $majversion in
-		"6" ) 	[ $(git branch | grep rh6) ] || {
-				git remote add rh6 git://git.app.eng.bos.redhat.com/rhel6.git
-				git fetch rh6
-				git checkout -b rh6 rh6/master
-				fetched=true
-			}
-			;;
-		"7" )	[ $(git branch | grep rh7) ] || {
-				git remote add rh7 git://git.app.eng.bos.redhat.com/rhel7.git
-				git fetch rh7
-				git checkout -b rh7 rh7/master
-				fetched=true
-			}
-			;;
-		"8" )	git config --global http.sslVerify false
-			[ $(git branch | grep 8.0) ] || {
-				git remote add rh8 https://code.engineering.redhat.com/gerrit/kernel-rhel
-				git fetch rh8
-				git checkout -b 800 rh8/rhel-8.0.0
-				git checkout -b 810 rh8/rhel-8.1.0
-				fetched=true
-			}
-			;;
-	esac
+	if [ $stat -eq 0 ]; then
+		echo "$rhrepo already added to tree" 2>&1 | tee -a $logfile
+	else
+		echo "Adding $rhrepo to tree" 2>&1 | tee -a $logfile
+		if [ $majversion == "8" ]; then
+			git remote add $rhrepo \
+				https://code.engineering.redhat.com/gerrit/kernel-rhel \
+				2>&1 | tee -a $logfile
+			git fetch $rhrepo
+			git checkout -b 820 $rhrepo/rhel-8.2.0 2>&1 | tee -a $logfile
+		else
+			git remote add $rhrepo \
+				git://git.app.eng.bos.redhat.com/rhel$majversion.git \
+				2>&1 | tee -a $logfile
+			git fetch $rhrepo
+			git checkout -b $rhrepo $rhrepo/master 2>&1 | tee -a $logfile
+		fi
+		fetched=true
+	fi
 
-	$fetched || git remote update
+	$fetched || git remote update 2>&1 | tee -a $logfile
 	cd
 fi
 
