@@ -13,6 +13,7 @@ function usage() {
 saved_entry=$(grub2-editenv list | grep "^saved_entry=" | awk -F "=" ' { print $2 }')
 
 grubvalue=0
+list=
 
 if [ $# -gt 1 ]; then
 	usage
@@ -35,7 +36,20 @@ value=-1
 # Oct 7 2018: The old pre-grub BLS call was
 # list=$(cat $GRUBFILE | grep 'menuentry ' | awk -F "'" ' { print $2 } ')
 # but 'grubby --info=ALL' appears to work on pre-grub2 BLS installations.
-list=$(grubby --info=ALL | grep "^title=" | awk -F "title=" ' { print $2 } ')
+#
+# Jan 8 2020
+# It's possible to have both a grub.cfg file and an entries directory.
+# Only use grubby when there is an entries directory
+[ -d /boot/loader/entries ] && \
+	list=$(grubby --info=ALL | grep "^title=" | awk -F "title=" ' { print $2 } ')
+
+# tboot still puts its entries in a submenu in grub.conf. If the file exists,
+# parse it for entries and add them to the ones obtained from grubby.
+grubconfigfile=$(find /boot -name grub.cfg)
+[ $grubconfigfile ] && {
+	grubconfiglist="$(grep "^menuentry" $grubconfigfile | cut -d "'" -f2)"
+	list="$(printf "%s\n%s\n" "$grubconfiglist" "$list" )"
+}
 
 echo "$list" | while read ENTRY
 do
@@ -50,10 +64,13 @@ do
 		# TODO: add an option to print the full entry?
 		echo $ENTRY | grep rescue >& /dev/null
 		if [ $? -ne 0 ]; then
-			ENTRY=$(echo $ENTRY | awk -F "(" ' {print $2} ')
-			ENTRY=$(echo $ENTRY | awk -F ")" ' {print $1} ')
-			# TODO: optionally output 'kernel'
-			#ENTRY="kernel $ENTRY"
+			echo $ENTRY | grep -i tboot >& /dev/null
+			if [ $? -ne 0 ]; then
+				ENTRY=$(echo $ENTRY | awk -F "(" ' {print $2} ')
+				ENTRY=$(echo $ENTRY | awk -F ")" ' {print $1} ')
+				# TODO: optionally output 'kernel'
+				#ENTRY="kernel $ENTRY"
+			fi
 		fi
 
 		[ "$NEXT" -eq "1" ] && [ "$DEFAULT" -eq "1" ] && echo "*D |$value  $ENTRY" && continue
