@@ -529,6 +529,7 @@ lookup_hash() {
 #                 tlines        - number of lines in the terminal window
 #                 tcols         - number of columns in the terminal window
 #                 qstr          - string with a boldfaced 'q'
+#                 ignore_str    - string of comment chars in commits log
 #       RETURNS:  none
 #===============================================================================
 set_next_cherrypick() {
