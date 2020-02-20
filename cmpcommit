@@ -1,0 +1,203 @@
+#!/bin/bash
+#
+# commitcmp
+#
+
+# Use unset in case these have been set elsewhere.
+unset BLD && declare BLD="[1m"
+unset UND && declare UND="[4m"
+unset OFF && declare OFF="[0m"
+
+# Contlol-C exit code
+# see http://www.tldp.org/LDP/abs/html/exitcodes.html
+unset CTLC_EXIT &&  declare -i CTLC_EXIT=130
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD commitcmp -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+
+declare -i optcount=0
+declare upstream	# file containing upstream commits
+declare rhel		# file containing rhel commits
+declare rhstr=		# string contents of upstream commits file
+declare upstr=		# string contents of rhel commits file
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [options] upstream rhel
+
+Compare the contents of a file all commits from a given commit or date
+in the upstream git repo with the contents of a file created by using
+extup from a given commit in the downstream repo.
+
+The idea is to find upstream commits in the list of proposed backports
+that have already been backported.
+
+NOTE:
+Requires the use of scripts gitnice and extup to create the file
+inputs for this script.
+
+Example:
+
+First create the log files ...
+$ gitnice -r -c -d 0ecfebd2b52404~1..HEAD drivers/char/ipmi > upstream.log
+$ extup -r RHEL-7.6..HEAD drivers/char/ipmi > rhel.log
+
+Then ...
+$(basename $0) upstream.log rhel.log
+
+Arguments:
+  upstream - upstream commits proposed for backporting as formatted by
+             gitnice -r -c -d
+             ------- ----------- ----------------------------
+             up-hash up-cmt-date description-string
+
+  rhel     - rhel commits mapped to upstream commits as formatted by extup -r
+             ------- ------- ----------- ----------------------
+             rh-hash up-hash up-cmt-date description-string
+
+Options:
+  -h  - help
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+# readvars - read the files into string variables
+readvars() {
+	local uptmp=$(< $upstream)
+	local rhtmp=$(< $rhel)
+	local tmp=
+	local up=
+	local rh=
+
+	while read up; do
+		printf -v upstr "%s%s\n" "$upstr" "${up:0:9}"
+	done <<< "$uptmp"
+
+	while read rh; do
+		echo "rh: $rh"
+		tmp=$(echo "$rh" | cut -d' ' -f2)
+		printf -v rhstr "%s%s\n" "$rhstr" "${tmp:0:9}"
+	done <<< "$rhtmp"
+	read
+}
+
+cmpstr() {
+	local upstr=$(< $upstream)
+	local rhstr=$(< $rhel)
+	local upnum=$(echo "$upstr" | wc -l)
+	local rhnum=$(echo "$rhstr" | wc -l)
+	local upcmt	# the upstream oneline git log in the upstream repo
+	local rhcmt	# the upstream commit in the rhel repo
+	local up	# one line from the upstream log
+	local rh	# one line from the rhel log
+	local tmp
+#set -x
+	[ $rhnum -gt $upnum ] && {
+		echo "rhnum: $rhnum -gt upnum: $upnum"
+		while read rh; do
+			echo "rh: $rh"
+			tmp=$(echo "$rh" | cut -d' ' -f2)
+			rhcmt="${tmp:0:9}"
+			while read up; do
+				upcmt="${up:0:9}"
+				[[ $rhcmt == $upcmt ]] && {
+					echo "$up"
+					break
+				}
+			done <<< "$upstr"
+		done <<< "$rhstr"
+	} || {
+		echo "upnum: $upnum -gt rhnum: $rhnum"
+		while read up; do
+			upcmt="${up:0:9}"
+			while read rh; do
+				tmp=$(echo "$rh" | cut -d' ' -f2)
+				rhcmt="${tmp:0:9}"
+				[[ $rhcmt == $upcmt ]] && {
+					echo "$up"
+					break
+				}
+			done <<< "$rhstr"
+		done <<< "$upstr"
+	}
+#set +x
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	while getopts h OPTION; do
+    	    case "$OPTION" in
+		h ) usage
+let ++optcount
+		    ;;
+		* ) echo "unrecognized option -$OPTION"
+		    echo -e "$usagestr"
+		    exit 127
+	    esac
+	done
+
+	shift $optcount
+	[ $# -eq 2 ] || exitme $EXIT_INVARG
+
+	upstream=$1
+	rhel=$2
+
+	# readvars
+	cmpstr
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
