@@ -62,6 +62,8 @@ pathspec="$2"
 
 [ $# -eq 2 ] || exitme
 
+# Create an array of hashes from the current (rhel) branch
+#
 blist=($(git log --oneline $rev --pretty=format:%h $commit_expr $pathspec))
 # echo -e "${blist[@]}"
 
@@ -84,8 +86,8 @@ for ((i=0; i < ${#blist[@]}; ++i)); do
 	fi
 
 	if $show_b; then
-		uc=$(echo $astr | cut -d' ' -f1)
-		as=$(echo $astr | cut -d' ' -f2-)
+		uc=$(echo $astr | cut -d' ' -f1)	# upstream cmt hash
+		as=$(echo $astr | cut -d' ' -f2-)	# upstream cmt date & desc
 		printf " %-9.9s %-9.9s %s\n" "${blist[$i]}" "$uc" "$as"
 	else
 		echo " $astr "
