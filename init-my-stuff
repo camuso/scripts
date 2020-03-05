@@ -360,8 +360,10 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 			git remote add $rhrepo \
 				https://code.engineering.redhat.com/gerrit/kernel-rhel \
 				2>&1 | tee -a $logfile
-			git fetch $rhrepo
+			git -c http.sslVerify=false fetch $rhrepo
+			git checkout -b 810 $rhrepo/rhel-8.1.0 2>&1 | tee -a $logfile
 			git checkout -b 820 $rhrepo/rhel-8.2.0 2>&1 | tee -a $logfile
+			git checkout -b 830 $rhrepo/rhel-8.3.0 2>&1 | tee -a $logfile
 		else
 			git remote add $rhrepo \
 				git://git.app.eng.bos.redhat.com/rhel$majversion.git \
