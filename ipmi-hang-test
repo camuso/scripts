@@ -27,17 +27,12 @@ __waitsecs() {
 
 set -e
 
-for i in $(seq 0 10); do
-	echo "Insert ipmi modules"
-	modprobe -v ipmi_msghandler
-	modprobe -v ipmi_si
-	modprobe -v ipmi_devintf
-	modprobe -v ipmi_watchdog
-	modprobe -v ipmi_poweroff
-	# modprobe -v power_meter
-	modprobe -v acpi_ipmi
-	__waitsecs 2
+modprobe -v ipmi_poweroff
+modprobe -v ipmi_watchdog
+modprobe -v acpi_ipmi
+# modprobe -v power_meter
 
+for i in $(seq 0 10); do
 	echo "Remove ipmi modules"
 	# modprobe -rv power_meter
 	modprobe -rv acpi_ipmi
@@ -45,7 +40,20 @@ for i in $(seq 0 10); do
 	modprobe -rv ipmi_watchdog
 	modprobe -rv ipmi_devintf
 	modprobe -rv ipmi_si
+	# modprobe -rv ipmi_ssif
 	modprobe -rv ipmi_msghandler
 	__waitsecs 2
+
+	echo "Insert ipmi modules"
+	modprobe -v ipmi_msghandler
+	modprobe -v ipmi_si
+	# modprobe -v ipmi_ssif
+	modprobe -v ipmi_devintf
+	modprobe -v ipmi_watchdog
+	modprobe -v ipmi_poweroff
+	# modprobe -v power_meter
+	modprobe -v acpi_ipmi
+	__waitsecs 2
+
 done
 echo "If you see this message, the test passed."
