@@ -54,7 +54,7 @@ usage() {
 # If output is to terminal, then do the special formatting.
 # Else, if being redirected, just plain output.
 #
-[ -t 1 ] && b_format=true || b_format=false
+# [ -t 1 ] && b_format=true || b_format=false
 
 # leading colon in options list tells the option parser to parse errors
 # silently, allowing the user to address parsing errors.
