@@ -1,5 +1,12 @@
 #!/bin/bash
 
+#
+# Text Attributes
+#
+unset BLD && declare BLD="\033[1m"
+unset UND && declare UND="\033[4m"
+unset OFF && declare OFF="\033[0m"
+
 declare rev=""
 declare -i optcount=0
 declare -a alist		# alternate (upstream) branch list
