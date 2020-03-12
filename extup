@@ -9,6 +9,7 @@ declare cmtdat=
 declare notupstream="---------"
 declare  invalidcmt="-badobj--"
 declare cmtline=
+declare scratchfile="/dev/mem/extup.tmp"
 declare usagestr=$(
 cat <<EOF
 
@@ -43,6 +44,59 @@ exitme() {
 	exit 0
 }
 
+# loop_range()
+#
+# Loop until user gives a number in the range defined by the args
+#
+# $1 - minimum
+# $2 - maximum
+# $3 - the value to be returned
+#
+loop_range() {
+	local min=$1
+	local max=$2
+	local number
+	local cmd
+	local pstr=\
+"$OFF\0Please enter a number between $BLD$min$OFF and $BLD$max$OFF: "
+
+	[ $max -lt 10 ] && cmd=promptgetchar || cmd=getuser
+	# echo "cmd: $cmd"
+
+	while true; do
+		$cmd "$pstr" number
+
+		if [[ $number =~ ^-?[0-9]+$ ]]  && \
+		   [[ $number -ge $min ]]       && \
+		   [[ $number -le $max ]]; then
+			eval $3=$number
+			echo
+			return 0
+		fi
+	done
+}
+
+choose_commit() {
+	local list="$1"
+	local line=
+	local index=0
+	local ary
+
+	echo "There is more than one commit in the git log"
+	list=$(sort -u <<< "$list")
+
+	while read line; do
+		ary[$index]="$line"
+		let ++index
+		printf "%d: %s\n" $index $line
+	done <<< "$list"
+
+	loop_range 1 $index index
+
+	let --index
+	echo "$ary[$index]"
+}
+
 while getopts :p:rb OPTION; do
     case "$OPTION" in
 
@@ -70,7 +124,11 @@ blist=($(git log --oneline $rev --pretty=format:%h $commit_expr $pathspec))
 
 for ((i=0; i < ${#blist[@]}; ++i)); do
 	log=$(git log -1 ${blist[$i]} | tail -n +2)
-	cmtline=$(echo "$log" | grep -n1 -i 'commit')
+	log="$(echo "$log" | sed -e 's/^ *//g')"	# trim all leading spaces
+	cmtline=$(echo "$log" | egrep '^commit')
+
+	[ $(echo "$cmtline" | wc -l) -gt 1 ] && cmtline=$(choose_commit "$cmtline")
+
 	alist[$i]=$(echo "$cmtline" | egrep -o "\b[0-9a-f]{40}\b")
 
 	if [ $? -eq 0 ]; then
