@@ -30,8 +30,6 @@ $(basename $0) [OPTIONS] directory commitspec -- pathspec
 
   git format-patch \\\
 
-	--no-renames \\\
-
 	--numbered \\\
 
 	--signoff \\\
@@ -81,7 +79,6 @@ echo -e "
 git format-patch \\
 	$cletter \\
 	$reroll  \\
-	--no-renames \\
 	--numbered \\
 	--signoff \\
 	--stat=80 \\
@@ -96,7 +93,6 @@ read -n1
 git format-patch \
 	"$cletter" \
 	"$reroll" \
-	--no-renames \
 	--numbered \
 	--signoff \
 	--stat=80 \
