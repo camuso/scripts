@@ -241,6 +241,9 @@ get_rcmurl()
 		"7" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo"
 			return 0
 			;;
+		"8" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo"
+			return 0
+			;;
 	esac
 
 	echo ""
@@ -255,6 +258,11 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	declare rcmurl=""
 	declare installagent""
 
+	# install the RH certs
+	# See: https://docs.engineering.redhat.com/display/RCMDOC/RCM+Tools+Release+Guide#RCMToolsReleaseGuide-Installredhat-internal-cert-installrpm
+	#
+	install-rhit-cert
+
 	# Get the additional repos according to distro
 	#
 	if [[ "$distro" == "fedora" ]]; then
@@ -263,17 +271,15 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 		 dnf install -y fedpkg
 
 	elif [[ "$distro" == "rhel" ]]; then
-
-		# Download and install the rhpkg package
-		#
-		rhpkgurl="http://download-node-02.eng.bos.redhat.com/rel-eng/dist-git/rhel/rhpkg.repo"
 		rcmurl="$(get_rcmurl $majversion)"
 	fi
 
-	#curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
+	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
 	#curl -L -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
 
 	# $installagent groupinstall -y 'X Window System' 'GNOME'
+
+	$installagent group install "Development Tools"
 
 	$installagent install -y $installflags \
 	automake \
@@ -284,6 +290,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	bc \
 	bind-utils \
 	bison \
+	brewkoji \
 	openssl-devel \
 	ncurses-devel \
 	rpm-build \
@@ -303,6 +310,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	mutt \
 	net-tools \
 	patchutils \
+	rhpkg \
 	rsync \
 	texinfo \
 	trousers \
@@ -315,10 +323,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	# orphaned packages
 	#
 	# koji \
-	# brewkoji \
 	# http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
 	# vim-powerline \
-	# rhpkg \
 	# krb5-auth-dialog \
 	# kmodtool \
 
