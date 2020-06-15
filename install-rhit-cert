@@ -1,0 +1,16 @@
+#!/usr/bin/bash
+
+# Get the Red Hat IT Root Certificate
+wget --no-check-certificate -P /etc/pki/ca-trust/source/anchors/ https://password.corp.redhat.com/RH-IT-Root-CA.crt
+ret=$?
+[ ${ret} -ne 0 ] && echo "access to RH IT Root Certificate failed (error ${ret})." && exit 1
+
+[ ! -e /etc/pki/ca-trust/source/anchors/RH-IT-Root-CA.crt ] && echo "RH IT Root Certificate not found? (error ${ret})" && exit 1
+
+update-ca-trust
+ret=$?
+[ ${ret} -ne 0 ] && echo "install of RH IT Root Certificate failed (error ${ret})." && exit 1
+
+# install the IPA LDAP redhat.com cert
+
+mkdir /etc/ipa && curl -o /etc/ipa/ca.crt https://password.corp.redhat.com/ipa.crt
