@@ -1,0 +1,9 @@
+#!/bin/bash
+#
+for ((count=33; count < 127; ++count)); do
+	hex=$(echo "ibase=10; obase=16; $count" | bc)
+	foo=$(xxd -r <<<"0 $hex")
+	[[ "$foo" == [[:punct:]] ]] && bar="$bar$foo"
+done
+
+echo "$bar"
