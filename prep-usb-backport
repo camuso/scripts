@@ -1,0 +1,254 @@
+#!/bin/bash
+#
+# prep-usb-backport
+#
+# NOTE:
+# Requires the use of scripts gitnice and extup to create the file
+# inputs for this script.
+
+
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+
+source $MYLIB/ui.source
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+
+declare -a exitmsgary=(
+""
+"Invalid number of arguments."
+" is an invalid filename."
+" is an invalid directory name."
+)
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD $(basename $0) -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+
+declare -i optcount=0
+declare uplog="upstream.log"
+declare dnlog="downstream.log"
+declare usblog="usb-backport.log"
+declare outdir=
+declare upcmt=
+declare dncmt=
+declare upbr=
+declare dnbr=
+declare subsys=
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) -uc upcmt -ub upbr -dc dncmt -db dnbr outdir
+  Creates a file of usb commits for backporting.
+
+Argument:
+  outdir    - The directory in which the log files are created
+
+Options:
+  -h          - this help text
+  -uc upcmt   - Upstream commit expression, e.g. 'v5.6..v5.7'. Creates
+                $uplog file in the outdir.
+  -dc dncmt   - RHEL commit expression, e.g. 'RHEL-8.3.0..HEAD'. Creates
+                $dnlog file in the outdir.
+  -ur uprepo  - Directory containing the uptream repo.
+  -db dnrepo  - Directory containing the RHEL repo.
+
+Example:
+  $(basename $0) \\\
+
+        -uc 'v5.7..v5.8' -ur upstream/repo/directory \\\
+
+        -dc 'RHEL-8.3.0..HEAD' -dr RHEL/directory \\\
+
+        backport/work/directory
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+# parseops() - parse the input options
+#
+# Needed multicharacter optionis, but didn't want to use longopts.
+#
+# Inputs: $@, the whole command line
+#
+# Globals:
+# 	optcount
+# 	upcmt
+# 	dncmt
+# 	upbr
+# 	dnbr
+# 	usagestr
+#
+parseops() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+	    if [ ${arg:0:1} == '-' ]; then
+		opt="${arg:1}"
+		case "$opt" in
+		    h  ) usage
+		         let ++optcount
+		         ;;
+		    uc ) shift
+			 upcmt="$1"
+			 shift
+		         optcount=$((optcount + 2))
+		         ;;
+		    ub ) shift
+			 upbr="$1"
+			 shift
+		         optcount=$((optcount + 2))
+		         ;;
+		    dc ) shift
+			 dncmt="$1"
+			 shift
+		         optcount=$((optcount + 2))
+		         ;;
+		    dr ) shift
+			 dnbr="$1"
+			 shift
+		         optcount=$((optcount + 2))
+		         ;;
+		    *  ) echo "unrecognized option -$1"
+		         echo -e "$usagestr"
+		         exit 127
+		esac
+	    fi
+	done
+}
+
+# test_args
+# cmpstr() - compare strings
+#    Compare the commits from the upstream and downstream commit logs
+#    to identify those the ones that have already been backported.
+#    Output all commit lines to the cherp.log file, marking the ones
+#    that werre already backported with a leading #
+#
+# GLOBALS
+#	usblog - output commits file
+#	uplog  - upstream commits file
+#	dnlog  - downstream commits file
+#	outdir - directory for all the commit log files
+#
+cmpstr() {
+	local uppath="$outdir/$uplog"
+	local dnpath="$outdir/$dnlog"
+	local chpath="$outdir/$usblog"
+	local upstr=$(< $uppath)
+	local rhstr=$(< $dnpath)
+	local up	# one line from the upstream log
+	local rh	# one line from the rhel log
+	local tmp
+	local b_match=false
+#set -x
+	> $chpath
+
+	while read up; do
+		upcmt="${up:0:9}"
+		while read rh; do
+			tmp=$(echo "$rh" | cut -d' ' -f2)
+			rhcmt="${tmp:0:9}"
+			[[ $rhcmt == $upcmt ]] && {
+				b_match=true
+				break
+			}
+		done <<< "$rhstr"
+		$b_match && echo "# $up" >> $chpath || echo "$up" >> $chpath
+		$b_match && echo "# $up" || echo "$up"
+		b_match=false
+	done <<< "$upstr"
+#set +x
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	parseops $@
+	[ $optcount -lt 10 ] && exitme $EXIT_INVARG
+
+	shift $optcount
+	subsys="$1"
+
+	ui_testdir "$outdir" outdir
+	echo
+
+	[ -f $outdir/$uplog ] && {
+		echo -e "$BLD$outdir/$uplog$OFF exists."
+		echo "You must delete it if you want to recreate it, or it will be used as is."
+	} || {
+		echo -e "Create upstream commit log  : $BLD$outdir/$uplog$OFF"
+	}
+
+	[ -f $outdir/$dnlog ] && {
+		echo -e "$BLD$outdir/$dnlog$OFF exists."
+		echo "You must delete it if you want to recreate it, or it will be used as is."
+	} || {
+		echo -e "Create downstream commit log: $BLD$outdir/$dnlog$OFF"
+	}
+	echo
+
+	printf "Upstream Branch: $BLD%-12s$OFF Downstream Branch: $BLD%-12s$OFF\n" $upbr $dnbr
+	printf "Upstream Commit: $BLD%-12s$OFF Downstream Commit: $BLD%-12s$OFF\n" $upcmt $dncmt
+
+	echo
+	echo -n "Press any key to proceed or CTRL-C to exit..."
+	read -n1
+
+	[ -f $outdir/$uplog ] || {
+		git checkout $upbr
+		gitnice -r -c -d $upcmt..HEAD $subsys > $outdir/$uplog
+	}
+	[ -f $outdir/$dnlog ] || {
+		git checkout $dnbr
+		extup -r $dncmt..HEAD $subsys > $outdir/$dnlog
+	}
+
+	cmpstr
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+
