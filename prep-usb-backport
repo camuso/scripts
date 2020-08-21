@@ -17,12 +17,24 @@ declare -i EXIT_OK=0
 declare -i EXIT_INVARG=1
 declare -i EXIT_INVFIL=2
 declare -i EXIT_INVDIR=3
+declare -i EXIT_NODIR=4
+declare -i EXIT_DIRNOTEXIST=5
+declare -i EXIT_UPCMT=6
+declare -i EXIT_RHCMT=7
+declare -i EXIT_UPDIR=8
+declare -i EXIT_RHDIR=9
 
 declare -a exitmsgary=(
 ""
-"Invalid number of arguments."
+"Invalid number of options."
 " is an invalid filename."
 " is an invalid directory name."
+"You must provide a directory for output."
+" directory does not exist."
+"You must provide an upstream commit expression with the -uc option."
+"You must provide a RHEL commit expression with the -rc option."
+"You must provide a valid upstream repo directory with the -ur option."
+"You must provied a valid RHEL repo directory with the -rr option."
 )
 
 exitme() {
@@ -58,19 +70,18 @@ Cleaning up and exiting.
 
 declare -i optcount=0
 declare uplog="upstream.log"
-declare dnlog="downstream.log"
+declare rhlog="rhel.log"
 declare usblog="usb-backport.log"
 declare outdir=
 declare upcmt=
-declare dncmt=
-declare upbr=
-declare dnbr=
-declare subsys=
+declare rhcmt=
+declare updir=
+declare rhdir=
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) -uc upcmt -ub upbr -dc dncmt -db dnbr outdir
+$(basename $0) -uc upcmt -ub updir -dc rhcmt -db rhdir outdir
   Creates a file of usb commits for backporting.
 
 Argument:
@@ -80,10 +91,10 @@ Options:
   -h          - this help text
   -uc upcmt   - Upstream commit expression, e.g. 'v5.6..v5.7'. Creates
                 $uplog file in the outdir.
-  -dc dncmt   - RHEL commit expression, e.g. 'RHEL-8.3.0..HEAD'. Creates
-                $dnlog file in the outdir.
-  -ur uprepo  - Directory containing the uptream repo.
-  -db dnrepo  - Directory containing the RHEL repo.
+  -rc rhcmt   - RHEL commit expression, e.g. 'RHEL-8.3.0..HEAD'. Creates
+                $rhlog file in the outdir.
+  -ud updir   - Directory containing the uptream repo.
+  -rd rhdir   - Directory containing the RHEL repo.
 
 Example:
   $(basename $0) \\\
@@ -112,9 +123,9 @@ usage() {
 # Globals:
 # 	optcount
 # 	upcmt
-# 	dncmt
-# 	upbr
-# 	dnbr
+# 	rhcmt
+# 	updir
+# 	rhdir
 # 	usagestr
 #
 parseops() {
@@ -133,18 +144,18 @@ parseops() {
 			 shift
 		         optcount=$((optcount + 2))
 		         ;;
-		    ub ) shift
-			 upbr="$1"
+		    ud ) shift
+			 updir="$1"
 			 shift
 		         optcount=$((optcount + 2))
 		         ;;
-		    dc ) shift
-			 dncmt="$1"
+		    rc ) shift
+			 rhcmt="$1"
 			 shift
 		         optcount=$((optcount + 2))
 		         ;;
-		    dr ) shift
-			 dnbr="$1"
+		    rd ) shift
+			 rhdir="$1"
 			 shift
 		         optcount=$((optcount + 2))
 		         ;;
@@ -156,7 +167,21 @@ parseops() {
 	done
 }
 
-# test_args
+# test_opts - test the correct number of args and options were submitted
+#
+# Two of the opts must point to legitimate git repos.
+# The other two must be valid commit expressions.
+#
+test_opts() {
+	[ -n "$upcmt" ] || exitme $EXIT_UPCMT
+	[ -n "$rhcmt" ] || exitme $EXIT_RHCMT
+	[ -d "$updir" ] || exitme $EXIT_NODIR
+	[ -d "$rhdir" ] || exitme $EXIT_NODIR
+	[ -d $updir/.git ] || exitme $EXIT_UPDIR
+	[ -d $rhdir/.git ] || exitme $EXIT_RHDIR
+}
+
+
 # cmpstr() - compare strings
 #    Compare the commits from the upstream and downstream commit logs
 #    to identify those the ones that have already been backported.
@@ -166,15 +191,15 @@ parseops() {
 # GLOBALS
 #	usblog - output commits file
 #	uplog  - upstream commits file
-#	dnlog  - downstream commits file
+#	rhlog  - downstream commits file
 #	outdir - directory for all the commit log files
 #
 cmpstr() {
 	local uppath="$outdir/$uplog"
-	local dnpath="$outdir/$dnlog"
+	local rhpath="$outdir/$rhlog"
 	local chpath="$outdir/$usblog"
 	local upstr=$(< $uppath)
-	local rhstr=$(< $dnpath)
+	local rhstr=$(< $rhpath)
 	local up	# one line from the upstream log
 	local rh	# one line from the rhel log
 	local tmp
@@ -204,11 +229,14 @@ main() {
         trap control_c SIGINT
 
 	parseops $@
-	[ $optcount -lt 10 ] && exitme $EXIT_INVARG
+	[ $optcount -lt 8 ] && exitme $EXIT_INVARG
+
+	test_opts
 
 	shift $optcount
-	subsys="$1"
+	outdir="$1"
 
+	[ -n "$outdir" ] || exitme $EXIT_NODIR
 	ui_testdir "$outdir" outdir
 	echo
 
@@ -216,31 +244,33 @@ main() {
 		echo -e "$BLD$outdir/$uplog$OFF exists."
 		echo "You must delete it if you want to recreate it, or it will be used as is."
 	} || {
-		echo -e "Create upstream commit log  : $BLD$outdir/$uplog$OFF"
+		echo -e "Creating upstream commit log  : $BLD$outdir/$uplog$OFF"
 	}
 
-	[ -f $outdir/$dnlog ] && {
-		echo -e "$BLD$outdir/$dnlog$OFF exists."
+	[ -f $outdir/$rhlog ] && {
+		echo -e "$BLD$outdir/$rhlog$OFF exists."
 		echo "You must delete it if you want to recreate it, or it will be used as is."
 	} || {
-		echo -e "Create downstream commit log: $BLD$outdir/$dnlog$OFF"
+		echo -e "Creating RHEL commit log: $BLD$outdir/$rhlog$OFF"
 	}
 	echo
 
-	printf "Upstream Branch: $BLD%-12s$OFF Downstream Branch: $BLD%-12s$OFF\n" $upbr $dnbr
-	printf "Upstream Commit: $BLD%-12s$OFF Downstream Commit: $BLD%-12s$OFF\n" $upcmt $dncmt
+	printf "Upstream Repo   : $BLD%-12s$OFF RHEL Repo   : $BLD%-12s$OFF\n" $updir $rhdir
+	printf "Upstream Commits: $BLD%-12s$OFF RHEL Commits: $BLD%-12s$OFF\n" $upcmt $rhcmt
 
 	echo
 	echo -n "Press any key to proceed or CTRL-C to exit..."
 	read -n1
 
+# TODO:
+#
 	[ -f $outdir/$uplog ] || {
-		git checkout $upbr
+		git checkout $updir
 		gitnice -r -c -d $upcmt..HEAD $subsys > $outdir/$uplog
 	}
-	[ -f $outdir/$dnlog ] || {
-		git checkout $dnbr
-		extup -r $dncmt..HEAD $subsys > $outdir/$dnlog
+	[ -f $outdir/$rhlog ] || {
+		git checkout $rhdir
+		extup -r $rhcmt..HEAD $subsys > $outdir/$rhlog
 	}
 
 	cmpstr
