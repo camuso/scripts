@@ -6,6 +6,39 @@
 # Requires the use of scripts gitnice and extup to create the file
 # inputs for this script.
 
+# GIT LOG COMMAND
+# ===============
+# This is the git log command to extract the upstream comimts
+declare gitlogcmd="git log --oneline --reverse --no-abbrev-commit --no-merges"
+
+# SUBSYTEM EXPRESSION
+# ===================
+# These are the directories that will be searched by the gitlogcmd
+declare subsys="\
+drivers/usb
+tools/usb
+tools/include/uapi/linux/*usb*
+include/linux/*usb*
+include/uapi/linux/*usb*
+Documentation/driver-api/usb
+Documentation/devicetree/bindings/usb/
+include/dt-bindings/usb
+drivers/net/usb
+drivers/net/can/usb
+drivers/media/usb
+include/uapi/linux/videodev2.h
+include/media/*usb*"
+
+declare -i optcount=0
+declare uplog="upstream.log"
+declare rhlog="rhel.log"
+declare usblog="usb-backport.log"
+declare outdir=
+declare upcmt=
+declare rhcmt=
+declare updir=
+declare rhdir=
+declare sybsys=
 
 declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
@@ -36,47 +69,6 @@ declare -a exitmsgary=(
 "You must provide a valid upstream repo directory with the -ur option."
 "You must provied a valid RHEL repo directory with the -rr option."
 )
-
-exitme() {
-	local exitval=$1
-	local strarg=""
-	local exitmsg
-
-	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
-		[ $# -eq 2 ] && strarg=$2
-		[ ${#exitmsgary[@]} -gt $exitval ] \
-			&& exitmsg="${exitmsgary[$exitval]}"
-
-		echo -e "$BLD$strarg$exitmsg$OFF"
-
-		[ $exitval -ne 0 ] && echo -e \
-			"Type$BLD $(basename $0) -h$OFF for help."
-	fi
-
-	exit $exitval
-}
-
-# run if user hits control-c
-#
-control_c()
-{
-	echo -en "
-Ctrl-c detected
-Cleaning up and exiting.
-"
-	exitme $CTLC_EXIT
-}
-
-
-declare -i optcount=0
-declare uplog="upstream.log"
-declare rhlog="rhel.log"
-declare usblog="usb-backport.log"
-declare outdir=
-declare upcmt=
-declare rhcmt=
-declare updir=
-declare rhdir=
 
 declare usagestr=$(
 cat <<EOF
@@ -113,6 +105,37 @@ usage() {
 	echo -en "$usagestr"
 	exitme 0
 }
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD $(basename $0) -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
 
 # parseops() - parse the input options
 #
@@ -167,7 +190,7 @@ parseops() {
 	done
 }
 
-# test_opts - test the correct number of args and options were submitted
+# test_opts - test the correct options were submitted
 #
 # Two of the opts must point to legitimate git repos.
 # The other two must be valid commit expressions.
@@ -198,8 +221,8 @@ cmpstr() {
 	local uppath="$outdir/$uplog"
 	local rhpath="$outdir/$rhlog"
 	local chpath="$outdir/$usblog"
-	local upstr=$(< $uppath)
-	local rhstr=$(< $rhpath)
+	local upstr=$(< $uppath)	# populate upstr with the contents of uppath
+	local rhstr=$(< $rhpath)	# populate rhstr with the contents of rhpath
 	local up	# one line from the upstream log
 	local rh	# one line from the rhel log
 	local tmp
@@ -224,13 +247,34 @@ cmpstr() {
 #set +x
 }
 
+# rewrite_log - check if user wants to rewrite existing logs
+#
+# $1 - path to log 
+rewrite_log() {
+	local logpath="$1"
+	local rewrite=false
+
+	[ -f "$logpath" ] && {
+		echo -e "$BLD$outdir/$uplog$OFF exists."
+		echo -e "If you choose ${BLD}NOT$OFF to recreate it, the script will exit."
+		getyn "Do you want to re-create it?" rewrite
+		$rewrite || exitme $EXIT_OK
+		echo
+	}
+}
+
+# mark_dups() - look for duplicate commits in the upstream
+#
+mark_dups() {
+	return 0
+}
+
 main() {
         # Trap for control-c
         trap control_c SIGINT
 
 	parseops $@
 	[ $optcount -lt 8 ] && exitme $EXIT_INVARG
-
 	test_opts
 
 	shift $optcount
@@ -240,39 +284,31 @@ main() {
 	ui_testdir "$outdir" outdir
 	echo
 
-	[ -f $outdir/$uplog ] && {
-		echo -e "$BLD$outdir/$uplog$OFF exists."
-		echo "You must delete it if you want to recreate it, or it will be used as is."
-	} || {
-		echo -e "Creating upstream commit log  : $BLD$outdir/$uplog$OFF"
-	}
+	outdir="$(realpath $outdir)"
+	rhdir="$(realpath $rhdir)"
+	updir="$(realpath $updir)"
 
-	[ -f $outdir/$rhlog ] && {
-		echo -e "$BLD$outdir/$rhlog$OFF exists."
-		echo "You must delete it if you want to recreate it, or it will be used as is."
-	} || {
-		echo -e "Creating RHEL commit log: $BLD$outdir/$rhlog$OFF"
-	}
-	echo
+	rewrite_log "$outdir/$uplog"
+	rewrite_log "$outdir/$rhlog"
 
-	printf "Upstream Repo   : $BLD%-12s$OFF RHEL Repo   : $BLD%-12s$OFF\n" $updir $rhdir
-	printf "Upstream Commits: $BLD%-12s$OFF RHEL Commits: $BLD%-12s$OFF\n" $upcmt $rhcmt
+	printf "Upstr Repo: $BLD%-12s$OFF Upstr Commits: $BLD%-12s$OFF\n" $updir $upcmt
+	printf " RHEL Repo: $BLD%-12s$OFF  RHEL Commits: $BLD%-12s$OFF\n" $rhdir $rhcmt
 
 	echo
 	echo -n "Press any key to proceed or CTRL-C to exit..."
 	read -n1
+set -x
+	# Create the upstream log of commits.
+	cd $updir
+	$gitlogcmd "$upcmt" "$subsys" > $outdir/$uplog
+	cd -
 
-# TODO:
-#
-	[ -f $outdir/$uplog ] || {
-		git checkout $updir
-		gitnice -r -c -d $upcmt..HEAD $subsys > $outdir/$uplog
-	}
-	[ -f $outdir/$rhlog ] || {
-		git checkout $rhdir
-		extup -r $rhcmt..HEAD $subsys > $outdir/$rhlog
-	}
-
+	# Create the RHEL log of upstream commits already backported
+	cd $rhdir
+	extup -r "$rhcmt" "$subsys" > $outdir/$rhlog
+	cd -
+set +x
+	# Look for commits that have already been backported.
 	cmpstr
 
 	exitme $EXIT_OK
