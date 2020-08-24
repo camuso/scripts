@@ -13,7 +13,11 @@ declare gitlogcmd="git log --oneline --reverse --no-abbrev-commit --no-merges"
 
 # SUBSYTEM EXPRESSION
 # ===================
-# These are the directories that will be searched by the gitlogcmd
+# These are the directories that will be searched by the gitlogcmd.
+# There is are backslashes in the string, so it must be expressed without
+# quotes, because the quotes will preserve the embedded linefeeds.
+# This simplifies the declaration by omitting the backslahes that would
+# otherwise be required at the end of every line.
 declare subsys="\
 drivers/usb
 tools/usb
@@ -33,6 +37,8 @@ declare -i optcount=0
 declare uplog="upstream.log"
 declare rhlog="rhel.log"
 declare usblog="usb-backport.log"
+declare donelog="already-done.log"
+declare duplog="upstream-dups.log"
 declare outdir=
 declare upcmt=
 declare rhcmt=
@@ -91,9 +97,9 @@ Options:
 Example:
   $(basename $0) \\\
 
-        -uc 'v5.7..v5.8' -ur upstream/repo/directory \\\
+        -uc 'v5.7..v5.8' -ud upstream/repo/directory \\\
 
-        -dc 'RHEL-8.3.0..HEAD' -dr RHEL/directory \\\
+        -rc 'RHEL-8.3.0..HEAD' -rd RHEL/repo/directory \\\
 
         backport/work/directory
 
@@ -135,7 +141,6 @@ Cleaning up and exiting.
 "
 	exitme $CTLC_EXIT
 }
-
 
 # parseops() - parse the input options
 #
@@ -198,58 +203,15 @@ parseops() {
 test_opts() {
 	[ -n "$upcmt" ] || exitme $EXIT_UPCMT
 	[ -n "$rhcmt" ] || exitme $EXIT_RHCMT
-	[ -d "$updir" ] || exitme $EXIT_NODIR
-	[ -d "$rhdir" ] || exitme $EXIT_NODIR
+	[ -d "$updir" ] || exitme $EXIT_UPDIR
+	[ -d "$rhdir" ] || exitme $EXIT_RHDIR
 	[ -d $updir/.git ] || exitme $EXIT_UPDIR
 	[ -d $rhdir/.git ] || exitme $EXIT_RHDIR
 }
 
-
-# cmpstr() - compare strings
-#    Compare the commits from the upstream and downstream commit logs
-#    to identify those the ones that have already been backported.
-#    Output all commit lines to the cherp.log file, marking the ones
-#    that werre already backported with a leading #
-#
-# GLOBALS
-#	usblog - output commits file
-#	uplog  - upstream commits file
-#	rhlog  - downstream commits file
-#	outdir - directory for all the commit log files
-#
-cmpstr() {
-	local uppath="$outdir/$uplog"
-	local rhpath="$outdir/$rhlog"
-	local chpath="$outdir/$usblog"
-	local upstr=$(< $uppath)	# populate upstr with the contents of uppath
-	local rhstr=$(< $rhpath)	# populate rhstr with the contents of rhpath
-	local up	# one line from the upstream log
-	local rh	# one line from the rhel log
-	local tmp
-	local b_match=false
-#set -x
-	> $chpath
-
-	while read up; do
-		upcmt="${up:0:9}"
-		while read rh; do
-			tmp=$(echo "$rh" | cut -d' ' -f2)
-			rhcmt="${tmp:0:9}"
-			[[ $rhcmt == $upcmt ]] && {
-				b_match=true
-				break
-			}
-		done <<< "$rhstr"
-		$b_match && echo "# $up" >> $chpath || echo "$up" >> $chpath
-		$b_match && echo "# $up" || echo "$up"
-		b_match=false
-	done <<< "$upstr"
-#set +x
-}
-
 # rewrite_log - check if user wants to rewrite existing logs
 #
-# $1 - path to log 
+# $1 - path to log
 rewrite_log() {
 	local logpath="$1"
 	local rewrite=false
@@ -263,13 +225,54 @@ rewrite_log() {
 	}
 }
 
+# mark_backported - mark upstream commits that have already been backported
+#
+# GLOBALS
+#   outdir - directory containing the log files
+#   uplog  - the upstream log file
+#   rhlog  - the RHEL log file
+#
+mark_backported() {
+	return 0
+}
+
 # mark_dups() - look for duplicate commits in the upstream
+#
+#   outdir - directory containing the log files
+#   uplog  - the upstream log file
+#   rhlog  - the RHEL log file
 #
 mark_dups() {
 	return 0
 }
 
+# create_log() - create the git log
+#
+# GLOBALS
+#   outdir    - directory for log files
+#   gitlogcmd - the command used to extract the logs
+#   subsys    - the string containing all the directories to be scanned
+#
+# ARGUMENTS
+#   $1 commit expression
+#   $2 directory of repo to log
+#   $3 name of log file
+#
+create_log() {
+	local cmtexp="$1"
+	local repod="$2"
+	local lognam="$3"
+	local mypid=
+
+	cd $repod /dev/null 2>&1
+	$gitlogcmd $cmtexp $subsys > $outdir/$lognam & mypid=$!
+	ui_waitonproc_tty $mypid .05 "Please wait while we create $outdir/$lognam"
+	cd - > /dev/null 2>&1
+}
+
 main() {
+	local mypid
+
         # Trap for control-c
         trap control_c SIGINT
 
@@ -293,23 +296,16 @@ main() {
 
 	printf "Upstr Repo: $BLD%-12s$OFF Upstr Commits: $BLD%-12s$OFF\n" $updir $upcmt
 	printf " RHEL Repo: $BLD%-12s$OFF  RHEL Commits: $BLD%-12s$OFF\n" $rhdir $rhcmt
+	ui_press_any_ctlc
 
-	echo
-	echo -n "Press any key to proceed or CTRL-C to exit..."
-	read -n1
-set -x
-	# Create the upstream log of commits.
-	cd $updir
-	$gitlogcmd "$upcmt" "$subsys" > $outdir/$uplog
-	cd -
+	create_log "$upcmt" "$updir" "$uplog"
+	create_log "$rhcmt" "$rhdir" "$rhlog"
 
-	# Create the RHEL log of upstream commits already backported
-	cd $rhdir
-	extup -r "$rhcmt" "$subsys" > $outdir/$rhlog
-	cd -
-set +x
-	# Look for commits that have already been backported.
-	cmpstr
+	# Mark commits that have already been backported with a leading hash
+	mark_backported
+
+	# Mark upstream commits that are duplicates with a leading hash
+	mark_dups
 
 	exitme $EXIT_OK
 }
