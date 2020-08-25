@@ -59,9 +59,7 @@ declare -i EXIT_INVDIR=3
 declare -i EXIT_NODIR=4
 declare -i EXIT_DIRNOTEXIST=5
 declare -i EXIT_UPCMT=6
-declare -i EXIT_RHCMT=7
-declare -i EXIT_UPDIR=8
-declare -i EXIT_RHDIR=9
+declare -i EXIT_UPDIR=7
 
 declare -a exitmsgary=(
 ""
@@ -71,9 +69,7 @@ declare -a exitmsgary=(
 "You must provide a directory for output."
 " directory does not exist."
 "You must provide an upstream commit expression with the -uc option."
-"You must provide a RHEL commit expression with the -rc option."
 "You must provide a valid upstream repo directory with the -ur option."
-"You must provied a valid RHEL repo directory with the -rr option."
 )
 
 declare usagestr=$(
@@ -89,17 +85,14 @@ Options:
   -h          - this help text
   -uc upcmt   - Upstream commit expression, e.g. 'v5.6..v5.7'. Creates
                 $uplog file in the outdir.
-  -rc rhcmt   - RHEL commit expression, e.g. 'RHEL-8.3.0..HEAD'. Creates
-                $rhlog file in the outdir.
   -ud updir   - Directory containing the uptream repo.
-  -rd rhdir   - Directory containing the RHEL repo.
 
 Example:
   $(basename $0) \\\
 
-        -uc 'v5.7..v5.8' -ud upstream/repo/directory \\\
+        -uc 'v5.7..v5.8' \\\
 
-        -rc 'RHEL-8.3.0..HEAD' -rd RHEL/repo/directory \\\
+	-ud upstream/repo/directory \\\
 
         backport/work/directory
 
@@ -177,16 +170,6 @@ parseops() {
 			 shift
 		         optcount=$((optcount + 2))
 		         ;;
-		    rc ) shift
-			 rhcmt="$1"
-			 shift
-		         optcount=$((optcount + 2))
-		         ;;
-		    rd ) shift
-			 rhdir="$1"
-			 shift
-		         optcount=$((optcount + 2))
-		         ;;
 		    *  ) echo "unrecognized option -$1"
 		         echo -e "$usagestr"
 		         exit 127
@@ -202,38 +185,25 @@ parseops() {
 #
 test_opts() {
 	[ -n "$upcmt" ] || exitme $EXIT_UPCMT
-	[ -n "$rhcmt" ] || exitme $EXIT_RHCMT
 	[ -d "$updir" ] || exitme $EXIT_UPDIR
-	[ -d "$rhdir" ] || exitme $EXIT_RHDIR
 	[ -d $updir/.git ] || exitme $EXIT_UPDIR
-	[ -d $rhdir/.git ] || exitme $EXIT_RHDIR
 }
 
 # rewrite_log - check if user wants to rewrite existing logs
 #
 # $1 - path to log
+# $2 - boolean return
+#
 rewrite_log() {
 	local logpath="$1"
 	local rewrite=false
 
 	[ -f "$logpath" ] && {
 		echo -e "$BLD$outdir/$uplog$OFF exists."
-		echo -e "If you choose ${BLD}NOT$OFF to recreate it, the script will exit."
 		getyn "Do you want to re-create it?" rewrite
-		$rewrite || exitme $EXIT_OK
 		echo
 	}
-}
-
-# mark_backported - mark upstream commits that have already been backported
-#
-# GLOBALS
-#   outdir - directory containing the log files
-#   uplog  - the upstream log file
-#   rhlog  - the RHEL log file
-#
-mark_backported() {
-	return 0
+	eval $2=$rewrite
 }
 
 # mark_dups() - look for duplicate commits in the upstream
@@ -243,6 +213,65 @@ mark_backported() {
 #   rhlog  - the RHEL log file
 #
 mark_dups() {
+	local eof5=false	# set when we detect end of file
+	local eof6=false
+	local line5
+	local line6
+	local line5ary
+	local line6ary
+	local tok5
+	local tok6
+	local savedIFS="$IFS"
+	local index=
+	local b_dup=false
+
+	> "$outdir/$duplog"
+	exec 5<"$outdir/$uplog"
+
+	IFS=
+	shopt -s nocasematch
+	until $eof5; do
+		read -r -u 5 line5 || eof5=true
+		ui_strtok "$line5" " $punctset" line5ary
+
+		echo "seeking dup of: $(echo $line5 | cut -d' ' -f2-)"
+		exec 6<"$outdir/$uplog"
+
+		until $eof6; do
+			read -r -u 6 line6 || eof6=true
+			[ "$line5" == "$line6" ] && continue
+			ui_strtok "$line6" " $punctset" line6ary
+			echo -n "              : $(echo $line6 | cut -d' ' -f2-)"
+
+			for ((index=2; index < ${#line5ary[@]}; ++index)); do
+				tok5="${line5ary[$index]}"
+				tok6="${line6ary[$index]}"
+
+				if [ "$tok5" == "$tok6" ]; then
+					b_dup=true
+					continue
+				else
+					b_dup=false
+					break
+				fi
+			done
+
+			ui_clearline
+
+			if $b_dup; then
+				echo "$line5" | tee -a $outdir/$duplog
+				echo "$line6" | tee -a $outdir/$duplog
+				echo | tee -a $outdir/$duplog
+			fi
+		done
+		exec 6<&-
+		eof6=false
+		ui_clearline
+	done
+
+	exec 5<&-
+	shopt -u nocasematch
+	IFS=$savedIFS
 	return 0
 }
 
@@ -264,20 +293,21 @@ create_log() {
 	local lognam="$3"
 	local mypid=
 
-	cd $repod /dev/null 2>&1
+	cd $repod > /dev/null 2>&1
 	$gitlogcmd $cmtexp $subsys > $outdir/$lognam & mypid=$!
 	ui_waitonproc_tty $mypid .05 "Please wait while we create $outdir/$lognam"
 	cd - > /dev/null 2>&1
 }
 
 main() {
-	local mypid
+	local b_uplog=true
+	local b_rhlog=true
 
         # Trap for control-c
         trap control_c SIGINT
 
 	parseops $@
-	[ $optcount -lt 8 ] && exitme $EXIT_INVARG
+	[ $optcount -lt 4 ] && exitme $EXIT_INVARG
 	test_opts
 
 	shift $optcount
@@ -288,21 +318,14 @@ main() {
 	echo
 
 	outdir="$(realpath $outdir)"
-	rhdir="$(realpath $rhdir)"
 	updir="$(realpath $updir)"
 
-	rewrite_log "$outdir/$uplog"
-	rewrite_log "$outdir/$rhlog"
+	rewrite_log "$outdir/$uplog" b_uplog
 
 	printf "Upstr Repo: $BLD%-12s$OFF Upstr Commits: $BLD%-12s$OFF\n" $updir $upcmt
-	printf " RHEL Repo: $BLD%-12s$OFF  RHEL Commits: $BLD%-12s$OFF\n" $rhdir $rhcmt
 	ui_press_any_ctlc
 
-	create_log "$upcmt" "$updir" "$uplog"
-	create_log "$rhcmt" "$rhdir" "$rhlog"
-
-	# Mark commits that have already been backported with a leading hash
-	mark_backported
+	$b_uplog && create_log "$upcmt" "$updir" "$uplog"
 
 	# Mark upstream commits that are duplicates with a leading hash
 	mark_dups
