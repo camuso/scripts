@@ -13,11 +13,12 @@ declare gitlogcmd="git log --oneline --reverse --no-abbrev-commit --no-merges"
 
 # SUBSYTEM EXPRESSION
 # ===================
-# These are the directories that will be searched by the gitlogcmd.
-# There is are backslashes in the string, so it must be expressed without
-# quotes, because the quotes will preserve the embedded linefeeds.
-# This simplifies the declaration by omitting the backslahes that would
-# otherwise be required at the end of every line.
+
+# These are the directories that will be searched by the gitlogcmd. The
+# string is declared withouth backslashes on every line, so it must be
+# used without surrounding quotes. Surrounding quotes would preserve the
+# embedded linefeeds and confound the git log command.
+
 declare subsys="\
 drivers/usb
 tools/usb
@@ -35,16 +36,12 @@ include/media/*usb*"
 
 declare -i optcount=0
 declare uplog="upstream.log"
-declare rhlog="rhel.log"
 declare usblog="usb-backport.log"
 declare donelog="already-done.log"
 declare duplog="upstream-dups.log"
 declare outdir=
 declare upcmt=
-declare rhcmt=
 declare updir=
-declare rhdir=
-declare sybsys=
 
 declare MYDIR=$(dirname $(which $(basename $0)))
 declare MYLIB=$MYDIR/lib
@@ -69,13 +66,13 @@ declare -a exitmsgary=(
 "You must provide a directory for output."
 " directory does not exist."
 "You must provide an upstream commit expression with the -uc option."
-"You must provide a valid upstream repo directory with the -ur option."
+"You must provide a valid upstream repo directory with the -ud option."
 )
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) -uc upcmt -ub updir -dc rhcmt -db rhdir outdir
+$(basename $0) -uc upcmt -ub updir outdir
   Creates a file of usb commits for backporting.
 
 Argument:
@@ -144,9 +141,7 @@ Cleaning up and exiting.
 # Globals:
 # 	optcount
 # 	upcmt
-# 	rhcmt
 # 	updir
-# 	rhdir
 # 	usagestr
 #
 parseops() {
@@ -220,27 +215,26 @@ mark_dups() {
 	local lineB
 	local lineAsum
 	local lineBsum
-	local lineAary
-	local lineBary
-	local tokA
-	local tokB
 	local lincnt=$(cat $outdir/$uplog | wc -l)
+	local cmtary
 	local b_dup=false
 
 	> "$outdir/$duplog"
 
-	IFS=
+	IFS=$'\n'	# the $ says keep going until you find a newline
 	shopt -s nocasematch
+	shopt -s extglob
+	cmtary=($(< $outdir/$uplog))
 
-	for ((idxA = 1; idxA <= lincnt; ++idxA)); do
+	for ((idxA = 0; idxA < lincnt; ++idxA)); do
 
-		lineA=$(ui_readline_raw $idxA "$outdir/$uplog")
+		lineA="${cmtary[$idxA]}"
 		lineAsum="$(echo $lineA | cut -d' ' -f2-)"
 		echo "seeking dup of: $lineAsum"
 
 		for ((idxB = $idxA+1; idxB < lincnt; ++idxB)); do
 
-			lineB=$(ui_readline_raw $idxB "$outdir/$uplog")
+			lineB="${cmtary[$idxB]}"
 			lineBsum="$(echo $lineB | cut -d' ' -f2-)"
 
 			if [ "$lineAsum" == "$lineBsum" ]; then
@@ -250,10 +244,10 @@ mark_dups() {
 				break
 			fi
 		done
-		ui_clearline
 	done
 
 	shopt -u nocasematch
+	shopt -u extglob
 	IFS=$savedIFS
 	return 0
 }
@@ -284,7 +278,6 @@ create_log() {
 
 main() {
 	local b_uplog=true
-	local b_rhlog=true
 
         # Trap for control-c
         trap control_c SIGINT
