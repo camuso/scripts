@@ -203,6 +203,7 @@ rewrite_log() {
 
 # mark_dups() - look for duplicate commits in the upstream
 #
+# GLOBALS
 #   outdir - directory containing the log files
 #   uplog  - the upstream log file
 #
@@ -217,7 +218,7 @@ mark_dups() {
 	local lineBsum
 	local lincnt=$(cat $outdir/$uplog | wc -l)
 	local cmtary
-	local b_dup=false
+	local duplinenum
 
 	> "$outdir/$duplog"
 
@@ -241,6 +242,8 @@ mark_dups() {
 				echo "$lineA" | tee -a $outdir/$duplog
 				echo "$lineB" | tee -a $outdir/$duplog
 				echo | tee -a $outdir/$duplog
+				duplinenum=$((idxB + 1))
+				sed -i "${duplinenumber}s /.*/# ${lineB}/" $outdir/$uplog
 				break
 			fi
 		done
