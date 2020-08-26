@@ -1,0 +1,339 @@
+#!/bin/bash
+#
+# prep-usb-backport
+#
+# NOTE:
+# Requires the use of scripts gitnice and extup to create the file
+# inputs for this script.
+
+# GIT LOG COMMAND
+# ===============
+# This is the git log command to extract the upstream comimts
+declare gitlogcmd="git log --oneline --reverse --no-abbrev-commit --no-merges"
+
+# SUBSYTEM EXPRESSION
+# ===================
+# These are the directories that will be searched by the gitlogcmd.
+# There is are backslashes in the string, so it must be expressed without
+# quotes, because the quotes will preserve the embedded linefeeds.
+# This simplifies the declaration by omitting the backslahes that would
+# otherwise be required at the end of every line.
+declare subsys="\
+drivers/usb
+tools/usb
+tools/include/uapi/linux/*usb*
+include/linux/*usb*
+include/uapi/linux/*usb*
+Documentation/driver-api/usb
+Documentation/devicetree/bindings/usb/
+include/dt-bindings/usb
+drivers/net/usb
+drivers/net/can/usb
+drivers/media/usb
+include/uapi/linux/videodev2.h
+include/media/*usb*"
+
+declare -i optcount=0
+declare uplog="upstream.log"
+declare rhlog="rhel.log"
+declare usblog="usb-backport.log"
+declare donelog="already-done.log"
+declare duplog="upstream-dups.log"
+declare outdir=
+declare upcmt=
+declare rhcmt=
+declare updir=
+declare rhdir=
+declare sybsys=
+
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+
+source $MYLIB/ui.source
+
+# Other exit codes
+declare -i EXIT_OK=0
+declare -i EXIT_INVARG=1
+declare -i EXIT_INVFIL=2
+declare -i EXIT_INVDIR=3
+declare -i EXIT_NODIR=4
+declare -i EXIT_DIRNOTEXIST=5
+declare -i EXIT_UPCMT=6
+declare -i EXIT_UPDIR=7
+
+declare -a exitmsgary=(
+""
+"Invalid number of options."
+" is an invalid filename."
+" is an invalid directory name."
+"You must provide a directory for output."
+" directory does not exist."
+"You must provide an upstream commit expression with the -uc option."
+"You must provide a valid upstream repo directory with the -ur option."
+)
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) -uc upcmt -ub updir -dc rhcmt -db rhdir outdir
+  Creates a file of usb commits for backporting.
+
+Argument:
+  outdir    - The directory in which the log files are created
+
+Options:
+  -h          - this help text
+  -uc upcmt   - Upstream commit expression, e.g. 'v5.6..v5.7'. Creates
+                $uplog file in the outdir.
+  -ud updir   - Directory containing the uptream repo.
+
+Example:
+  $(basename $0) \\\
+
+        -uc 'v5.7..v5.8' \\\
+
+	-ud upstream/repo/directory \\\
+
+        backport/work/directory
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exitme 0
+}
+
+exitme() {
+	local exitval=$1
+	local strarg=""
+	local exitmsg
+
+	if ([ $exitval -ne $EXIT_OK ] && [ $exitval -ne $CTLC_EXIT ]); then
+		[ $# -eq 2 ] && strarg=$2
+		[ ${#exitmsgary[@]} -gt $exitval ] \
+			&& exitmsg="${exitmsgary[$exitval]}"
+
+		echo -e "$BLD$strarg$exitmsg$OFF"
+
+		[ $exitval -ne 0 ] && echo -e \
+			"Type$BLD $(basename $0) -h$OFF for help."
+	fi
+
+	exit $exitval
+}
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "
+Ctrl-c detected
+Cleaning up and exiting.
+"
+	exitme $CTLC_EXIT
+}
+
+# parseops() - parse the input options
+#
+# Needed multicharacter optionis, but didn't want to use longopts.
+#
+# Inputs: $@, the whole command line
+#
+# Globals:
+# 	optcount
+# 	upcmt
+# 	rhcmt
+# 	updir
+# 	rhdir
+# 	usagestr
+#
+parseops() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+	    if [ ${arg:0:1} == '-' ]; then
+		opt="${arg:1}"
+		case "$opt" in
+		    h  ) usage
+		         let ++optcount
+		         ;;
+		    uc ) shift
+			 upcmt="$1"
+			 shift
+		         optcount=$((optcount + 2))
+		         ;;
+		    ud ) shift
+			 updir="$1"
+			 shift
+		         optcount=$((optcount + 2))
+		         ;;
+		    *  ) echo "unrecognized option -$1"
+		         echo -e "$usagestr"
+		         exit 127
+		esac
+	    fi
+	done
+}
+
+# test_opts - test the correct options were submitted
+#
+# Two of the opts must point to legitimate git repos.
+# The other two must be valid commit expressions.
+#
+test_opts() {
+	[ -n "$upcmt" ] || exitme $EXIT_UPCMT
+	[ -d "$updir" ] || exitme $EXIT_UPDIR
+	[ -d $updir/.git ] || exitme $EXIT_UPDIR
+}
+
+# rewrite_log - check if user wants to rewrite existing logs
+#
+# $1 - path to log
+# $2 - boolean return
+#
+rewrite_log() {
+	local logpath="$1"
+	local rewrite=false
+
+	[ -f "$logpath" ] && {
+		echo -e "$BLD$outdir/$uplog$OFF exists."
+		getyn "Do you want to re-create it?" rewrite
+		echo
+	}
+	eval $2=$rewrite
+}
+
+# mark_dups() - look for duplicate commits in the upstream
+#
+#   outdir - directory containing the log files
+#   uplog  - the upstream log file
+#   rhlog  - the RHEL log file
+#
+mark_dups() {
+	local eof5=false	# set when we detect end of file
+	local eof6=false
+	local line5
+	local line6
+	local line5ary
+	local line6ary
+	local tok5
+	local tok6
+	local savedIFS="$IFS"
+	local index=
+	local b_dup=false
+
+	> "$outdir/$duplog"
+	exec 5<"$outdir/$uplog"
+
+	IFS=
+	shopt -s nocasematch
+	until $eof5; do
+		read -r -u 5 line5 || eof5=true
+		ui_strtok "$line5" " $punctset" line5ary
+
+		echo "seeking dup of: $(echo $line5 | cut -d' ' -f2-)"
+		exec 6<"$outdir/$uplog"
+
+		until $eof6; do
+			read -r -u 6 line6 || eof6=true
+			[ "$line5" == "$line6" ] && continue
+			ui_strtok "$line6" " $punctset" line6ary
+			echo -n "              : $(echo $line6 | cut -d' ' -f2-)"
+
+			for ((index=2; index < ${#line5ary[@]}; ++index)); do
+				tok5="${line5ary[$index]}"
+				tok6="${line6ary[$index]}"
+
+				if [ "$tok5" == "$tok6" ]; then
+					b_dup=true
+					continue
+				else
+					b_dup=false
+					break
+				fi
+			done
+
+			ui_clearline
+
+			if $b_dup; then
+				echo "$line5" | tee -a $outdir/$duplog
+				echo "$line6" | tee -a $outdir/$duplog
+				echo | tee -a $outdir/$duplog
+			fi
+		done
+		exec 6<&-
+		eof6=false
+		ui_clearline
+	done
+
+	exec 5<&-
+	shopt -u nocasematch
+	IFS=$savedIFS
+	return 0
+}
+
+# create_log() - create the git log
+#
+# GLOBALS
+#   outdir    - directory for log files
+#   gitlogcmd - the command used to extract the logs
+#   subsys    - the string containing all the directories to be scanned
+#
+# ARGUMENTS
+#   $1 commit expression
+#   $2 directory of repo to log
+#   $3 name of log file
+#
+create_log() {
+	local cmtexp="$1"
+	local repod="$2"
+	local lognam="$3"
+	local mypid=
+
+	cd $repod > /dev/null 2>&1
+	$gitlogcmd $cmtexp $subsys > $outdir/$lognam & mypid=$!
+	ui_waitonproc_tty $mypid .05 "Please wait while we create $outdir/$lognam"
+	cd - > /dev/null 2>&1
+}
+
+main() {
+	local b_uplog=true
+	local b_rhlog=true
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	parseops $@
+	[ $optcount -lt 4 ] && exitme $EXIT_INVARG
+	test_opts
+
+	shift $optcount
+	outdir="$1"
+
+	[ -n "$outdir" ] || exitme $EXIT_NODIR
+	ui_testdir "$outdir" outdir
+	echo
+
+	outdir="$(realpath $outdir)"
+	updir="$(realpath $updir)"
+
+	rewrite_log "$outdir/$uplog" b_uplog
+
+	printf "Upstr Repo: $BLD%-12s$OFF Upstr Commits: $BLD%-12s$OFF\n" $updir $upcmt
+	ui_press_any_ctlc
+
+	$b_uplog && create_log "$upcmt" "$updir" "$uplog"
+
+	# Mark upstream commits that are duplicates with a leading hash
+	mark_dups
+
+	exitme $EXIT_OK
+}
+
+main $@
+
+exitme $EXIT_OK
+

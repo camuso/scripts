@@ -191,7 +191,7 @@ ui_waitonproc_tty () {
 
     # Leave the TTY as it was before we were called.
     #
-    ui_clearline "$txt"
+    ui_clearline
 }
 
 # ui_sh_backout
@@ -661,10 +661,44 @@ function ui_catoneline {
 # Returns 1 if the line number exceeds the number of lines in the file.
 #
 function ui_replaceline {
+	local stat
+	local line
+	local new_content
+
 	[ $# -ne 3 ] && return $ui_err_invargc
 	check_lineargs $1 $3
 	stat=$?
 	[ $stat -ne 0 ] && return $stat
+
+	awk -v line=$1 -v new_content="$2" '{
+		if (NR == line) {
+			print new_content;
+		} else {
+			print $0;
+		}
+	}' $3 > __temp__file__
+	mv __temp__file__ "$3"
+	return 0
+}
+
+# ui_replaceline_raw
+#
+# Replaces one line in a file, using only the line number instead of
+# pattern matching.
+#
+# NOTE:
+#  This "raw" version does not check arguments for integrity, so you
+#  must be sure that you have valid arguments, or enjoy indeterminate
+#  results.
+#
+# $1 - Line number
+# $2 - Text to write over the existing text in the line
+# $3 - File
+#
+# Returns 1 if the line number exceeds the number of lines in the file.
+#
+function ui_replaceline_raw {
+	local line
 
 	awk -v line=$1 -v new_content="$2" '{
 		if (NR == line) {
@@ -692,6 +726,7 @@ check_lineargs() {
 
 	lines=$(cat "$file" | wc -l)
 	((number > lines)) && return $ui_err_invlinec
+	((number == 0)) && return $ui_err_invlinec
 	return 0
 }
 
@@ -726,6 +761,29 @@ function ui_readline {
 	return 0
 }
 
+# ui_readline_raw
+# Reads one line in a file given the line number.
+# $1 - line number
+# $2 - file to read
+#
+# Always returns 0, so you'd better know what you're doing
+# when you use this. There are no input consistency checks.
+#
+# call: line=$(ui_readline line file)
+#
+# The line of text will be echoed to stdout
+#
+function ui_readline_raw {
+	local __line__
+
+	awk -v __line__="$1" '{
+		if (NR == __line__) {
+			print $0;
+		}
+	}' $2
+	return 0
+}
+
 # ui_insertline
 # Insert a line into a file at the given line number.
 # If the line number is greater than the number of lines in the file,
@@ -736,7 +794,7 @@ function ui_readline {
 # $3 - file
 #
 function ui_insertline {
-	lc=$(cat $3 | wc -l)
+	local lc=$(cat $3 | wc -l)
 
 	[ $# -eq 3 ] || return $ui_err_invargc
 
@@ -996,3 +1054,8 @@ ui_press_any() {
 	read -n1
 }
 
+ui_press_any_ctlc() {
+	echo -n "Press any key to continue or Ctl-C to exit ..."
+	read -n1
+	echo
+}

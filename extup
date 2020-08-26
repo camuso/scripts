@@ -3,9 +3,10 @@
 #
 # Text Attributes
 #
-unset BLD && declare BLD="\033[1m"
-unset UND && declare UND="\033[4m"
-unset OFF && declare OFF="\033[0m"
+declare MYDIR=$(dirname $(which $(basename $0)))
+declare MYLIB=$MYDIR/lib
+
+source $MYLIB/ui.source
 
 declare rev=""
 declare -i optcount=0
