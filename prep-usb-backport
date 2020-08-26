@@ -237,43 +237,17 @@ mark_dups() {
 		lineA=$(ui_readline_raw $idxA "$outdir/$uplog")
 		lineAsum="$(echo $lineA | cut -d' ' -f2-)"
 		echo "seeking dup of: $lineAsum"
-		ui_strtok "$lineA" " $punctset" lineAary
 
 		for ((idxB = $idxA+1; idxB < lincnt; ++idxB)); do
 
 			lineB=$(ui_readline_raw $idxB "$outdir/$uplog")
 			lineBsum="$(echo $lineB | cut -d' ' -f2-)"
-			echo -n "              : $lineBsum"
 
 			if [ "$lineAsum" == "$lineBsum" ]; then
 				echo "$lineA" | tee -a $outdir/$duplog
 				echo "$lineB" | tee -a $outdir/$duplog
 				echo | tee -a $outdir/$duplog
 				break
-			fi
-
-			ui_strtok "$lineB" " $punctset" lineBary
-
-			for ((index=2; index < ${#lineAary[@]}; ++index)); do
-
-				tokA="${lineAary[$index]}"
-				tokB="${lineBary[$index]}"
-
-				if [ "$tokA" == "$tokB" ]; then
-					b_dup=true
-					continue
-				else
-					b_dup=false
-					break
-				fi
-			done
-
-			ui_clearline
-
-			if $b_dup; then
-				echo "$lineA" | tee -a $outdir/$duplog
-				echo "$lineB" | tee -a $outdir/$duplog
-				echo | tee -a $outdir/$duplog
 			fi
 		done
 		ui_clearline
