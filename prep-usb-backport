@@ -243,6 +243,7 @@ mark_dups() {
 
 			b_print=false
 			pindex=0
+			printary=()
 
 			for ((idxB = 1; idxB < duparysiz; ++idxB)); do
 				duplinenum=$(echo "${dupary[$idxB]}" | cut -d':' -f1)
@@ -266,11 +267,11 @@ mark_dups() {
 
 				# Since we are using ? as a sed delimiter,
 				# replace any ? in the line with _
-				lineB="$(echo "$lineB" | tr ? _)"
+				lineB="$(echo "$lineB" | tr '?' '_')"
 				sed -i "${duplinenum}s?.*?# ${lineB}?" $outdir/$uplog
 			done
 
-			if $b_print; then
+			if $b_print && [ -n "${printary[0]}" ]; then
 				printary=("${dupary[0]}" "${printary[@]}")
 				for ((idxB = 0; idxB < duparysiz; ++idxB)); do
 					echo "${printary[$idxB]}" | tee -a $outdir/$duplog
@@ -331,7 +332,7 @@ main() {
 	outdir="$(realpath $outdir)"
 	updir="$(realpath $updir)"
 
-	rewrite_log "$outdir/$uplog" b_uplog
+	# rewrite_log "$outdir/$uplog" b_uplog
 
 	printf "Upstr Repo: $BLD%-12s$OFF Upstr Commits: $BLD%-12s$OFF\n" $updir $upcmt
 	ui_press_any_ctlc
