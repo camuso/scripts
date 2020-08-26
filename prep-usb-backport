@@ -210,44 +210,56 @@ rewrite_log() {
 #
 #   outdir - directory containing the log files
 #   uplog  - the upstream log file
-#   rhlog  - the RHEL log file
 #
 mark_dups() {
-	local eof5=false	# set when we detect end of file
-	local eof6=false
-	local line5
-	local line6
-	local line5ary
-	local line6ary
-	local tok5
-	local tok6
 	local savedIFS="$IFS"
 	local index=
+	local idxA
+	local idxB
+	local lineA
+	local lineB
+	local lineAsum
+	local lineBsum
+	local lineAary
+	local lineBary
+	local tokA
+	local tokB
+	local lincnt=$(cat $outdir/$uplog | wc -l)
 	local b_dup=false
 
 	> "$outdir/$duplog"
-	exec 5<"$outdir/$uplog"
 
 	IFS=
 	shopt -s nocasematch
-	until $eof5; do
-		read -r -u 5 line5 || eof5=true
-		ui_strtok "$line5" " $punctset" line5ary
 
-		echo "seeking dup of: $(echo $line5 | cut -d' ' -f2-)"
-		exec 6<"$outdir/$uplog"
+	for ((idxA = 1; idxA <= lincnt; ++idxA)); do
 
-		until $eof6; do
-			read -r -u 6 line6 || eof6=true
-			[ "$line5" == "$line6" ] && continue
-			ui_strtok "$line6" " $punctset" line6ary
-			echo -n "              : $(echo $line6 | cut -d' ' -f2-)"
+		lineA=$(ui_readline_raw $idxA "$outdir/$uplog")
+		lineAsum="$(echo $lineA | cut -d' ' -f2-)"
+		echo "seeking dup of: $lineAsum"
+		ui_strtok "$lineA" " $punctset" lineAary
 
-			for ((index=2; index < ${#line5ary[@]}; ++index)); do
-				tok5="${line5ary[$index]}"
-				tok6="${line6ary[$index]}"
+		for ((idxB = $idxA+1; idxB < lincnt; ++idxB)); do
 
-				if [ "$tok5" == "$tok6" ]; then
+			lineB=$(ui_readline_raw $idxB "$outdir/$uplog")
+			lineBsum="$(echo $lineB | cut -d' ' -f2-)"
+			echo -n "              : $lineBsum"
+
+			if [ "$lineAsum" == "$lineBsum" ]; then
+				echo "$lineA" | tee -a $outdir/$duplog
+				echo "$lineB" | tee -a $outdir/$duplog
+				echo | tee -a $outdir/$duplog
+				break
+			fi
+
+			ui_strtok "$lineB" " $punctset" lineBary
+
+			for ((index=2; index < ${#lineAary[@]}; ++index)); do
+
+				tokA="${lineAary[$index]}"
+				tokB="${lineBary[$index]}"
+
+				if [ "$tokA" == "$tokB" ]; then
 					b_dup=true
 					continue
 				else
@@ -259,17 +271,14 @@ mark_dups() {
 			ui_clearline
 
 			if $b_dup; then
-				echo "$line5" | tee -a $outdir/$duplog
-				echo "$line6" | tee -a $outdir/$duplog
+				echo "$lineA" | tee -a $outdir/$duplog
+				echo "$lineB" | tee -a $outdir/$duplog
 				echo | tee -a $outdir/$duplog
 			fi
 		done
-		exec 6<&-
-		eof6=false
 		ui_clearline
 	done
 
-	exec 5<&-
 	shopt -u nocasematch
 	IFS=$savedIFS
 	return 0
