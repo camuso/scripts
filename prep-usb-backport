@@ -234,6 +234,10 @@ mark_dups() {
 	for ((idxA = 0; idxA < lincnt; ++idxA)); do
 
 		lineA="${cmtary[$idxA]}"
+
+		# If it's already been marked as a dup, skip it.
+		[ "${lineA:0:1}" == "#" ] && continue
+
 		lineAsum="$(echo "$lineA" | cut -d' ' -f2-)"
 		echo "seeking dup of: $lineAsum"
 		dupary=($(grep -n "$lineAsum" $outdir/$uplog))
@@ -269,22 +273,25 @@ mark_dups() {
 				# replace any ? in the line with _
 				lineB="$(echo "$lineB" | tr '?' '_')"
 				sed -i "${duplinenum}s?.*?# ${lineB}?" $outdir/$uplog
+
+				# Refresh the array with the new information.
+				cmtary=($(< $outdir/$uplog))
 			done
 
-			if $b_print && [ -n "${printary[0]}" ]; then
+			if $b_print; then
 				printary=("${dupary[0]}" "${printary[@]}")
 				for ((idxB = 0; idxB < duparysiz; ++idxB)); do
 					echo "${printary[$idxB]}" | tee -a $outdir/$duplog
 					b_print=false
 				done
-				echo | tee -a $outdir/$duplog
+				[ -n "${printary[1]}" ] && echo | tee -a $outdir/$duplog
 			fi
 		fi
 	done
 
 	shopt -u nocasematch
 	shopt -u extglob
-	IFS=$savedIFS
+	IFS="$savedIFS"
 	return 0
 }
 
