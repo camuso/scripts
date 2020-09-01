@@ -269,7 +269,7 @@ main() {
 	}
 	[ -f $outdir/$dnlog ] || {
 		git checkout $dnbr
-		extup -r $dncmt..HEAD $subsys > $outdir/$dnlog
+		extup -r "$dncmt..HEAD" "$subsys" > $outdir/$dnlog
 	}
 
 	cmpstr
