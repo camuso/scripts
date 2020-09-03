@@ -14,6 +14,7 @@ declare distro
 declare installagent
 declare installflags
 declare fetched=false
+declare majersion=
 
 echo "Installing environment on ..."
 hostname
@@ -121,12 +122,15 @@ for repo in $repolist; do
 		if [ -d "$repo"/.git ]; then
 			echo "Updating $repo" | tee -a "$logfile" 2>&1
 			cd $repo
+			git config pull.rebase false
 			git pull
 			cd -
 		else
 			echo "Converting directory $repo to git repo" | tee -a "$logfile" 2>&1
 			rm -rf $repo
 			$clonestr$repo.git $repo
+			cd $repo
+			git config pull.rebase false
 		fi
 	else
 		echo "Cloning $repo ..." | tee -a "$logfile" 2>&1
@@ -144,12 +148,15 @@ echo
 if [ -d bin/.git ]; then
 	cd bin
 	echo "Updating bin repo..." | tee -a "$logfile" 2>&1
+	git config pull.rebase false
 	git pull
 	cd -
 else
 	[ -e bin ] && rm -rf bin
 	echo "Creating bin repo..."  | tee -a "$logfile" 2>&1
 	${clonestr}scripts.git bin
+	cd bin
+	git config pull.rebase false
 fi
 
 # Copy etc and rc files out of their archive directories into their respective
@@ -229,11 +236,8 @@ echo
 # If we are running as root and install has been requested, then install
 # the development tools.
 #
-
 get_rcmurl()
 {
-	local majversion="$1"
-
 	case "$majversion" in
 		"6" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo"
 			return 0
@@ -252,6 +256,8 @@ get_rcmurl()
 
 get_certs()
 {
+	# If rcm tools are already installed, favor them over the downloaded ones.
+	#
 	local b_rcmsaved=false
 
 	if [ -f /etc/yum.repos.d/rcm-tools.repo ]; then
@@ -273,7 +279,6 @@ get_certs()
 
 if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
-	declare majversion
 	declare arch=$(uname -m)
 	declare rhpkgurl=""
 	declare rcmurl=""
@@ -288,7 +293,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	elif [[ "$distro" == "rhel" ]]; then
 		get_certs
-		rcmurl="$(get_rcmurl $majversion)"
+		rcmurl="$(get_rcmurl)"
 	fi
 
 	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
@@ -303,38 +308,39 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	elfutils-libelf-devel \
 	gcc \
 	gcc-c++ \
-	openssl \
 	bc \
 	bind-utils \
 	bison \
 	brewkoji \
-	openssl-devel \
-	ncurses-devel \
-	rpm-build \
-	git-email \
+	cmake \
 	cscope \
-	ipmitool \
-	OpenIPMI \
-	watchdog \
-	hostname \
-	kmod \
-	kmod-libs \
-	krb5-workstation \
-	krb5-libs \
+	elfutils-devel elfutils-libs elfutils-libelf \
 	elinks \
 	flex \
+	git-email \
+	hostname \
+	ipmitool \
+	kmod \
+	kmod-libs \
+	krb5-workstation krb5-libs \
+	libdwarf libdwarf-devel \
 	lynx \
+	make \
 	mutt \
+	ncurses ncurses-devel \
 	net-tools \
-	patchutils \
+	OpenIPMI \
+	openssl openssl-devel \
+	pahole \
+	patch patchutils \
 	rhpkg \
+	rpm-build \
 	rsync \
 	texinfo \
-	trousers \
-	trousers-devel \
-	vim \
-	vim-enhanced \
-	vim-filesystem \
+	trousers trousers-devel \
+	vim vim-enhanced vim-filesystem \
+	watchdog \
+	xz \
 	2>&1 | tee -a $logfile
 
 	# orphaned packages
