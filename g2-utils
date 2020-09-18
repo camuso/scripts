@@ -1,0 +1,1 @@
+rpm -qa | grep grub2 | while read g; do echo; echo $g; rpm -ql $g | grep bin; done
