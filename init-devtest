@@ -1,0 +1,5 @@
+git checkout 840
+git branch -D 840dt
+git checkout -b 840dt rh8/rhel-8.4.0-devtest
+git pull
+git branch
