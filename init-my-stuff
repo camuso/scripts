@@ -236,16 +236,19 @@ echo
 # If we are running as root and install has been requested, then install
 # the development tools.
 #
-get_rcmurl()
+get_rcmtools()
 {
 	case "$majversion" in
-		"6" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo"
+		"6" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
 			return 0
  			;;
-		"7" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo"
+		"7" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
 			return 0
 			;;
-		"8" ) echo "http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo"
+		"8" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			return 0
 			;;
 	esac
@@ -271,7 +274,7 @@ get_certs()
 	# install the RH certs
 	# See: https://docs.engineering.redhat.com/display/RCMDOC/RCM+Tools+Release+Guide#RCMToolsReleaseGuide-Installredhat-internal-cert-installrpm
 	#
-	install-rhit-cert
+	~/bin/install-rhit-cert
 
 	$b_rcmsaved && \
 		mv /etc/yum.repos.d/rcm-tools.repo.save /etc/yum.repos.d/rcm-tools.repo
@@ -280,30 +283,26 @@ get_certs()
 if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	declare arch=$(uname -m)
-	declare rhpkgurl=""
 	declare rcmurl=""
 	declare installagent""
 
 	# Get the additional repos according to distro
 	#
 	if [[ "$distro" == "fedora" ]]; then
-		rhpkgurl="http://download.devel.redhat.com/rel-eng/dist-git/fedora/rhpkg.repo"
-		rcmurl="http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo"
+		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo
 		dnf install -y fedpkg
 
 	elif [[ "$distro" == "rhel" ]]; then
 		get_certs
-		rcmurl="$(get_rcmurl)"
+		get_rcm_tools
 	fi
 
-	curl -L -o /etc/yum.repos.d/rcm-tools.repo "$rcmurl"
-	#curl -L -o /etc/yum.repos.d/rhpkg.repo "$rhpkgurl"
 
 	# $installagent groupinstall -y 'X Window System' 'GNOME'
 
 	$installagent group install "Development Tools"
 
-	$installagent install -y $installflags \
+	$installagent install --nogpgcheck -y $installflags \
 	automake \
 	elfutils-libelf-devel \
 	gcc \
@@ -312,8 +311,10 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	bind-utils \
 	bison \
 	brewkoji \
+	ca-certificates \
 	cmake \
 	cscope \
+	dwarves libdwarves1 \
 	elfutils-devel elfutils-libs elfutils-libelf \
 	elinks \
 	flex \
@@ -331,7 +332,6 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	net-tools \
 	OpenIPMI \
 	openssl openssl-devel \
-	pahole \
 	patch patchutils \
 	rhpkg \
 	rpm-build \
@@ -393,6 +393,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 			git checkout -b 810 $rhrepo/rhel-8.1.0 2>&1 | tee -a $logfile
 			git checkout -b 820 $rhrepo/rhel-8.2.0 2>&1 | tee -a $logfile
 			git checkout -b 830 $rhrepo/rhel-8.3.0 2>&1 | tee -a $logfile
+			git checkout -b 840 $rhrepo/rhel-8.4.0 2>&1 | tee -a $logfile
 		else
 			git remote add $rhrepo \
 				git://git.app.eng.bos.redhat.com/rhel$majversion.git \
