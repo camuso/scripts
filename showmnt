@@ -1,0 +1,54 @@
+#!/bin/bash
+#
+# showmnt
+
+unset BLD && declare BLD="\033[1m"
+unset UND && declare UND="\033[4m"
+unset OFF && declare OFF="\033[0m"
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Description:
+	Show only the mount names and their corresponing mount points.
+
+Arguments:
+	None
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+my_strtok() {
+	IFS="$2" read -r -a $3 <<< "$1"
+}
+
+main() {
+	local savedIFS="$IFS"
+	local -a mountarray=
+	local -a linetoks
+
+	IFS=$'\n'
+	mountarray=($(mount))
+	IFS="$savedIFS"
+
+	printf " %b%-30s%b %b\n" \
+		"$BLD$UND" "Mount Point" "$OFF" "$BLD$UND\0File System or Partition$OFF"
+
+	for ((i=0; i<${#mountarray[@]}; ++i)); do
+		my_strtok "${mountarray[i]}" ' ' linetoks
+		printf " %-30s %s\n" ${linetoks[2]} ${linetoks[0]}
+	done
+}
+
+main $@
+
+exit 0
+
