@@ -56,8 +56,10 @@ if [ -f /etc/os-release ]; then
 	#
 	distro=$(echo "$foo" | tr '[:upper:]' '[:lower:]')
 
-	([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
-		{ "$distro is not Redhat"; exit 1; }
+	# ([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
+	#	{ echo  "$distro is not Redhat" }
+
+	echo "Distro: $distro"
 
 	if [[ "$distro" == "fedora" ]]; then
 		installagent=dnf
@@ -77,6 +79,11 @@ if [ -f /etc/os-release ]; then
 			installagent="dnf"
 			installflags="--allowerasing --best"
 		fi
+
+	elif [[ "$distro" == "ubuntu" ]]; then
+		installagent='apt-get'
+	else
+		echo "$distro is not a distro supported by this script."
 	fi
 
 else
