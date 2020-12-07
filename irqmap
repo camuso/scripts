@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# irqmap
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	for IRQ in $(grep virtio2-request /proc/interrupts |cut -d: -f1); do
+		for file in /proc/irq/$IRQ/ ; do
+			echo -n "IRQ: $(basename $file) CPU: " ; cat $file/smp_affinity_list
+		done
+	done
+}
+
+main $@
+
+exit 0
+
