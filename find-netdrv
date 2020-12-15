@@ -1,0 +1,41 @@
+#!/bin/bash
+#
+# find-netdrv
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) net-driver
+
+Description:
+	Returns information about the network device managed by the given
+	network driver.
+
+Arguments:
+	net-driver: network device driver, e.g. tg3
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	local drv="$1"
+	[ -n "$drv" ] || usage
+	for i in $(ls /sys/class/net/); do
+		str=$(ethtool -i "$i" 2>&1 | grep driver | cut -d' ' -f2)
+		if [ "$str" == "$drv" ];then
+			echo $i; echo "$(ethtool -i $i)"
+		fi
+	done
+set +x
+}
+
+main $@
+
+exit 0
+
