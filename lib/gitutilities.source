@@ -568,51 +568,63 @@ git_get_lasttag() {
 # 	local current_branch=$(git_getcurrentbranch)
 #
 function git_getcurrentbranch {
- 	git_checkrepo true
-	[ $? -eq 0 ] || exit 1
+	$(git_checkrepo) || exit 1
 	echo $(git branch | egrep \* | cut -d' ' -f2)
 }
 
-# git_setbranch outdir
+# git_setbranch branchlist lasttagvar
 #
-# $1 if it exists sets the outpath. Default is /dev/shm/branchlist
+# $1 file that will get the branchllist
+# $2 file that will get the latest tag
+# $3 variable that will be written with latest tag
 #
 function git_setbranch {
+	local branchlist="$1"
+	local lasttagfil="$2"
+	local lasttagvar
 	local index=1
 	local line
 	local status=0
 	local gitbranch
 	local linenumber
-	local outpath="/dev/shm/branchlist"
 
-	[ $# -eq 1 ] && outpath="$1"
-
-	git branch > $outpath
+	echo "branchlist: $branchlist lasttagfil: $lasttagfil"
+	git branch > $branchlist
 	echo
 	echo -e "$BLD$UND\0Change Current Branch$OFF\n"
 
 	while read line; do
 		printf "$BLD%2d$OFF  $line\n" $index
 		let index++
-	done < $outpath
+	done < $branchlist
 
 	echo
 	loop_range_q 1 $((index - 1)) linenumber
 	status=$?
 	[ $status -ne 0 ] && return
 
-	gitbranch="$(ui_readline $linenumber $outpath | tr -d [\*" "])"
+	gitbranch="$(ui_readline $linenumber $branchlist | tr -d [\*" "])"
 	echo "git checkout "$gitbranch""
 	git am --abort 2>/dev/null
 	git checkout "$gitbranch" # 2>/dev/null
 	status=$?
+
+	if [ $status -ne 0 ]; then
+		echo "Could not switch branches. See git status below."
+		git status
+		return status
+	fi
+
 	git log --oneline -n1
+	git_get_lasttag lasttagvar $lasttagfil
+	eval $3="$lasttagvar"
 	return $status
 }
 
 # find_fixes - grep for all the commits since the one passed as $1
 #
 # $1 - a line expected to contain only a valid commit.
+# $2 - path to a temp file
 #
 find_fixes () {
 	local commit_id="$1"
@@ -635,7 +647,6 @@ find_fixes () {
 		--pretty='%h ("%s")' \
 		--since="$commit_date" \
 		--grep="$short_hash" > $tmpfil
-
 }
 
 # check_fixes - look for missed commits
@@ -658,8 +669,11 @@ check_fixes() {
 	local msg="$BLD$YEL\0WARNING: found missing commit$OFF"
 	local mypid
 	local fixfile="/dev/shm/fixfile"
+	local missing="/dev/shm/missing"
 
 	echo -e "\nLooking for missing commits ..."
+
+	> $missing
 
 	while read line; do
 		commitid=$(echo "$line" | cut -d' ' -f1)
@@ -675,22 +689,42 @@ check_fixes() {
 			cat "$fixfile" | while read -r commit_fix; do
 				commit_fix_id=$(echo "$commit_fix" | awk ' { print $1 } ')
 
+############
+## WIP !! ##
+############
+# This test needs to be replaced by a test that looks for the missing commit
+# from where RHEL was forked from the linus tree.
+#
 				# If the "missing" commit is in the current branch,
 				# then the upstream commitid has already been applied.
 				# In that case, get the next upstream commitid.
-				git log --oneline -n1 $commit_fix_id > /dev/null 2>&1 \
-					&& continue
+				#git log --oneline -n1 $commit_fix_id > /dev/null 2>&1 \
+				#	&& continue
 
 				# If the missing commit is not in the list of upstream
 				# commits, then it truly is missing from the patch set.
+
 				if ! grep "$commit_fix_id" "$commitsfile" >& /dev/null; then
-					# WARN ONLY. There may be a reason a commit is
-					# is skipped.
-					echo -e "$msg $commit_fix"
+					echo "commit_fix_id $commit_fix_id"
+					# First see if we've already reported it.
+					if ! grep "$commit_fix_id" "$missing" >& /dev/null; then
+						# WARN ONLY. There may be a reason a commit is
+						# is skipped.
+						echo -e "$msg $commit_fix"
+					else
+						echo "$commit_fix_id" >> $missing
+					fi
 				fi
 			done
 		fi
 	done < "$commitsfile"
 
 	[ -f $fixfile ] && rm -f $fixfile
+}
+
+git_get_rhelfork() {
+	local linus="$1"
+	local rhel="$2"
+	local forkfil="$3"
+	git rev-list --ancestry-path $(git merge-base $linus $rhel)..$rhel | tail -1 > $forkfil
 }

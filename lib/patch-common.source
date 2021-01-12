@@ -69,6 +69,7 @@ declare patchcount=0
 declare commit_msg_file="commit-msg.txt"
 declare last_tag_file="$MYDATA/lasttag"
 declare branchlist="$MYDATA/branchlist"
+declare branchforks="$MYDATA/branchforks"
 declare mismatch_file="mm.log"	# patchreview/develop will complete mmfile path
 declare mmfile			# complete name of mmfile set by patchreview/devlop
 declare valpatchlist=		# inited by call to patch-utils::create_patchlist
@@ -768,8 +769,8 @@ show_branch_mismatch() {
 	local _yn_
 
 	echo -e "$BLD\0Patches are$OFF $_distro_$BLD but kernel is$OFF $lasttag"
-	doyn "Switch branches now?" "git_setbranch $branchlist" "" _yn_
-	$_yn_ && git_get_lasttag lasttag $last_tag_file
+	getyn "Switch branches now?" _yn_
+	$_yn_ && git_setbranch $branchlist $last_tag_file lasttag
 	eval $2=$_yn_
 }
 
@@ -870,7 +871,7 @@ check_patchvbranch() {
 
 	# Tokenize the current kernel branch tag.
 	#
-	ui_strtok "$lasttag" ".-" tag
+	ui_strtok "$lasttag" ".-_" tag
 
 	# 2020-10-05
 	# Cycle through the tag array looking for elstr. It is not
@@ -1401,4 +1402,9 @@ renpatfiles() {
     cd -
     check_patch_count
     return $?
+}
+
+common_init()
+{
+	check_branchforks "$branchforks"
 }

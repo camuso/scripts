@@ -63,7 +63,7 @@ is_prologue() {
 	return 1
 }
 
-# create_patchlist() - create the patchlist starting at startpat
+# create_patchlist() - create the patchlist as a string of strings
 #
 # ARGUMENTS
 #	$1 - string containing list of patches
@@ -100,5 +100,103 @@ create_patchlist() {
 	# be left as a command to be executed, which will fail.
 	#
 	eval "$2='$retlist'"
+}
+
+# get_rhel_family - el6, el7, etc
+#
+# $1 - lasttagfile
+# $2 - will contain the el family name, el7, el8, etc.
+#
+get_rhel_family() {
+	local tag
+	local fam=
+
+	# tokenize the kernel tag and extract the "el" family.
+	#
+	ui_strtok "$lasttag" ".-_" tag
+
+	# Cycle through the tag array looking for elstr. It is not
+	# necessarily the last token anymore.
+	#
+	for ((i = 0; i < ${#tag[@]}; ++i)); do
+		case "${tag[i]}" in
+			"el7" ) break;;
+			"el8" ) break;;
+		esac
+	done
+
+	(( $i >= ${#tag[@]} )) && eval $2="ns" && return 1
+
+	eval $2=${tag[i]}
+
+	return 0
+}
+
+# check_branchforks
+#
+# see if the primordial fork for the current branch has been logged.
+#
+# $1 - file containing list of primordial fork commit IDs
+# $2 - file containing the lasttag
+#
+check_branchforks() {
+	local forkfile="$1"
+	local family=
+	local stat
+	local mergebase
+	local mergecmt
+	local branchcom
+	local forkcmt=/dev/shm/forkcmt
+	local mypid
+	local linus=$(grep -A1 branch .git/config | \
+			grep -B1 origin | \
+			head -1 | \
+			sed 's/"//g' | \
+			sed 's/[][]//g' | \
+			cut -d' ' -f2)
+
+	[ -f $forkfile ] || > $forkfile
+
+	get_rhel_family $forkfile family
+	stat=$?
+
+	(( $stat == 0 )) || {
+		echo "Most recent tag in this branch: $lasttag"
+		echo "Current branch is not RHEL or is not supported."
+		echo "Only el7 and el8 are supported at this time."
+		return 1
+	}
+
+	echo "RHEL family: $family"
+	mergebase=$(grep "$family" $forkfile)
+
+	if (( $? == 0 )); then
+		mergecmt=$(echo $mergebase | cut -d' ' -f1)
+	else
+
+		case "$family" in
+			"el7" ) branchcom=$(grep -B1 -m1 rhel7 .git/config | \
+					head -1 \
+					sed 's/"//g' | \
+					sed 's/[][]//g' | \
+					cut -d' ' -f2)
+					;;
+			"el8" ) branchcom=$(grep -B2 -m1 rhel-8 .git/config | \
+					head -1 | \
+					sed 's/"//g' | \
+					sed 's/[][]//g' | \
+					cut -d' ' -f2)
+					;;
+		esac
+	fi
+
+	echo "linus: $linus branch: $branchcom"
+
+	git_get_rhelfork $linus $branchcom $forkcmt & mypid=$!
+
+	ui_waitonproc_tty $mypid .1 "Getting the commit where $family was forked from $linus"
+	echo "forkcmt: $(cat $forkcmt)"
+
+	return 0
 }
 
