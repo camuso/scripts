@@ -74,6 +74,7 @@ declare mismatch_file="mm.log"	# patchreview/develop will complete mmfile path
 declare mmfile			# complete name of mmfile set by patchreview/devlop
 declare valpatchlist=		# inited by call to patch-utils::create_patchlist
 
+declare prj_searchbase
 declare prj_menumode
 declare prj_patchvalfuzz
 declare prj_patchseekmode
@@ -85,6 +86,9 @@ declare prj_cmpmode
 declare prj_applymode
 declare prj_b_rename_infiles
 declare prj_b_fmt_upstream
+
+declare searchbase=
+declare default_searchbase="RHEL-8.3.0"
 
 # These booleans are always set true when the script is inited.
 declare b_rename_infiles
@@ -1406,5 +1410,47 @@ renpatfiles() {
 
 common_init()
 {
-	check_branchforks "$branchforks"
+	check_branchforks "$lasttag" "$branchforks"
+	searchbase=$(prj_get_item $prj_searchbase)
+	check_searchbase_commitlist "$searchbase"
+}
+
+set_searchbase() {
+	local sb
+	local family
+	local whatisthis=$(
+cat <<EOF
+ $YEL
+ You can set the tag to be used as the base for seeking commits that
+ are missing in the patch series.
+ See uppercase 'S' in the ${UND}Discrete Operations$OFF$YEL above.
+ See Option 4 in the ${UND}Batch Run Parameters$OFF$YEL tables above.
+ $OFF
+ Enter $qstr to return without changing the current base.
+ \0
+EOF
+)
+	echo -e "$whatisthis"
+	get_rhel_family $lasttag family
+
+	while :; do
+		getuser "Please enter a valid RHEL tag: " sb
+		[ "$sb" == "q" ] && return
+
+		if ! git log -1 --oneline $sb >& /dev/null; then
+			echo -e "$BLD$sb$OFF is not a valid tag in $BLD$family$OFF."
+			continue
+		else
+			break
+		fi
+	done
+
+	# If the user entered the same base that we already had, then simply return.
+	# Otherwise, we might have to build a list of all the commits for this family
+	# from the searchbase to the HEAD.
+	[ "$searchbase" == "$sb" ] && return
+
+	# See if the commitlist unique to this searchbase already exists. If not, it
+	# will be created.
+	check_searchbase_commitlist "$searchbase"
 }

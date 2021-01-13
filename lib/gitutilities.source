@@ -722,6 +722,21 @@ check_fixes() {
 	[ -f $fixfile ] && rm -f $fixfile
 }
 
+# git_get_rhelfork - get the commit where RHEL was forked from the Linus tree
+#
+# Writes the commit into a file, since this routine is intended to be forked
+# when called, because it does take some time.
+#
+# Call example:
+#
+# git_get_rhelfork $linus $branch $forkcmt & mypid=$!
+# ui_waitonproc_tty $mypid .1 "Getting commit where $branch was forked from $linus"
+#
+# Arguments
+#   $1 - the branch name of the linus tree
+#   $2 - the branch name of the RHEL tree
+#   $3 - the file where the fork commit will be written
+#
 git_get_rhelfork() {
 	local linus="$1"
 	local rhel="$2"

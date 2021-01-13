@@ -298,6 +298,7 @@ $BLD
  w  $outdirstr directory          :$OFF $outdir$BLD
  e  Diff Editor             :$OFF $editor$BLD
  f  Patch Validation fuzz   :$OFF $(show_patchvalfuzz)$BLD
+ s  Missing Commits Base    :$OFF $searchbase$BLD
 
     $UND\0Batch Run Parameters$OFF$BLD
  1  Compare mode            :$OFF $(show_cmpmode)$BLD
@@ -352,6 +353,8 @@ menu_parser() {
 		e )	set_editor
 			;;
 		f )	set_patchvalfuzz
+			;;
+		s )	set_searchbase
 			;;
 		x )	ui_cycle_state menumode $menumode_states
 			prj_set_item $prj_menumode $menumode
@@ -430,6 +433,7 @@ function menu_loop {
 	patchseekmode=$(prj_get_item $prj_patchseekmode)
 	patchvalfuzz=$(prj_get_item $prj_patchvalfuzz)
 	menumode=$(prj_get_item $prj_menumode)
+	searchbase=$(prj_get_item $prj_searchbase)
 
 	# delete any "scratch" file from the indir
 	#
@@ -454,10 +458,10 @@ init_parms() {
 
 	# This loop enumerates and counts the items in the project file.
 	# Add new booleans to the end of the list.
-	# Add new non-boolean parameters before the first boolean, but
-	# after all the non-booleans.
+	# Add new non-boolean parameters before the first boolean.
 	#
 	for offset in \
+	prj_searchbase \
 	prj_menumode \
 	prj_patchvalfuzz \
 	prj_patchseekmode \
@@ -508,12 +512,14 @@ init_parms() {
 		patchseekmode=$patchseek_off
 		patchvalfuzz=1
 		menumode=$menumode_ext
+		searchbase="$default_searchbase"
 		prj_set_item $prj_cmpmode $cmpmode
 		prj_set_item $prj_applymode $applymode
 		prj_set_item $prj_applyfailmode $applyfailmode
 		prj_set_item $prj_patchseekmode $patchseekmode
 		prj_set_item $prj_patchvalfuzz $patchvalfuzz
 		prj_set_item $prj_menumode $menumode
+		prj_set_item $prj_searchbase "$searchbase"
 	fi
 
 	common_init

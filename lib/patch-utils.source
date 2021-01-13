@@ -102,18 +102,19 @@ create_patchlist() {
 	eval "$2='$retlist'"
 }
 
-# get_rhel_family - el6, el7, etc
+# get_rhel_family - el7, el8, etc
 #
-# $1 - lasttagfile
+# $1 - _lasttag_
 # $2 - will contain the el family name, el7, el8, etc.
 #
 get_rhel_family() {
-	local tag
+	local _lasttag_="$1"
+	local tag=()
 	local fam=
 
 	# tokenize the kernel tag and extract the "el" family.
 	#
-	ui_strtok "$lasttag" ".-_" tag
+	ui_strtok "$_lasttag_" ".-" tag
 
 	# Cycle through the tag array looking for elstr. It is not
 	# necessarily the last token anymore.
@@ -125,22 +126,19 @@ get_rhel_family() {
 		esac
 	done
 
-	(( $i >= ${#tag[@]} )) && eval $2="ns" && return 1
-
-	eval $2=${tag[i]}
-
-	return 0
+	(( $i >= ${#tag[@]} )) && eval $2="" || eval $2=${tag[i]}
 }
 
 # check_branchforks
 #
 # see if the primordial fork for the current branch has been logged.
 #
-# $1 - file containing list of primordial fork commit IDs
-# $2 - file containing the lasttag
+# $1 - file containing the lasttag
+# $2 - file containing list of primordial fork commit IDs
 #
 check_branchforks() {
-	local forkfile="$1"
+	local lasttag="$1"
+	local forkfile="$2"
 	local family=
 	local stat
 	local mergebase
@@ -154,20 +152,24 @@ check_branchforks() {
 			sed 's/"//g' | \
 			sed 's/[][]//g' | \
 			cut -d' ' -f2)
+	local notice=$(
+cat <<EOF
+$YEL
+    Most recent tag in this branch: $BLD$lasttag$OFF$YEL
+    ... is not in RHEL or is not supported.
+    Searches for missing commits are supported only for RHEL-7 and RHEL-8
+    at this time.
+$OFF
+EOF
+)
+	get_rhel_family "$lasttag" family
 
-	[ -f $forkfile ] || > $forkfile
-
-	get_rhel_family $forkfile family
-	stat=$?
-
-	(( $stat == 0 )) || {
-		echo "Most recent tag in this branch: $lasttag"
-		echo "Current branch is not RHEL or is not supported."
-		echo "Only el7 and el8 are supported at this time."
+	[ -z "$family" ] && {
+		echo -e "$notice"
 		return 1
 	}
 
-	echo "RHEL family: $family"
+	[ -f $forkfile ] || > $forkfile
 	mergebase=$(grep "$family" $forkfile)
 
 	if (( $? == 0 )); then
@@ -188,15 +190,72 @@ check_branchforks() {
 					cut -d' ' -f2)
 					;;
 		esac
+
+		echo "origin: $linus family: $family"
+		git_get_rhelfork $linus $branchcom $forkcmt & mypid=$!
+		ui_waitonproc_tty $mypid .1 "Getting the commit where $family was forked from $linus"
+		echo "Adding $family $(cat $forkcmt)"
+		echo "$(cat $forkcmt) $family" > $forkfile
+		rm -f $forkcmt
 	fi
 
-	echo "linus: $linus branch: $branchcom"
-
-	git_get_rhelfork $linus $branchcom $forkcmt & mypid=$!
-
-	ui_waitonproc_tty $mypid .1 "Getting the commit where $family was forked from $linus"
-	echo "forkcmt: $(cat $forkcmt)"
-
 	return 0
+}
+
+create_searchbase_commitlist() {
+	local sbase="$1"
+	local commitlist="$2"
+	local ncpus=$(nproc)
+	local count=0
+	local commitids=
+	local LINE=
+	local commitid=
+
+	git log --grep "commit" $sbase.. | grep -E "   commit ([0-9a-f]{40})( \(.*\))?$|^    \(cherry picked from commit ([0-9a-f]{40})\)$" | while read LINE
+	do
+		if echo $LINE | grep cherry >& /dev/null ; then
+			commitid=$(echo $LINE | awk ' { print $5 } ' | tr -d ")")
+		else
+			commitid=$(echo $LINE | awk ' { print $2 } ')
+		fi
+		# this is one more char than pretty
+		commitid=$(echo $commitid | cut -c -14)
+
+		count=$((count + 1))
+		if [ $((count % ncpus)) -eq 0 ]; then
+			echo "$commitids $commitid" >> $commitlist
+			commitids=""
+			# echo $count
+		else
+			commitids="$commitids $commitid"
+		fi
+	done
+
+	# delete empty first line of commitlist
+	sed -i -e "1d" $commitlist
+}
+
+check_searchbase_commitlist() {
+	local sbase="$1"
+	local commitlist
+	local mypid
+	local wuzhappenin=$(
+cat <<EOF
+$YEL
+ Creating: $BLD$MYDATA/${searchbase}-commitlist$OFF$YEL
+ This may take two or three minutes, but is only done when
+ $MYDATA/${searchbase}-commitlist does not already exist.
+$OFF
+EOF
+)
+	# Create a filename unique to this searchbase
+	commitlist="$MYDATA/${searchbase}-commitlist"
+
+	# If it already exists, then we don't need to do anything more.
+	[ -f "$commitlist" ] && return
+
+	echo -e "$wuzhappenin"
+	create_searchbase_commitlist "$searchbase" "$commitlist" & mypid=$!
+	ui_waitonproc_tty $mypid .2 "Please be patient."
 }
 
