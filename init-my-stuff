@@ -143,6 +143,8 @@ for repo in $repolist; do
 		echo "Cloning $repo ..." | tee -a "$logfile" 2>&1
 		$clonestr$repo.git $repo
 	fi
+	chown -R tcamuso.tcamuso $repo
+	chmod -R u+wrx,go+rx,go-w $repo
 done
 
 echo "*******************************" >> "$logfile" 2>&1
@@ -166,6 +168,7 @@ else
 	git config pull.rebase false
 fi
 
+
 # Copy etc and rc files out of their archive directories into their respective
 # real directories, but only if they're newer.
 #
@@ -180,15 +183,16 @@ echo >> "$logfile" 2>&1
 # performing the rsync and possibley overwriting it with new content.
 # If the .orig file already exists, do not write over it.
 #
-for f in $(ls -rtd1 rcbak/{*,.*}); do
-	name=$(basename $f);
-	if [ -f $f ] && [ -f "$name" ]; then
+find rcbak/ -maxdepth 1 -exec sh -c \
+	'name=$(basename $1);
+	if [ -f $1 ] && [ -f "$name" ]; then
 		[[ -f "$name".orig ]] \
-			|| cp -v $name "$name".orig 2>&1 | tee -a $logfile
-	fi
-done
+			|| cp -v $name "$name".orig 2>&1 | tee -a $2; \
+	fi' \
+	sh '{}' $logfile \;
 
 rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
+exit
 
 # Can only do the following if root
 #
