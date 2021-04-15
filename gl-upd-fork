@@ -8,17 +8,18 @@ cat <<EOF
 $(basename $0) <fork> [branch]
 
 Description:
-
-
-
-Arguments:
-
+	[ -n "\$fork" ] || usage
+	git checkout main
+	git fetch origin
+	git rebase origin/main
+	git push "\$fork" main
+	[ -n "\$branch" ] && { git checkout "\$branch"; git pull; }
 \0
 EOF
 )
 
 usage() {
-	echo -en $usagestr
+	echo -e "$usagestr"
 	exit 1
 }
 
@@ -26,6 +27,7 @@ main() {
 	fork="$1"
 	branch="$2"
 
+	[ -n "$branch" ] || usage
 	git checkout main
 	git fetch origin
 	git rebase origin/main
