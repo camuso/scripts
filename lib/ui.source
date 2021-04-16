@@ -98,10 +98,10 @@ declare ui_tempfile="/dev/shm/ui_temp_file"
 #
 ui_popterm() {
 	cmd="$1"
-	[ -n "$cmd" ] x-terminal-emulator -e "$cmd" || x-terminal-emulator
+	[ -n "$cmd" ] && x-terminal-emulator -e "$cmd" || x-terminal-emulator
 }
 
-ui_get_screenbackground() {ui
+ui_get_screenbackground() {
 	echo
 	echo "Is your terminal background best described as:"
 	echo "1. light"
