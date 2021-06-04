@@ -30,4 +30,4 @@ do
 done <<< "$grublist"
 echo
 echo "From $entries"
-cat "$entries"
+ls -1 "$entries"
