@@ -322,6 +322,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	$installagent install --nogpgcheck -y $installflags \
 	automake \
+	annobin \
+	annnobin-annocheck \
 	elfutils-libelf-devel \
 	gcc \
 	gcc-c++ \
@@ -332,6 +334,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	brewkoji \
 	ca-certificates \
 	cmake \
+	conserver-client \
 	cscope \
 	dwarves libdwarves1 \
 	elfutils-devel elfutils-libs elfutils-libelf \
