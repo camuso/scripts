@@ -119,9 +119,10 @@ $b_pushpriv && clonestr="git clone git@github.com:camuso/" \
 [ -f $HOME/.ssh/id_rsa ] || \
 	ssh-keygen -N "" -f $HOME/.ssh/id_rsa | tee -a "$logfile" 2>&1
 
-echo "*******************************" >> "$logfile" 2>&1
-echo "* Clone or update Env Files   *" >> "$logfile" 2>&1
-echo "*******************************" >> "$logfile" 2>&1
+echo "*******************************" | tee -a "$logfile"
+echo "* Clone or update Env Files   *" | tee -a "$logfile"
+echo "*       Version 3.0           *" | tee -a "$logfile"
+echo "*******************************" | tee -a "$logfile"
 echo
 
 for repo in $repolist; do
@@ -143,8 +144,8 @@ for repo in $repolist; do
 		echo "Cloning $repo ..." | tee -a "$logfile" 2>&1
 		$clonestr$repo.git $repo
 	fi
-	chown -R tcamuso.tcamuso $repo
-	chmod -R u+wrx,go+rx,go-w $repo
+	# chown -R tcamuso.tcamuso $repo
+	# chmod -R u+wrx,go+rx,go-w $repo
 done
 
 echo "*******************************" >> "$logfile" 2>&1
@@ -177,22 +178,8 @@ echo "* Copying Env files from Backup Directories    *" >> "$logfile" 2>&1
 echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
 echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
-
-# Get the full pathname so we can use that to copy from.
-# If the file or directory already exists, then copy it into a .orig before
-# performing the rsync and possibley overwriting it with new content.
-# If the .orig file already exists, do not write over it.
-#
-find rcbak/ -maxdepth 1 -exec sh -c \
-	'name=$(basename $1);
-	if [ -f $1 ] && [ -f "$name" ]; then
-		[[ -f "$name".orig ]] \
-			|| cp -v $name "$name".orig 2>&1 | tee -a $2; \
-	fi' \
-	sh '{}' $logfile \;
-
+echo "rsync contents of rcbak to home directory" | tee -a "$logfile"
 rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
-exit
 
 # Can only do the following if root
 #
@@ -210,23 +197,10 @@ if [ $(id -u) -eq 0 ]; then
 		fi
 	done
 
-	rsync -Pvat --cvs-exclude etcbk/ /etc/. 2>&1 | tee -a $logfile
+	echo "rsync contents of etcbk to /etc" | tee -a "$logfile"
+	rsync -Pvat --cvs-exclude etcbk/ /etc/.| tee -a "$logfile"
 fi
 
-if [ "$remotename" == "root" ]; then
-	for file in \
-	"hosts" \
-	"vpnc.conf" \
-	"krb5.conf"
-	do
-		echo "--------------" >> "$logfile" 2>&1
-		echo "Checking $file" >> "$logfile" 2>&1
-		[ -f /etc/"$file".orig ] || cp -vf /etc/$file /etc/$file.orig 2>&1 | tee -a "$logfile"
-		cp -vf ~/etcbk/$file /etc/$file 2>&1 | tee -a "$logfile"
-		echo "* * * * * * * * * " >> "$logfile" 2>&1
-		echo "" >> "$logfile" 2>&1
-	done
-fi
 echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
 
@@ -238,7 +212,7 @@ if [ "$remotename" ]; then
 	echo "* Doing Rmote Fixup *" >> "$logfile" 2>&1
 	echo "*********************" >> "$logfile" 2>&1
 	echo "" >> "$logfile" 2>&1
-	bin/fixup-rsync $remotename >> "$logfile" 2>&1
+	bin/fixup-rsync $remotename | tee -a "$logfile"
 fi
 cd -
 
@@ -252,26 +226,57 @@ get_rcmtools()
 	# if rcm-tools is already installed with the distro, then skip this.
 	[ -f /etc/yum.repos.d/rcm-tools.repo ] && return
 
+	echo -n "Installing rcm tools for " | tee -a "$logfile"
 	case "$majversion" in
-		"6" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+		"6" )   echo "RHEL-6" | tee -a "$logfile"
+			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
 			return 0
  			;;
-		"7" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+		"7" )	echo "RHEL-7" | tee -a "$logfile"
+			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
 			return 0
 			;;
-		"8" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+		"8" )	echo "RHEL-8" | tee -a "$logfile"
+			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			return 0
 			;;
-		"9" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+		"9" ) 	echo "RHEL-8 for RHEL-9" | tee -a "$logfile"
+			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			return 0
 			;;
 	esac
 
 	echo ""
+	return 1
+}
+
+
+get_epel() {
+	echo -n "Installing EPEL for " | tee -a "$logfile"
+	case "$majversion" in
+		"6" )   echo "RHEL-6" | tee -a "$logfile"
+			yum install -y https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm
+			return 0
+ 			;;
+		"7" )	echo "RHEL-7" | tee -a "$logfile"
+			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+			return 0
+			;;
+		"8" )	echo "RHEL-8" | tee -a "$logfile"
+			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+			return 0
+			;;
+		"9" ) 	echo "RHEL-8 for RHEL-9" | tee -a "$logfile"
+			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+			return 0
+			;;
+	esac
+
+	echo | tee -a "$logfile"
 	return 1
 }
 
@@ -309,10 +314,13 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	if [[ "$distro" == "fedora" ]]; then
 		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo
 		dnf install -y fedpkg
+		dnf copr enable -y bmeneguele/rhkernel-devtools
 
 	elif [[ "$distro" == "rhel" ]]; then
 		get_certs
-		get_rcm_tools
+		get_rcmtools
+		yum copr enable -y bmeneguele/rhkernel-devtools
+		get_epel
 	fi
 
 
@@ -321,9 +329,10 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	$installagent group install "Development Tools"
 
 	$installagent install --nogpgcheck -y $installflags \
+	annobin-annocheck \
 	automake \
 	annobin \
-	annnobin-annocheck \
+	annobin-annocheck \
 	elfutils-libelf-devel \
 	gcc \
 	gcc-c++ \
@@ -339,19 +348,23 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	dwarves libdwarves1 \
 	elfutils-devel elfutils-libs elfutils-libelf \
 	elinks \
+	ethtool \
 	flex \
 	git-email \
+	golang \
 	hostname \
 	ipmitool \
 	kmod \
 	kmod-libs \
 	krb5-workstation krb5-libs \
+	lab \
 	libdwarf libdwarf-devel \
 	lynx \
 	make \
 	mutt \
 	ncurses ncurses-devel \
 	net-tools \
+	nmap \
 	OpenIPMI \
 	openssl openssl-devel \
 	patch patchutils \
@@ -361,7 +374,11 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	texinfo \
 	vim vim-enhanced vim-filesystem \
 	watchdog \
+	waiverdb-cli \
+	xclip \
+	xorg-x11-apps \
 	xz \
+	zenity \
 	2>&1 | tee -a $logfile
 
 	# orphaned packages
@@ -372,6 +389,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	# vim-powerline \
 	# krb5-auth-dialog \
 	# kmodtool \
+	# python-bugzilla \
+	# git-lab-porcelain \
 
 	mkdir -p /work/us
 	cd /work/us
