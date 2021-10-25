@@ -147,6 +147,7 @@ for repo in $repolist; do
 	# chown -R tcamuso.tcamuso $repo
 	# chmod -R u+wrx,go+rx,go-w $repo
 done
+echo -e "---------------" | tee -a "$logfile"
 
 echo "*******************************" >> "$logfile" 2>&1
 echo "* Clone or update bin scripts  *" >> "$logfile" 2>&1
@@ -160,7 +161,6 @@ if [ -d bin/.git ]; then
 	echo "Updating bin repo..." | tee -a "$logfile" 2>&1
 	git config pull.rebase false
 	git pull
-	cd -
 else
 	[ -e bin ] && rm -rf bin
 	echo "Creating bin repo..."  | tee -a "$logfile" 2>&1
@@ -168,6 +168,9 @@ else
 	cd bin
 	git config pull.rebase false
 fi
+cd
+echo "Returning to $PWD..."
+echo -e "---------------\n" | tee -a "$logfile"
 
 
 # Copy etc and rc files out of their archive directories into their respective
@@ -180,25 +183,14 @@ echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
 echo "rsync contents of rcbak to home directory" | tee -a "$logfile"
 rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
+echo -e "---------------\n" | tee -a "$logfile"
 
 # Can only do the following if root
 #
 if [ $(id -u) -eq 0 ]; then
-	# Get the full pathname so we can use that to copy from.
-	# If the file or directory already exists, then copy it into a .orig before
-	# performing the rsync and possibley overwriting it with new content.
-	# If the .orig file already exists, do not write over it.
-	#
-	for f in $(ls -rtd1 etcbk/{*,.*}); do
-		name=$(basename $f);
-		if [ -f $f ] && [ -f "$name" ]; then
-			[[ -f "$name".orig ]] \
-				|| cp -v $name "$name".orig 2>&1 | tee -a $logfile
-		fi
-	done
-
 	echo "rsync contents of etcbk to /etc" | tee -a "$logfile"
 	rsync -Pvat --cvs-exclude etcbk/ /etc/.| tee -a "$logfile"
+	echo -e "---------------\n" | tee -a "$logfile"
 fi
 
 echo "************************************************" >> "$logfile" 2>&1
