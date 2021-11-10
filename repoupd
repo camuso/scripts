@@ -1,0 +1,92 @@
+#!/bin/bash
+#
+# repoupd
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [all]
+
+Description:
+	Update the repo(s) in the current directory.
+	With the "all" argument, update all repos in
+	all directories under /work.
+
+Arguments:
+	all - optional argument to update all directories
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+strtok ()
+{
+    IFS="$2" read -r -a $3 <<< "$1"
+}
+
+update_repo() {
+	local branches=$(grep "^\[branch" .git/config)
+	local br
+	local bary
+	local brindex=2
+
+	git fetch --all -p
+
+	while read br; do
+		echo "$br"
+		echo "----------------"
+		strtok "$br" '"[]' bary
+		arysiz=${#bary[@]}
+		git checkout ${bary[brindex]}
+		git pull
+		echo
+	done <<< $branches
+
+	echo $PWD | grep -q "upstream" && return
+
+	br=$(grep -A2 branch .git/config)
+	echo $br | grep -q origin && strtok "$br" '"[]' ary
+	br=${bary[brindex]}
+	echo "$br"
+	echo "----------------"
+	git checkout $br
+	git rebase origin/$br
+	git push tcamuso $br
+	echo
+}
+
+main() {
+	local repos=
+	local dir=
+
+	[ "$1" == "help" ] && { usage; return 0; }
+
+	[ "$1" == "all" ] || {
+		[ -f .git/config ] || {
+			echo -e "Not a git repo!\n"
+			return 1
+		}
+		update_repo
+		return 0
+	}
+
+	cd /work
+	repos=$(find ./ -maxdepth 2 -type d -name kernel -exec realpath {} \;)
+
+	while read dir; do
+		echo "cd $dir"
+		echo "========================"
+		cd $dir
+		update_repo
+		echo
+	done <<< $repos
+}
+
+main $@
+
+exit 0
+
