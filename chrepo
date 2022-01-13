@@ -2,7 +2,9 @@
 #
 # chrepo
 
-[ "$ui_loaded" ] || source $HOME/bin/lib/ui.source
+source $HOME/bin/lib/ui.source
+terminal_background=$tb_dark
+ui_set_colors
 
 declare repomap="$HOME/.config/patchreview/repomap"
 declare repolist="$HOME/.config/patchreview/repolist"
@@ -60,29 +62,6 @@ usage() {
 	echo -en "$usagestr"
 }
 
-chrepo_cdfromrepolist() {
-	local repod=
-	local dary=()
-	local dndx=0
-	local dnum=
-
-	dary=($(cat $repolist))
-	for ((dndx = 0; dndx < ${#dary[@]}; ++dndx)); do
-		echo -e "$MNU$((dndx+1)). $OFF${dary[dndx]}"
-	done
-
-	loop_range_q 1 ${#dary[@]} dnum || return 1
-	repod=${dary[dnum-1]}
-
-	[ -d "$repod" ] || {
-		echo -e "$WRN$repod is not a directory!$OFF"
-		return 1
-	}
-echo "repod: $repod"
-	cd $repod
-	pwd
-}
-
 chrepo() {
 	[ ${#@} -eq 1 ] || { pwd; return 0; }
 	( [ "$1" == "help" ] || [ "$1" == "-h" ] ) && { usage; return 0; }
@@ -123,4 +102,3 @@ chrepo() {
 	pwd
 	return 0
 }
-
