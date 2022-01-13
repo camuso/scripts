@@ -1,0 +1,126 @@
+#!/bin/bash
+#
+# chrepo
+
+[ "$ui_loaded" ] || source $HOME/bin/lib/ui.source
+
+declare repomap="$HOME/.config/patchreview/repomap"
+declare repolist="$HOME/.config/patchreview/repolist"
+declare usagestr=$(
+cat <<EOF
+
+chrepo [reponame | show]
+
+Description:
+	cd to a directory denoted by "repodir"
+
+	Create a ~/.config/patchreview/repomap file to map names
+	to repo directories, with the name in the first field and
+	the directory in the second. E.g...
+	rh7 /work/7/kernel
+	rh8 /work/7/kernel
+
+Arguments:
+	show 	 -  dumps the contents of ~/.config/patchreview/repomap
+
+	reponame - the name mapped to a specific directory in the
+	           ~/.config/patchreview/repomap file
+
+	If you do not present a name from the repomap firle as an arugment,
+	you will get a numbered list of repo directories stored in your
+	repolist file.
+
+	If that file does not exist, then create it by putting the names
+	of your repo directories in ...
+	~/.config/patchreview/repomap
+
+\0
+EOF
+)
+
+declare norepolist=$(
+cat <<EOF
+
+The $repolist file containing a list of your repo directories does
+not exist. Please create it.
+\0
+EOF
+)
+
+declare nomatch=$(
+cat <<EOF
+
+The repo name you submitted could not be found in
+$repomap.
+
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+}
+
+chrepo_cdfromrepolist() {
+	local repod=
+	local dary=()
+	local dndx=0
+	local dnum=
+
+	dary=($(cat $repolist))
+	for ((dndx = 0; dndx < ${#dary[@]}; ++dndx)); do
+		echo -e "$MNU$((dndx+1)). $OFF${dary[dndx]}"
+	done
+
+	loop_range_q 1 ${#dary[@]} dnum || return 1
+	repod=${dary[dnum-1]}
+
+	[ -d "$repod" ] || {
+		echo -e "$WRN$repod is not a directory!$OFF"
+		return 1
+	}
+echo "repod: $repod"
+	cd $repod
+	pwd
+}
+
+chrepo() {
+	[ ${#@} -eq 1 ] || { pwd; return 0; }
+	( [ "$1" == "help" ] || [ "$1" == "-h" ] ) && { usage; return 0; }
+
+	local arg="$1"
+	local repod=
+	local dary=()
+	local dndx=0
+	local dnum=
+
+	if [ -f "$repomap" ]; then
+		[ "$arg" == "show" ] && { cat "$repomap"; return 0; }
+	fi
+
+	line=$(grep -w $arg $repomap)
+
+	if [ "$line" ]; then
+		repod=$(echo $line | cut -d' ' -f2)
+	else
+		echo -e "$nomatch"
+		[ -f "$repolist" ] || { echo -e "$norepolist"; return 1; }
+
+		dary=($(cat $repolist))
+		for ((dndx = 0; dndx < ${#dary[@]}; ++dndx)); do
+			echo -e "$MNU$((dndx+1)). $OFF${dary[dndx]}"
+		done
+
+		loop_range_q 1 ${#dary[@]} dnum || return 1
+		repod=${dary[dnum-1]}
+
+		[ -d "$repod" ] || {
+			echo -e "$WRN$repod is not a directory!$OFF"
+			return 1
+		}
+	fi
+
+	cd $repod
+	pwd
+	return 0
+}
+
