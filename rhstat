@@ -1,0 +1,39 @@
+#!/bin/bash
+#
+# rhstat
+
+declare repolist=/home/tcamuso/.config/patchreview/repolist
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	while read repod; do
+		[[ "$repod" == *"upstream"* ]] && continue
+		cd $repod
+		pwd
+		echo "================="
+		rhstatus --interest
+		echo
+	done < "$repolist"
+}
+
+main $@
+
+exit 0
+
