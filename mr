@@ -1,0 +1,3 @@
+#!/bin/bash
+echo https://gitlab.com/redhat/rhel/src/kernel/rhel-8/-/merge_requests/${1}
+echo https://gitlab.com/redhat/centos-stream/src/kernel/centos-stream-9/-/merge_requests/${1}
