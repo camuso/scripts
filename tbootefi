@@ -1,0 +1,36 @@
+#!/bin/bash
+#
+# tbootefi
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	dnf install -y tboot grub2-efi-x64-modules
+	mkdir -p /boot/efi/EFI/redhat/x86_64-efi
+	cp /usr/lib/grub/x86_64-efi/relocator.mod \
+	   /boot/efi/EFI/redhat/x86_64-efi/
+	cp /usr/lib/grub/x86_64-efi/multiboot2.mod \
+	   /boot/efi/EFI/redhat/x86_64-efi/
+	grub2-mkconfig -o $(find /boot -name grub.cfg -print -quit)
+}
+
+main $@
+
+exit 0
+
