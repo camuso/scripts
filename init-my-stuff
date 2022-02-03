@@ -219,6 +219,15 @@ get_rcmtools()
 	[ -f /etc/yum.repos.d/rcm-tools.repo ] && return
 
 	echo -n "Installing rcm tools for " | tee -a "$logfile"
+
+	if [[ "$distro" == "fedora" ]]; then
+		echo "fedora" | tee -a "$logfile"
+		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo \
+			| tee -a "$logfile"
+		return
+	fi
+
 	case "$majversion" in
 		"6" )   echo "RHEL-6" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
@@ -299,26 +308,27 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	declare arch=$(uname -m)
 	declare rcmurl=""
-	declare installagent""
+	declare installagent=""
 
-	# Get the additional repos according to distro
-	#
-	if [[ "$distro" == "fedora" ]]; then
-		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo
-		dnf install -y fedpkg
-		dnf copr enable -y bmeneguele/rhkernel-devtools
+	get_certs
+	get_rcmtools
 
-	elif [[ "$distro" == "rhel" ]]; then
-		get_certs
-		get_rcmtools
-		yum copr enable -y bmeneguele/rhkernel-devtools
-		get_epel
+	dnf copr enable -y bmeneguele/rhkernel-devtools
+
+	if [ "$distro" == "fedora" ]; then
+		installagent=dnf
+		dnf copr enable -y james/centpkg
+		dnf install -y fedpkg rhel-packager centpkg-sig
 	fi
 
+	if [[ "$distro" == "rhel" ]]; then
+		get_epel
+		installagent=yum
+	fi
 
 	# $installagent groupinstall -y 'X Window System' 'GNOME'
 
-	$installagent group install "Development Tools"
+	$installagent group install -y "Development Tools"
 
 	$installagent install --nogpgcheck -y $installflags \
 	annobin-annocheck \
@@ -385,10 +395,10 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	# python-bugzilla \
 	# git-lab-porcelain \
 
-	mkdir -p /work/us
-	cd /work/us
+	mkdir -p /work
+	cd /work
 
-	[ -d /work/us/netperf ] || {
+	[ -d /work/netperf ] || {
 		git clone https://github.com/HewlettPackard/netperf.git 2>&1 | tee -a $logfile
 		cd netperf
 		./autogen.sh 2>&1 | tee -a $logfile
@@ -402,47 +412,106 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	#
 	$b_gitrepo || { cd; exit; }
 
-	cd /work/us
-	[ -d /work/us/linux ] || \
+	# Create the empty repo directories
+	#
+	declare repolist="/root/.config/patchreview/repolist"
+	while read line; do
+		echo "$line"
+		[ -d "$line" ] || mkdir -p $line
+	done < "$repolist"
+
+	# Add the user and give him ownership of all the work directories
+	useradd tcamuso
+	chown -R tcamuso.tcamuso /work
+	ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts
+
+	# Create the upstream linux kernel repo
+	#
+	cd /work/upstream
+	[ -f kernel/.git/config ] || {
 		git clone \
 		git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+		kernel \
 		2>&1 | tee -a $logfile
+		cd kernel
+		git remote add gh-ipmi https://github.com/cminyard/linux-ipmi.git \
+			2>&1 | tee -a $logfile
+		git remote add net-next \
+			https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git \
+			2>&1 | tee -a $logfile
+		git remote add scsi \
+			https://git.kernel.org/pub/scm/linux/kernel/git/jejb/scsi.git \
+			2>&1 | tee -a $logfile
+		git remote add power \
+			https://git.kernel.org/pub/scm/linux/kernel/git/powerpc/linux.git \
+			2>&1 | tee -a $logfile
+		git remote add perf \
+			https://git.kernel.org/pub/scm/linux/kernel/git/jolsa/perf.git \
+			2>&1 | tee -a $logfile
+		git remote add linux-rt-devel \
+			https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git \
+			2>&1 | tee -a $logfile
+		git remote add crypto \
+			https://git.kernel.org/pub/scm/linux/kernel/git/herbert/cryptodev-2.6.git \
+			2>&1 | tee -a $logfile
+		git remote add bluetooth \
+			git://git.kernel.org/pub/scm/linux/kernel/git/bluetooth/bluetooth-next.git \
+			2>&1 | tee -a $logfile
+		git fetch -p --all 2>&1 | tee -a $logfile
+	}
 
-	echo 2>&1 | tee -a $logfile
+	cd /work
 
-	cd /work/us/linux
-	rhrepo="rh$majversion"
-	git branch -r | grep $rhrepo
-	stat=$?
-
-	if [ $stat -eq 0 ]; then
-		echo "$rhrepo already added to tree" 2>&1 | tee -a $logfile
-	else
-		echo "Adding $rhrepo to tree" 2>&1 | tee -a $logfile
-		if [ $majversion == "8" ]; then
-			git remote add $rhrepo \
-				https://code.engineering.redhat.com/gerrit/kernel-rhel \
-				2>&1 | tee -a $logfile
-			git -c http.sslVerify=false fetch $rhrepo
-			git checkout -b 810 $rhrepo/rhel-8.1.0 2>&1 | tee -a $logfile
-			git checkout -b 820 $rhrepo/rhel-8.2.0 2>&1 | tee -a $logfile
-			git checkout -b 830 $rhrepo/rhel-8.3.0 2>&1 | tee -a $logfile
-			git checkout -b 840 $rhrepo/rhel-8.4.0 2>&1 | tee -a $logfile
-		elif [ $majversion == "9" ]; then
-			git remote add $rhrepo https://gitlab.com/redhat/rhel/src/kernel/rhel-9
-			git -c http.sslVerify=false fetch $rhrepo
-		else
-			git remote add $rhrepo \
-				git://git.app.eng.bos.redhat.com/rhel$majversion.git \
-				2>&1 | tee -a $logfile
-			git fetch $rhrepo
-			git checkout -b $rhrepo $rhrepo/master 2>&1 | tee -a $logfile
-		fi
-		fetched=true
+	if [ "$distro" == "rhel" ]; then
+		mkdir $majversion
+		cd $majversion
+		[ -f kernel/.git/config ] || {
+			git clone git@gitlab.com:redhat/rhel/src/kernel/rhel-$majversion.git \
+				kernel 2>&1 | tee -a $logfile
+		}
 	fi
 
-	$fetched || git remote update 2>&1 | tee -a $logfile
-	cd
+	if [ "$distro" == "fedora" ]; then
+		[ -d /work/7 ] || mkdir -p /work/7
+		cd /work/7
+		[ -f kernel/.git/config ] || {
+			git clone git@gitlab.com:redhat/rhel/src/kernel/rhel-7.git \
+				kernel 2>&1 | tee -a $logfile
+			cd kernel
+			git remote add tcamuso \
+			git@gitlab.com:tcamuso/rhel-8.git | tee -a $logfile
+		}
+
+		[ -d /work/8 ] || mkdir -p /work/8
+		cd /work/8
+		[ -f kernel/.git/config ] || {
+			git clone git@gitlab.com:redhat/rhel/src/kernel/rhel-8.git \
+				kernel 2>&1 | tee -a $logfile
+			cd kernel
+			git remote add tcamuso \
+				git@gitlab.com:tcamuso/rhel-8.git | tee -a $logfile
+		}
+
+		[ -d /work/c9s ] || mkdir -p /work/c9s
+		cd /work/c9s
+		[ -f kernel/.git/config ] || {
+			git clone git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-9.git \
+				kernel 2>&1 | tee -a $logfile
+			cd kernel
+			git remote add tcamuso git@gitlab.com:tcamuso/centos-stream-9.git \
+				| tee -a $logfile
+		}
+
+		[ -d /work/ark ] || mkdir -p /work/ark
+		cd /work/ark
+		[ -f kernel/.git/config ] || {
+			git clone git@gitlab.com:cki-project/kernel-ark.git \
+				kernel 2>&1 | tee -a $logfile
+			cd kernel
+			git remote add tcamuso \
+				git@gitlab.com:tcamuso/kernel-ark.git | tee -a $logfile
+		}
+	fi
 fi
 
 exit 0
