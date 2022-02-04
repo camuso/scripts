@@ -422,7 +422,6 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	# Add the user and give him ownership of all the work directories
 	useradd tcamuso
-	chown -R tcamuso.tcamuso /work
 	ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts
 
 	# Create the upstream linux kernel repo
@@ -478,6 +477,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 			git clone git@gitlab.com:redhat/rhel/src/kernel/rhel-7.git \
 				kernel 2>&1 | tee -a $logfile
 			cd kernel
+			git fetch
+			git pull
 			git remote add tcamuso \
 			git@gitlab.com:tcamuso/rhel-8.git | tee -a $logfile
 		}
@@ -488,6 +489,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 			git clone git@gitlab.com:redhat/rhel/src/kernel/rhel-8.git \
 				kernel 2>&1 | tee -a $logfile
 			cd kernel
+			git fetch
+			git pull
 			git remote add tcamuso \
 				git@gitlab.com:tcamuso/rhel-8.git | tee -a $logfile
 		}
@@ -498,6 +501,8 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 			git clone git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-9.git \
 				kernel 2>&1 | tee -a $logfile
 			cd kernel
+			git fetch
+			git pull
 			git remote add tcamuso git@gitlab.com:tcamuso/centos-stream-9.git \
 				| tee -a $logfile
 		}
@@ -508,10 +513,16 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 			git clone git@gitlab.com:cki-project/kernel-ark.git \
 				kernel 2>&1 | tee -a $logfile
 			cd kernel
+			git fetch
+			git pull
 			git remote add tcamuso \
 				git@gitlab.com:tcamuso/kernel-ark.git | tee -a $logfile
 		}
 	fi
+
+	# Guarantee that I own all the /work directories.
+	#
+	chown -R tcamuso.tcamuso /work
 fi
 
 exit 0
