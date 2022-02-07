@@ -2,7 +2,7 @@
 #
 # rhstat
 
-declare repolist="~/.config/patchreview/repolist"
+declare repolist="/home/tcamuso/.config/patchreview/repolist"
 
 declare usagestr=$(
 cat <<EOF
