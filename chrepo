@@ -6,8 +6,8 @@ source $HOME/bin/lib/ui.source
 terminal_background=$tb_dark
 ui_set_colors
 
-declare repomap="$HOME/.config/patchreview/repomap"
-declare repolist="$HOME/.config/patchreview/repolist"
+declare repomap=$HOME/.config/patchreview/repomap
+declare repolist=$HOME/.config/patchreview/repolist
 declare usagestr=$(
 cat <<EOF
 
