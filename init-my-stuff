@@ -375,6 +375,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	rsync \
 	texinfo \
 	tpm-tools \
+	usbutils \
 	vim vim-enhanced vim-filesystem \
 	watchdog \
 	waiverdb-cli \
