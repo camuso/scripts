@@ -64,11 +64,15 @@ if [ -f /etc/os-release ]; then
 	if [[ "$distro" == "fedora" ]]; then
 		installagent=dnf
 		installflags="--allowerasing --best"
-	elif [[ "$distro" == "rhel" ]]; then
+	elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 		# Get the major version and strip off any leading double quotes
 		#
 		majversion=$(grep -w 'VERSION_ID' /etc/os-release | cut -d= -f2 | cut -d. -f1)
 		majversion=${majversion#\"}
+		majversion=${majversion%\"}
+
+echo "majversion: $majversion"
+
 
 		# Determine the install agent based on the major version
 		#
@@ -229,22 +233,22 @@ get_rcmtools()
 	fi
 
 	case "$majversion" in
-		"6" )   echo "RHEL-6" | tee -a "$logfile"
+		"6" )   echo "$distro-6" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
 			return 0
  			;;
-		"7" )	echo "RHEL-7" | tee -a "$logfile"
+		"7" )	echo "$distro-7" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
 			return 0
 			;;
-		"8" )	echo "RHEL-8" | tee -a "$logfile"
+		"8" )	echo "$distro-8" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			return 0
 			;;
-		"9" ) 	echo "RHEL-8 for RHEL-9" | tee -a "$logfile"
+		"9" ) 	echo "$distro for RHEL-9" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			return 0
@@ -259,19 +263,19 @@ get_rcmtools()
 get_epel() {
 	echo -n "Installing EPEL for " | tee -a "$logfile"
 	case "$majversion" in
-		"6" )   echo "RHEL-6" | tee -a "$logfile"
+		"6" )   echo "$distro-6" | tee -a "$logfile"
 			yum install -y https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm
 			return 0
  			;;
-		"7" )	echo "RHEL-7" | tee -a "$logfile"
+		"7" )	echo "$distro-7" | tee -a "$logfile"
 			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
 			return 0
 			;;
-		"8" )	echo "RHEL-8" | tee -a "$logfile"
+		"8" )	echo "$distro-8" | tee -a "$logfile"
 			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 			return 0
 			;;
-		"9" ) 	echo "RHEL-8 for RHEL-9" | tee -a "$logfile"
+		"9" ) 	echo "$distro-8 for $distro-9" | tee -a "$logfile"
 			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 			return 0
 			;;
@@ -321,7 +325,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 		dnf install -y fedpkg rhel-packager centpkg-sig
 	fi
 
-	if [[ "$distro" == "rhel" ]]; then
+	if [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 		get_epel
 		installagent=yum
 	fi
@@ -469,6 +473,16 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 		[ -f kernel/.git/config ] || {
 			git clone git@gitlab.com:redhat/rhel/src/kernel/rhel-$majversion.git \
 				kernel 2>&1 | tee -a $logfile
+		}
+	fi
+
+	if [ "$distro" == "centos" ]; then
+		mkdir $majversion
+		cd $majversion
+		[ -f kernel/.git/config ] || {
+			git clone \
+			git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-$majversion.git \
+			kernel 2>&1 | tee -a $logfile
 		}
 	fi
 
