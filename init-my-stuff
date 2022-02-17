@@ -370,6 +370,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	OpenIPMI \
 	openssl openssl-devel \
 	patch patchutils \
+	python-bugzilla-cli \
 	rhpkg \
 	rpm-build \
 	rsync \
