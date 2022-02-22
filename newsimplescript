@@ -34,7 +34,7 @@ EOF
 )
 
 usage() {
-	echo -en "\$usagestr"
+	echo -en \"\$usagestr\"
 	exit 1
 }
 
