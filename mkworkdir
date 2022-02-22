@@ -100,13 +100,14 @@ main() {
 	mkfs.xfs $workdir
 	[ -d /home ] || mkdir /home
 	[ -d /work ] || mkdir /work
-	mount -v $homedir
-	mount -v $workdir
 
 	grep $workdir /etc/fstab || {
 		cp -v /etc/fstab /etc/fstab.orig
 		echo "$workmnt" >> /etc/fstab
 	}
+
+	mount -v $homedir
+	mount -v $workdir
 }
 
 main $@
