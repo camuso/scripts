@@ -401,6 +401,12 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	# python-bugzilla \
 	# git-lab-porcelain \
 
+# We're gonna quit here, because we need to create the /work mountpoint as a logical
+# volume. For that, we will use mkworkdir interactively.
+# The creation of the repos will be done separately at command line of the new
+# system.
+#
+exit 0
 	mkdir -p /work
 	cd /work
 
