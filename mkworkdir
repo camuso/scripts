@@ -1,0 +1,115 @@
+#!/bin/bash
+#
+# mkworkdir
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+	Remove and recreate home directory with smaller size and create
+	a /work logical volume with a size large enough to do actual work.
+
+Arguments:
+	help : print this text to the screen.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+declare warning=$(
+cat <<EOF
+
+ Be sure you have backed-up or moved everything in your /home directory,
+ because it will be destroyed.
+
+ Press ctrl-c NOW if you need to do that first.
+ Press any other key to continue.
+\0
+EOF
+)
+
+declare homemnt=
+declare workmnt=
+declare homedir=
+declare workdir=
+declare logvol=
+declare homesiz=
+declare worksiz=
+declare newhomesiz=
+
+main() {
+	local yn=
+
+	[[ "$1" == *"h"* ]] && usage
+
+	echo -e "$warning"
+	read
+
+	homemnt=$(grep home /etc/fstab)
+	[ $? -eq 0 ] || {
+		echo "Can't find \'home\' in /etc/fstab"
+		exit 1
+	}
+
+	workmnt=${homemnt//home/work}
+	homedir=$(echo $homemnt | cut -d' ' -f1)
+	workdir=${homedir/home/work}
+	logvol=$(vgs)
+	logvol=$(echo $logvol | cut -d' ' -f8)
+
+	# echo the parameters before continuing.
+	#
+	echo "logvol : $logvol"
+	echo "homedir: $homedir"
+	echo "workdir: $workdir"
+	echo "homemnt: $homemnt"
+	echo "workmnt: $workmnt"
+	read -p "Press ctrl-c to exit or any other key to continue ..."
+
+	homesiz=$(lvs | grep home | cut -d' ' -f6)
+	echo "Current homedir size: $homesiz"
+
+	while :; do
+		read -p "Enter new homedir size in GB: " newhomesiz
+		echo "The new homedir will be $newhomesiz GB"
+		homesiz=${homesiz//[a-z,A-Z]/}
+		homesiz=$(echo $homesiz | cut -d'.' -f1)
+		[ $newhomesiz -lt $homesiz ] || {
+			echo "New homedir size must be less than $homesiz"
+			continue
+		}
+		worksiz=$((homesiz - newhomesiz))
+		echo "The workdir size will be $worksiz GB"
+		read -n1 -p "Is this what you want (y/n) : " yn
+		[ "$yn" == "y" ] && break
+	done
+	echo
+
+	umount -v -l $homedir
+	lvremove -v $homedir
+	lvcreate -v -L ${newhomesiz}G -n home $logvol
+	lvcreate -v -L ${worksiz}G -n work $logvol
+	mkfs.xfs $homedir
+	mkfs.xfs $workdir
+	[ -d /home ] || mkdir /home
+	[ -d /work ] || mkdir /work
+	mount -v $homedir
+	mount -v $workdir
+
+	grep $workdir /etc/fstab || {
+		cp -v /etc/fstab /etc/fstab.orig
+		echo "$workmnt" >> /etc/fstab
+	}
+}
+
+main $@
+
+exit 0
+
