@@ -66,10 +66,14 @@ main() {
 
 	# echo the parameters before continuing.
 	#
-	echo "logvol : $logvol"
+	echo "Logical Volume name : $logvol"
+	echo "-------------------"
+	echo "The /home directory will be destroyed and recreated"
 	echo "homedir: $homedir"
-	echo "workdir: $workdir"
 	echo "homemnt: $homemnt"
+	echo
+	echo "The /work directory will be created and added to /etc/fstab."
+	echo "workdir: $workdir"
 	echo "workmnt: $workmnt"
 	read -p "Press ctrl-c to exit or any other key to continue ..."
 
@@ -111,6 +115,8 @@ main() {
 
 	lvextend -l +100%FREE $workdir
 	xfs_growfs $workdir
+	restorecon -R /work
+	restorecon -R /home
 }
 
 main $@
