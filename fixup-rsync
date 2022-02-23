@@ -7,6 +7,6 @@ if [ "$remoteuser" == "root" ]; then
 #	chmod -v g-w /root
 else
 	chown -v $remoteuser.$remoteuser /home/$remoteuser
-#	chmod -v go-w /home/$1
+	sudo chmod -v go-w /home/$1/.
 fi
 
