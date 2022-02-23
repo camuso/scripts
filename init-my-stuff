@@ -186,14 +186,14 @@ echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
 echo "************************************************" >> "$logfile" 2>&1
 echo >> "$logfile" 2>&1
 echo "rsync contents of rcbak to home directory" | tee -a "$logfile"
-rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
+rsync -Pat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
 echo -e "---------------\n" | tee -a "$logfile"
 
 # Can only do the following if root
 #
 if [ $(id -u) -eq 0 ]; then
 	echo "rsync contents of etcbk to /etc" | tee -a "$logfile"
-	rsync -Pvat --cvs-exclude etcbk/ /etc/.| tee -a "$logfile"
+	rsync -Pat --cvs-exclude etcbk/ /etc/.| tee -a "$logfile"
 	echo -e "---------------\n" | tee -a "$logfile"
 fi
 
