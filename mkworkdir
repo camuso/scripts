@@ -108,6 +108,9 @@ main() {
 
 	mount -v $homedir
 	mount -v $workdir
+
+	lvextend -l +100%FREE $workdir
+	xfs_growfs $workdir
 }
 
 main $@
