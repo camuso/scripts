@@ -420,6 +420,14 @@ exit 0
 		make install 2>&1 | tee -a $logfile
 	}
 
+	[ -d /work/progress ] || {
+		git clone https://github.com/Xfennec/progress.git
+		cd progress
+		make
+		make install
+		cd -
+	}
+
 	# If the caller passed a -g option, it means no git repo,
 	# so return to the top directory and exit.
 	#
