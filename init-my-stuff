@@ -192,6 +192,7 @@ echo -e "---------------\n" | tee -a "$logfile"
 # Can only do the following if root
 #
 if [ $(id -u) -eq 0 ]; then
+	useradd tcamuso
 	echo 'tcamuso ALL=(ALL)NOPASSWD: ALL' >> /etc/sudoers
 	echo "rsync contents of etcbk to /etc" | tee -a "$logfile"
 	rsync -Pat --cvs-exclude etcbk/ /etc/.| tee -a "$logfile"
