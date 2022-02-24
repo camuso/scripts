@@ -1,0 +1,30 @@
+#!/bin/bash
+[ -z "$1" ] && exit 1
+NAME=$1
+shift
+if [ "${NAME}" -ge 0 2>/dev/null ]
+then
+  ENTRY=$( \
+	   ldapsearch -x -LLL -h ldap.corp.redhat.com \
+		      -b ou=users,dc=redhat,dc=com \
+		    "(|(employeeNumber=${NAME})(rhatOraclePersonID=${NAME}))" $@ \
+	 )
+elif echo "${NAME}" | grep -q @
+then
+  ENTRY=$( \
+	   ldapsearch -x -LLL -h ldap.corp.redhat.com \
+		      -b ou=users,dc=redhat,dc=com \
+		    "(mail=*${NAME}*)" $@ \
+	 )
+else
+  ENTRY=$( \
+	   ldapsearch -x -LLL -h ldap.corp.redhat.com \
+		      -b ou=users,dc=redhat,dc=com \
+		    "(|(cn=*${NAME}*)(uid=${NAME}))" $@ \
+	 )
+fi
+#export LESS_TERMCAP_so=$'\E[30;43m'
+#export LESS_TERMCAP_se=$'\E[0m'
+export LESS_TERMCAP_so=$'\E[38;5;0m\E[48;5;208m'
+export LESS_TERMCAP_se=$'\E[0m'
+echo "$ENTRY" | less -R -p "${NAME}"
