@@ -55,7 +55,7 @@ update_repo() {
 	echo "----------------"
 	git checkout $br
 	git rebase origin/$br
-	# git push tcamuso $br
+	git push tcamuso $br
 	echo
 }
 
