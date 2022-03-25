@@ -78,6 +78,7 @@ main() {
 	repos=$(find ./ -maxdepth 2 -type d -name kernel -exec realpath {} \;)
 
 	while read dir; do
+		[ -f "$dir/.git/config" ] || continue
 		echo "cd $dir"
 		echo "========================"
 		cd $dir
