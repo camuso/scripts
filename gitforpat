@@ -3,11 +3,16 @@
 # gitforpat
 #
 
+declare CL1="\e["$tcols"D"	# column 1 of the current line
+declare CCR="\e[K"    		# clear line and carriage return
+declare UP1="\e[1A"		# move cursor up one line
+
 declare -i argcount=2
 declare -i optcount=0
 declare cletter="--no-cover-letter"
-declare reroll="--reroll-count=0"
+declare reroll=
 declare startnumber=1
+declare numbers="--no-numbered"
 
 declare usagestr=$(
 cat <<EOF
@@ -25,22 +30,8 @@ $(basename $0) [OPTIONS] directory commitspec -- pathspec
   -c      - generate a cover letter
   -v n    - version number of the patch
   -s n    - start patch series from number n
+  -n      - numbers
 
-  The patch set will be created with the following git command.
-
-  git format-patch \\\
-
-	--numbered \\\
-
-	--signoff \\\
-
-	--stat=80 \\\
-
-	--start-number=n \\\
-
-	--output-directory <directory> \\\
-
-	<commitspec> [-- pathspec]
 \0
 EOF
 )
@@ -50,7 +41,11 @@ usage() {
 	exit $1
 }
 
-while getopts :cv:s: OPTION; do
+show_reroll() {
+	[ -n "$reroll" ] && { echo -e "\t$reroll \\"; echo; } || echo -e "$UP1"
+}
+
+while getopts :cnv:s: OPTION; do
     case "$OPTION" in
 
 	c ) cletter="--cover-letter"
@@ -60,6 +55,9 @@ while getopts :cv:s: OPTION; do
 	    optcount=$((optcount+1))
 	    ;;
 	s ) startnumber=$OPTARG
+	    optcount=$((optcount+1))
+	    ;;
+	n ) numbers="--numbered"
 	    optcount=$((optcount+1))
 	    ;;
 	* ) echo "unrecognized option -$OPTION"
@@ -75,25 +73,34 @@ directory="$1"
 shift
 commitspec=$@
 
-echo -e "
-git format-patch \\
-	$cletter \\
-	$reroll  \\
-	--numbered \\
-	--signoff \\
-	--stat=80 \\
-	--start-number=$startnumber \\
-	--output-directory $directory \\
+declare outstr=$(
+cat <<EOF
+git format-patch \\\
+
+	$cletter \\\
+
+$(show_reroll)
+	$numbers \\\
+
+	--signoff \\\
+
+	--stat=80 \\\
+
+	--start-number=$startnumber \\\
+
+	--output-directory $directory \\\
+
 	$commitspec
-"
+EOF
+)
+echo -e "$outstr"
 
 echo "Press any key to continue or ctrl-c to exit..."
 read -n1
 
 git format-patch \
-	"$cletter" \
-	"$reroll" \
-	--numbered \
+	"$cletter" $reroll \
+	"$numbers" \
 	--signoff \
 	--stat=80 \
 	--start-number=$startnumber \
