@@ -36,26 +36,27 @@ update_repo() {
 
 	git fetch --all -p
 
-	while read br; do
-		echo "$br"
-		echo "----------------"
-		strtok "$br" '"[]' bary
-		arysiz=${#bary[@]}
-		git checkout ${bary[brindex]}
-		git pull
-		echo
-	done <<< $branches
-
-	echo $PWD | grep -q "upstream" && return
+#	while read br; do
+#		echo "$br"
+#		echo "----------------"
+#		strtok "$br" '"[]' bary
+#		arysiz=${#bary[@]}
+#		git checkout ${bary[brindex]}
+#		git pull
+#		echo
+#	done <<< $branches
+#
+#	echo $PWD | grep -q "upstream" && return
 
 	br=$(grep -A2 branch .git/config)
-	echo $br | grep -q origin && strtok "$br" '"[]' ary
+	echo $br | grep -q origin && strtok "$br" '"[]' bary
 	br=${bary[brindex]}
 	echo "$br"
 	echo "----------------"
 	git checkout $br
-	git rebase origin/$br
-	git push tcamuso $br
+	git pull
+#	git rebase origin/$br
+#	git push tcamuso $br
 	echo
 }
 
