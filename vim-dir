@@ -1,0 +1,64 @@
+#!/bin/bash
+#
+# vim-dir
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) dirspec
+
+Description: Invokes vim for every file in the directory
+
+Arguments:
+dirspec - any directory
+
+Example:
+	$(basename $0) .patches/*.patch
+
+\0
+EOF
+)
+
+shopt -s extglob
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+function read_nth_line {
+	awk -v line=$1 '{
+		if (NR == line) {
+			print $0;
+		}
+	}' $2
+}
+
+press_any() {
+	echo -n "Press any key to continue or ctl-c to quit... "
+	read -n1
+}
+
+main() {
+	[ $# -ge 1 ] || usage
+
+	local dirspec=$1
+	local filelist=/dev/shm/filelist
+
+	ls -1 $dirspec > $filelist
+
+	for ((index=1; ; ++index)); do
+		f=$(read_nth_line $index $filelist)
+		echo "vim $dirspec/$f"
+		press_any
+		[ "$f" ] && vim "$dirspec/$f" || break
+		press_any
+	done
+
+	rm -f $filelist
+}
+
+main $@
+
+exit 0
+
