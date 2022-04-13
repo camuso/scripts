@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# vimdir
+
+shopt -s extglob
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+main() {
+	local dirspec="$1"
+	local fil=
+
+	for fil in $(ls -1d $dirspec/*); do
+		echo -e "$fil\n----------------------------------"
+		read -n1 -p "Press any key ..."
+		vim $fil
+		echo
+	done
+}
+
+main $@
+
+exit 0
+
