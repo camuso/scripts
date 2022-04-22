@@ -1,0 +1,1 @@
+index=0; for l in $(gitls); do let ++index; [ $((index % 4)) -eq 0 ] && echo $l; done
