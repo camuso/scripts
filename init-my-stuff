@@ -248,11 +248,15 @@ get_rcmtools()
 		"8" )	echo "$distro-8" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
+			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
+			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
 			return 0
 			;;
 		"9" ) 	echo "$distro for RHEL-9" | tee -a "$logfile"
 			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
+			http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
+			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
+			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
 			return 0
 			;;
 	esac
@@ -278,7 +282,7 @@ get_epel() {
 			return 0
 			;;
 		"9" ) 	echo "$distro-8 for $distro-9" | tee -a "$logfile"
-			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
 			return 0
 			;;
 	esac
