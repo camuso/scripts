@@ -78,7 +78,9 @@ main() {
 	read -p "Press ctrl-c to exit or any other key to continue ..."
 
 	homesiz=$(lvs | grep home | cut -d' ' -f6)
-	echo "Current homedir size: $homesiz"
+	homesiz=${homesiz%.*}
+	homesiz=${homesiz//[!0-9]/}
+	echo "Current homedir size: $homesiz GiB"
 
 	while :; do
 		read -p "Enter new homedir size in GB: " newhomesiz
