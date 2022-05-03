@@ -15,15 +15,20 @@ declare installagent
 declare installflags
 declare fetched=false
 declare majersion=
+declare b_install=false
+declare pkg=
 
 echo "Installing environment on ..."
 hostname
 echo
 
-while getopts hpg OPTION; do
+while getopts hipg OPTION; do
     case "$OPTION" in
 
 	h ) optcount=$((optcount+1))
+	    ;;
+	i ) optcount=$((optcount+1))
+	    b_install=true
 	    ;;
 	p ) optcount=$((optcount+1))
 	    b_pushpriv=true
@@ -38,6 +43,7 @@ done
 
 shift $optcount
 remotename="$1"
+$b_install || { [ "$2" == "install" ] && b_install=true || b_install==false; }
 
 # ========================================================================
 # To determine whether dnf or yum is the installagent, get the distro and
@@ -72,7 +78,6 @@ if [ -f /etc/os-release ]; then
 		majversion=${majversion%\"}
 
 echo "majversion: $majversion"
-
 
 		# Determine the install agent based on the major version
 		#
@@ -278,7 +283,7 @@ get_epel() {
 			return 0
 			;;
 		"8" )	echo "$distro-8" | tee -a "$logfile"
-			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 			return 0
 			;;
 		"9" ) 	echo "$distro-8 for $distro-9" | tee -a "$logfile"
@@ -314,7 +319,7 @@ get_certs()
 		mv /etc/yum.repos.d/rcm-tools.repo.save /etc/yum.repos.d/rcm-tools.repo
 }
 
-if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
+if $b_install && [ "$remotename" == "root" ]; then
 
 	declare arch=$(uname -m)
 	declare rcmurl=""
@@ -340,7 +345,7 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 
 	$installagent group install -y "Development Tools"
 
-	$installagent install --nogpgcheck -y $installflags \
+	for pkg in \
 	annobin-annocheck \
 	automake \
 	annobin \
@@ -395,7 +400,10 @@ if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
 	xorg-x11-apps \
 	xz \
 	zenity \
-	2>&1 | tee -a $logfile
+	; do
+		$installagent install -y $installflags $pkg \
+		2>&1 | tee -a $logfile
+	done
 
 	# orphaned packages
 	#
