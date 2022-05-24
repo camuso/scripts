@@ -77,7 +77,7 @@ main() {
 	echo "workmnt: $workmnt"
 	read -p "Press ctrl-c to exit or any other key to continue ..."
 
-	homesiz=$(lvs | grep home | cut -d' ' -f6)
+	homesiz=$(lvs --units g | grep home | cut -d' ' -f6)
 	homesiz=${homesiz%.*}
 	homesiz=${homesiz//[!0-9]/}
 	echo "Current homedir size: $homesiz GiB"
