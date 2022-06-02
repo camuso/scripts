@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# efireboot
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+main() {
+	local bootcurrent=$(efibootmgr | grep BootCurrent | cut -d' ' -f2)
+
+	if [[ -z "$bootcurrent" && -f /root/EFI_BOOT_ENTRY.TXT ]]; then
+         	bootcurrent=$(</root/EFI_BOOT_ENTRY.TXT)
+	fi
+
+	if [ -n "$bootcurrent" ]; then
+		logger -s "efibootmgr -n $bootcurrent"
+		efibootmgr -n "$bootcurrent"
+	else
+		echo "I don't know what to boot next."
+		echo "current boot order:"
+		efibootmgr
+		exit 1
+	fi
+	reboot
+}
+
+main $@
+
+exit 0
+
