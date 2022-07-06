@@ -85,7 +85,7 @@ hos="$(echo $remote | cut -d'@' -f2)"
 echo "connecting with $remote..."
 
 if $installer; then
-	runremote $user $hos ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user "install"
+	runremote $user $hos ~/bin/init-my-stuff -i $pushpriv $nolinuxrepo $user
 else
 	runremote $user $hos ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user
 fi
