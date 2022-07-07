@@ -102,9 +102,10 @@ else
 fi
 
 # ========================================================================
-# Can't go any further without rsync and git
+# Can't go any further without which rsync and git
 # ------------------------------------------------------------------------
 #
+$installagent install -y which
 which rsync
 [ $? -eq 0 ] || $installagent install -y rsync
 
