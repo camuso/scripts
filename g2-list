@@ -7,7 +7,7 @@ declare BLD="\033[1m"
 declare UND="\033[4m"
 declare OFF="\033[0m"
 
-declare grubconfigfile=$(find /boot -name grub.cfg)
+declare grubconfigfile=$(find /boot/grub2 -name grub.cfg)
 declare grublist=$(grep "^menuentry" $grubconfigfile | cut -d "'" -f2)
 declare olddef=$(grub2-editenv list | head -1 | cut -d'=' -f2)
 declare entries=$(find /boot -type d -name entries)
