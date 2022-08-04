@@ -1,0 +1,60 @@
+#!/bin/bash
+# grub-cfg-stub-create
+# Version 1.0, Jun 28, 2022.
+#
+# Recreate the RHEL9 stub /boot/efi/EFI/redhat/grub.cfg file
+#
+# Post installation actions in the Beaker generated Anaconda kickstart file
+# for RHEL9 provisions may overwrite the stub /boot/efi/EFI/redhat/grub.cfg
+# file. This script can be used to recreate it.
+#
+# Author: Lenny Szubowicz <lszubowi@redhat.com>, Red Hat, Inc.
+
+
+# This should only be run by root on RHEL9, EFI-based systems
+#
+if [ $(whoami) != "root" ]; then
+	echo "$(basename $0) needs to be run as root"
+	exit 1
+fi
+
+if [ ! -f /etc/redhat-release ] || \
+   ! grep --silent "^Red Hat Enterprise Linux release 9" /etc/redhat-release ; then
+	echo "$(basename $0) can only be run on a RHEL 9.x system"
+	exit 1
+fi
+
+if [ ! -f /boot/efi/EFI/redhat/grub.cfg ] ; then
+	echo "$(basename $0) can only be run on a RHEL EFI-based system"
+	exit 1
+fi
+
+# The stub will refer to /boot/grub2/grub.cfg  If this file doesn't exist,
+# something else is wrong and we should not proceed.
+#
+if [ ! -f /boot/grub2/grub.cfg ] ; then
+	echo "Cannot find existing /boot/grub2/grub.cfg file"
+	exit 1
+fi
+
+if [ -L /boot/grub2/grub.cfg ] ; then
+	echo "On RHEL 9.x, /boot/grub2/grub.cfg should not be a symbolic link"
+	exit 1
+fi
+
+# First line of the stub grub.cfg specifies the file system UUID of
+# the /boot partition
+#
+cat << EOF > /boot/efi/EFI/redhat/grub.cfg
+search --no-floppy --fs-uuid --set=dev $(lsblk -no UUID $(df -P /boot/grub2 | awk 'END{print $1}'))
+set prefix=(\$dev)/grub2
+export \$prefix
+configfile \$prefix/grub.cfg
+EOF
+
+# Make sure ownership and protections are correct
+#
+chown root:root /boot/efi/EFI/redhat/grub.cfg
+chmod u=rwx,go= /boot/efi/EFI/redhat/grub.cfg
+
+exit 0
