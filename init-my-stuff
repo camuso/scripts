@@ -349,6 +349,7 @@ if $b_install && [ "$remotename" == "root" ]; then
 	automake \
 	annobin \
 	annobin-annocheck \
+	centpkg \
 	elfutils-libelf-devel \
 	gcc \
 	gcc-c++ \
@@ -384,6 +385,7 @@ if $b_install && [ "$remotename" == "root" ]; then
 	OpenIPMI \
 	openssl openssl-devel \
 	patch patchutils \
+	perl \
 	pv \
 	python-bugzilla-cli \
 	rhpkg \
