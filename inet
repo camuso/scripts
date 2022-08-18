@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# inet
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en "$usagestr"
+	exit 1
+}
+
+main() {
+	ifconfig | grep inet -m1 | grep broadcast | tr -s ' ' | cut -d' ' -f3
+}
+
+main $@
+
+exit 0
+
