@@ -12,8 +12,11 @@ function usage() {
 
 saved_entry=$(grub2-editenv list | grep "^saved_entry=" | awk -F "=" ' { print $2 }')
 
-grubvalue=0
-list=
+declare grubvalue=0
+declare list=
+declare value=0
+declare vers=
+declare grubenvdir=
 
 if [ $# -gt 1 ]; then
 	usage
@@ -30,57 +33,67 @@ if [ $# -eq 1 ]; then
 	fi
 fi
 
-display() {
-value=-1
-
-# Oct 7 2018: The old pre-grub BLS call was
-# list=$(cat $GRUBFILE | grep 'menuentry ' | awk -F "'" ' { print $2 } ')
-# but 'grubby --info=ALL' appears to work on pre-grub2 BLS installations.
-#
-# Jan 8 2020
-# It's possible to have both a grub.cfg file and an entries directory.
-# Only use grubby when there is an entries directory
-[ -d /boot/loader/entries ] && \
-	list=$(grubby --info=ALL | grep "^title=" | awk -F "title=" ' { print $2 } ')
-
-# tboot still puts its entries in a submenu in grub.conf. If the file exists,
-# parse it for entries and add them to the ones obtained from grubby.
-grubconfigfile=$(find /boot -name grub.cfg)
-[ $grubconfigfile ] && {
-	grubconfiglist="$(grep "^menuentry" $grubconfigfile | cut -d "'" -f2)"
-	list="$(printf "%s\n%s\n" "$grubconfiglist" "$list" )"
-}
-
-echo "$list" | while read ENTRY
-do
-	if [ ! -z "$ENTRY" ]; then
-		NEXT=0
-		DEFAULT=0
-		((value++))
-		[ "$grubvalue" -eq "$value" ] && NEXT=1
-		# saved_entry can be numeric or (by default) the entry string
-		[ "$ENTRY" == "$saved_entry" ] || [ "$value" == "$saved_entry" ] && DEFAULT=1
-
-		# TODO: add an option to print the full entry?
-		echo $ENTRY | grep rescue >& /dev/null
-		if [ $? -ne 0 ]; then
-			echo $ENTRY | grep -i tboot >& /dev/null
-			if [ $? -ne 0 ]; then
-				ENTRY=$(echo $ENTRY | awk -F "(" ' {print $2} ')
-				ENTRY=$(echo $ENTRY | awk -F ")" ' {print $1} ')
-				# TODO: optionally output 'kernel'
-				#ENTRY="kernel $ENTRY"
-			fi
-		fi
-
-		[ "$NEXT" -eq "1" ] && [ "$DEFAULT" -eq "1" ] && echo "*D |$value  $ENTRY" && continue
-		[ "$DEFAULT" -eq "1" ] && echo " D |$value  $ENTRY" && continue
-		[ "$NEXT" -eq "1" ] && echo "*  |$value  $ENTRY" && continue
-		echo "   |$value  $ENTRY"
+# RHEL-8 and RHEL-9 use different directories for grub.cfg
+vers=$(cat /etc/os-release | grep -w VERSION | tr -dc  [:digit:])
+if [ ${vers:0:1} -eq 9 ]; then
+	grubenvdir="/boot/grub2/"
+elif [ ${vers:0:1} -eq 8 ]; then
+	if [ -d /sys/firmware/efi ]; then
+		grubenvdir='/boot/efi/EFI/redhat'
 	else
-		echo "empty?"
+		grubenvdir='/boot/grub2'
 	fi
-done
+fi
+
+display() {
+	local grubconfigfile="$grubenvdir/grub.cfg"
+
+	# Oct 7 2018: The old pre-grub BLS call was
+	# list=$(cat $GRUBFILE | grep 'menuentry ' | awk -F "'" ' { print $2 } ')
+	# but 'grubby --info=ALL' appears to work on pre-grub2 BLS installations.
+	#
+	# Jan 8 2020
+	# It's possible to have both a grub.cfg file and an entries directory.
+	# Only use grubby when there is an entries directory
+	if [ -d /boot/loader/entries ]; then
+		list="$(grubby --info=ALL | grep "^title=" | awk -F "title=" ' { print $2 } ')"
+	fi
+
+	if [ $grubconfigfile ]; then
+		grubconfiglist="$(grep "^submenu" $grubconfigfile | cut -d '"' -f2)"
+		list="$(printf "%s\n%s\n" "$grubconfiglist" "$list" )"
+	fi
+
+	echo "$list" | while read ENTRY
+	do
+		if [ ! -z "$ENTRY" ]; then
+			NEXT=0
+			DEFAULT=0
+			((value++))
+			[ "$grubvalue" -eq "$value" ] && NEXT=1
+			# saved_entry can be numeric or (by default) the entry string
+			[ "$ENTRY" == "$saved_entry" ] || [ "$value" == "$saved_entry" ] && DEFAULT=1
+
+			# TODO: add an option to print the full entry?
+			echo $ENTRY | grep rescue >& /dev/null
+			if [ $? -ne 0 ]; then
+				echo $ENTRY | grep -i tboot >& /dev/null
+				if [ $? -ne 0 ]; then
+					ENTRY=$(echo $ENTRY | awk -F "(" ' {print $2} ')
+					ENTRY=$(echo $ENTRY | awk -F ")" ' {print $1} ')
+					# TODO: optionally output 'kernel'
+					#ENTRY="kernel $ENTRY"
+				fi
+			fi
+
+			[ "$NEXT" -eq "1" ] && [ "$DEFAULT" -eq "1" ] && echo "*D |$value  $ENTRY" && continue
+			[ "$DEFAULT" -eq "1" ] && echo " D |$value  $ENTRY" && continue
+			[ "$NEXT" -eq "1" ] && echo "*  |$value  $ENTRY" && continue
+			echo "   |$value  $ENTRY"
+		else
+			echo "empty?"
+		fi
+	done
 }
 
 cols=$(tput cols)
