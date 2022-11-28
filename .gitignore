@@ -2,13 +2,13 @@ temp/
 test/
 coventry/
 recovery/
+deprecated
 .*
 .*.swp
 *.tgz
 *.tar
 *.gz
 *.list
-*.txt
 
 # specific files to ignore.
 # These are dependent on separate git repos
