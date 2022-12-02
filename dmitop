@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# dmishow
+# dmitop
 
 
 usagestr="
 $(basename $0)
 
-	Show the follwoing information about the system
+	Show the following information about the system
 
 	BIOS Information
 		Vendor
