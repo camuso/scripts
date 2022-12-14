@@ -1,0 +1,35 @@
+#!/bin/bash
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Unloads and reloads the currently loaded ipmi modules.
+\0
+EOF
+)
+
+[ "$1" == "-h" ] && { echo -e "$usagestr"; exit 0; }
+
+declare mod
+declare addsudo=
+declare ipmidir="./drivers/char/ipmi"
+declare ipmiload=$(lsmod | grep ipmi | sort -rhk3)
+declare ipmiunload=$(lsmod | grep ipmi | sort -hk3)
+declare user
+
+user=$(id -u)
+
+((user == 0)) || addsudo="sudo"
+
+while read line; do
+	mod=$(echo "$line" | cut -d' ' -f1)
+	$addsudo rmmod "$mod"
+done <<< "$ipmiunload"
+
+while read line; do
+	mod=$(echo "$line" | cut -d' ' -f1)
+	$addsudo insmod "$ipmidir"/"$mod".ko
+done <<< "$ipmiload"
+
