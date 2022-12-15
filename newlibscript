@@ -1,0 +1,224 @@
+#!/bin/bash
+#
+# Create an empty bash script with placeholders for help text and
+# a usage function
+#
+
+
+
+source lib/getyn
+
+declare MYDIR=
+declare MYLIB=
+declare usagestr=
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+
+source "$MYLIB"/ui.source
+
+declare b_opts=false
+declare b_args=false
+declare b_answer=false
+declare opts=
+declare args=
+declare optstr=
+declare -i argcount=0
+declare -i optcount=0
+declare -i index
+declare -i width
+declare -i widest
+declare spacer="  "
+declare ofile
+declare b_cfgmgr=false
+
+usagestr=$(
+cat <<EOF
+
+$(basename $0) [ options ] <bashscript>
+
+Create an empty bash script with placeholders for help text and
+a usage function
+
+  -o options, a quote enclosed string containing a list of space separated
+     option flags with optional corresponding arguments.
+
+     Example: -o "n:number f:file d:directory x h" -a "arg1 arg2"
+
+     Creates options for -n number,  -f file, -d directory, -x and -h
+     with no arguments.
+
+  -a arguments, double quote enclosed string of arguments that follow
+     the options for the new script being created.
+     If the number of arguments following the options is not exactly
+     this number, then the newly created script will print its usage
+     message and exit.
+
+     Example: -a "arg1 arg2"
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit
+}
+
+test_help() {
+	local opt="$1"
+
+	shopt -s nocasematch
+	[[ $opt =~ (h|help) ]] && { usage; exitme $exit_ok; }
+	shopt -u nocasematch
+}
+
+#############################
+# Start execution
+#############################
+
+declare arg=
+declare opt=
+
+test_help "$1"
+
+for arg in "$@"; do
+
+    if [ "${arg:0:1}" == '-' ]; then
+	opt="${arg:1}"
+	shift
+
+	case "$opt" in
+	o ) opts="$1"
+	    b_opts=true
+	    shift
+	    ;;
+	a ) args="$1"
+	    b_args=true
+	    echo "args: "$args""
+	    shift
+	    ;;
+	c ) b_cfgmgr=true
+	    ;;
+	h ) usage
+	    ;;
+	* ) echo "unrecognized option"
+	    echo -e "$usagestr"
+	    exit 127
+	esac
+    fi
+done
+
+ofile=$1
+
+if [ -f "$ofile" ]; then
+# set -x
+	echo
+	echo "File: $ofile already exists!"
+	getyn "Do you want to overwrite?" answer
+	$answer && echo "Overwriting file: $ofile" || exit 1
+# set +x
+fi
+
+: > $ofile
+
+$b_opts && optstr="[options]"
+
+echo -en '#!/bin/bash
+#
+# '$ofile'
+#
+# Establish the directory defaults
+#
+declare MYDIR=
+declare MYLIB=
+declare MYDATA=
+declare configfile=
+declare usagestr=
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+MYDATA=$(realpath ./.data)
+[ -d "$MYDATA" ] || mkdir -p "$MYDATA"
+
+source "$MYLIB"/ui.source
+source "$MYLIB"/config-manager.source
+
+usagestr=$(
+cat <<EOF
+$(basename "$0")' >> "$ofile"
+
+$b_opts && echo -en ' [options]' >> "$ofile"
+$b_args && echo -e " $args\n" >> "$ofile"
+
+declare -i optwid=0
+declare -i padwid=0
+$b_args && {
+	for arg in $args; do
+		((${#arg} > optwid)) && optwid=${#arg}
+	done
+
+	echo -e "Arguments\n---------" >> "$ofile"
+
+	for arg in $args; do
+		echo -en "   $arg" >> "$ofile"
+		padwid=$((optwid - ${#arg}))
+		echo -e "$(ui_putnchar " " $padwid) : " >> "$ofile"
+	done
+	echo >> "$ofile"
+}
+
+optwid=0
+padwid=0
+$b_opts && {
+	for opt in $opts; do
+		((${#opt} > optwid)) && optwid=${#opt}
+	done
+
+	echo -e "Options\n-------" >> "$ofile"
+
+	for opt in $opts; do
+		opt="${opt//:/ }"
+		padwid=$((optwid - ${#opt}))
+		echo -en "  -$opt" >> "$ofile"
+		echo -e "$(ui_putnchar " " $padwid) : " >> "$ofile"
+	done
+}
+
+echo -en '
+EOF
+)
+
+# run if user hits control-c
+#
+control_c()
+{
+	echo -en "\nCtrl-c detected\nCleaning up and exiting.\n"
+	exitme $CTLC_EXIT
+}
+' >> "$ofile"
+
+$b_cfgmgr && echo -en '
+init() {
+	local bgtemp
+	local cfgtemplate
+
+	ui_setbg bgtemp
+
+	configfile="$MYDATA"/'$ofile'.conf
+	cfgtemplate="$MYLIB"/'$ofile'.conf
+	cfg_start "$cfgtemplate" "$configfile"
+
+	background=$bgtemp
+	cfg_set_item "background" "$backgroound"
+}
+' >> $ofile
+: '
+if $b_args; then
+	createoptions -o "$opts" -a "$args" $ofile
+else
+	createoptions -o "$opts" $ofile
+fi
+'
+chmod +x "$ofile"
+
