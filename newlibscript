@@ -42,8 +42,6 @@ a usage function
 
   -c Include config-manager
 
-  -p Create an options parser framework
-
   -o options, a quote enclosed string containing a list of space separated
      option flags with optional corresponding arguments.
 
