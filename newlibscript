@@ -217,6 +217,23 @@ echo -en '	exit $CTLC_EXIT
 }
 ' >> "$ofile"
 
+$b_cfgmgr && {
+	echo -en '
+# exitme
+#
+# Globals
+#   configfile
+#   All vars in configfile
+exitme() {
+	local -i code=$1
+	local artifact="$2"
+
+	cfg_update_configfile
+	ui_exit $code "$artifact"
+}
+'>> "$ofile"
+}
+
 echo -en '
 # init
 #
@@ -324,7 +341,8 @@ echo -en 'main() {
 
 $b_cfgmgr && echo -e "\tinit" >> "$ofile"
 $b_opts && echo -e "\tparseopts "'"$@"' >> "$ofile"
-$b_cfgmgr && echo -e "\n\tcfg_update_configfile" >> "$ofile"
+$b_cfgmgr && echo -e "\n\texitme "'$ui_exit_ok' >> "$ofile" \
+	  || echo -e "\n\tui_exit"'ui_exit_ok' >> "$ofile"
 
 echo -en '}
 
