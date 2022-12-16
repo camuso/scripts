@@ -1,0 +1,114 @@
+#!/bin/bash
+#
+# docscript
+#
+
+declare MYDIR=
+declare MYLIB=
+declare MYDATA=
+declare background=
+declare usagestr=
+declare optcount=0
+declare b_verbose=false
+declare file=
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+MYDATA=$(realpath ./.data)
+[ -d "$MYDATA" ] || mkdir -p "$MYDATA"
+
+source "$MYLIB"/ui.source
+
+usagestr=$(
+cat <<EOF
+
+$(basename "$0") [options] file
+
+Arguments
+---------
+   file : script having doc delimiters #** and #*
+
+Options
+-------
+  -v : verbose output instead of single line
+\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# init
+#
+# GLOBALS
+#   background
+#
+init() {
+	local bgtemp
+
+	ui_setbg bgtemp
+	background=$bgtemp
+}
+
+# parseopts
+#
+# Globals
+#
+parseopts() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+
+	    if [ "${arg:0:1}" == "-" ]; then
+		opt="${arg:1}"
+		shift
+		((optcount++))
+
+		case "$opt" in
+		v ) b_verbose=true
+		    ;;
+		h ) echo -e "$usagestr"
+		    exit 0
+		esac
+	    fi
+	done
+}
+
+main() {
+	local b_doc=false
+	parseopts "$@"
+	shift "$optcount"
+	file="$1"
+
+	while IFS= read -r line; do
+		if [[ "${line:0:3}" == "#**" ]]; then
+			$b_verbose && echo "$(ui_putnchar "=" 75)"
+			echo "${line:3}"
+			b_doc=true
+			$b_verbose && echo "$(ui_putnchar "-" 75)"
+			continue
+		fi
+		$b_verbose || continue
+
+		if [[ "${line:0:2}" != "#*" ]]; then
+			if $b_doc; then
+				[[ "${line:0:1}" == "#" ]] && echo "${line:1}" || echo "$line"
+			fi
+		else
+			b_doc=false
+			echo
+		fi
+	done < "$file"
+
+	ui_exit ui_exit_ok
+}
+
+main "$@"
