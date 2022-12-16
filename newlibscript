@@ -340,7 +340,7 @@ echo -en 'main() {
 $b_cfgmgr && echo -e "\tinit" >> "$ofile"
 $b_opts && echo -e "\tparseopts "'"$@"' >> "$ofile"
 $b_cfgmgr && echo -e "\n\texitme "'$ui_exit_ok' >> "$ofile" \
-	  || echo -e "\n\tui_exit"'ui_exit_ok' >> "$ofile"
+	  || echo -e "\n\tui_exit "'ui_exit_ok' >> "$ofile"
 
 echo -en '}
 
