@@ -2,6 +2,10 @@
 #
 # mkworkdir
 
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+# source "$MYLIB"/ui.source
+
 declare usagestr=$(
 cat <<EOF
 
@@ -43,6 +47,13 @@ declare logvol=
 declare homesiz=
 declare worksiz=
 declare newhomesiz=
+declare mountdev=
+
+strindex ()
+{
+    local x="${1%%$2*}";
+    [[ $x = "$1" ]] && echo -1 || echo ${#x}
+}
 
 main() {
 	local yn=
@@ -58,9 +69,14 @@ main() {
 		exit 1
 	}
 
+	# Create temporary workmnt by replacing 'home' with 'work'
+	# in the home string grepped from /etc/fstab
+	#
 	workmnt=${homemnt//home/work}
 	homedir=$(echo $homemnt | cut -d' ' -f1)
-	workdir=${homedir/home/work}
+	workdir=${homedir//home/work}
+
+	mountdev=${homedir:0:$(($(strindex $homedir "home") - 1))}
 	logvol=$(vgs)
 	logvol=$(echo $logvol | cut -d' ' -f8)
 
@@ -102,6 +118,10 @@ main() {
 	lvremove -v $homedir
 	lvcreate -v -L ${newhomesiz}G -n home $logvol
 	lvcreate -v -L ${worksiz}G -n work $logvol
+
+	homedir=$(find /dev/mapper/ | grep home)
+	workdir=$(find /dev/mapper/ | grep work)
+
 	mkfs.xfs $homedir
 	mkfs.xfs $workdir
 	[ -d /home ] || mkdir /home
