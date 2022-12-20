@@ -236,12 +236,13 @@ echo -en '
 # init
 #
 # GLOBALS
-#   background' >> "$ofile"
+#   background
+' >> "$ofile"
 
-$b_cfgmgr && echo -en '#   configfile' >> "$ofile"
+$b_cfgmgr && echo -en '#   configfile
+' >> "$ofile"
 
-echo -en '
-#
+echo -en '#
 init() {
 	local bgtemp
 ' >> "$ofile"
@@ -317,8 +318,6 @@ $b_opts && {
 	    fi
 	done
 }
-
-shift "$optcount"
 
 ' >> "$ofile"
 } || echo >> "$ofile"
