@@ -11,6 +11,7 @@ declare usagestr=
 declare optcount=0
 declare b_verbose=false
 declare file=
+declare b_func=false
 
 MYDIR="$(dirname "$(which "$(basename "$0")")")"
 MYLIB="$MYDIR"/lib
@@ -31,6 +32,7 @@ Arguments
 Options
 -------
   -v : verbose output instead of single line
+  -f : specific function or data block
 \0
 EOF
 )
@@ -75,6 +77,12 @@ parseopts() {
 		case "$opt" in
 		v ) b_verbose=true
 		    ;;
+		f ) fname="$1"
+		    b_verbose=true
+		    b_func=true
+		    shift
+		    ((optcount++))
+		    ;;
 		h ) echo -e "$usagestr"
 		    exit 0
 		esac
@@ -84,27 +92,38 @@ parseopts() {
 
 main() {
 	local b_doc=false
+	local line=
+	local -i fnamsiz
+	local -a lary=()
+
 	parseopts "$@"
 	shift "$optcount"
 	file="$1"
 
 	while IFS= read -r line; do
-		if [[ "${line:0:3}" == "#**" ]]; then
-			$b_verbose && echo "$(ui_putnchar "=" 75)"
-			echo "${line:3}"
+		read -ra lary <<< "$line"
+
+		$b_doc || [ "${line:0:1}" == "#" ] || continue
+		if [ "${lary[0]}" == "#**" ]; then
+			if $b_func; then
+				fnamsiz=${#fname}
+				[[ "${lary[1]}" == *"$fname"* ]] || continue
+			fi
+
+			$b_verbose && echo -e "\n$(ui_putnchar "=" 75)"
+			echo "${lary[@]:1}"
 			b_doc=true
 			$b_verbose && echo "$(ui_putnchar "-" 75)"
 			continue
 		fi
 		$b_verbose || continue
 
-		if [[ "${line:0:2}" != "#*" ]]; then
+		if [[ "${lary[0]}" != "#*" ]]; then
 			if $b_doc; then
 				[[ "${line:0:1}" == "#" ]] && echo "${line:1}" || echo "$line"
 			fi
 		else
 			b_doc=false
-			echo
 		fi
 	done < "$file"
 
