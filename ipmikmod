@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# ipmikmod
+#
+
+declare MYDIR=
+declare MYLIB=
+declare MYDATA=
+declare background=
+declare usagestr=
+declare optcount=0
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+MYDATA=$(realpath ./.data)
+[ -d "$MYDATA" ] || mkdir -p "$MYDATA"
+
+source "$MYLIB"/ui.source
+
+declare configfile=
+source "$MYLIB"/config-manager.source
+
+usagestr=$(
+cat <<EOF
+
+$(basename "$0") [options] dir
+
+Commands
+--------
+make - make the kmods
+
+reload [local | native] - reload kmods from local build or native kernel
+
+setparm <kmod> <parm> <value> - set the kmod parms
+
+showparm [parm] - show the value of the specific parm
+                  default is to show all
+
+showmods - show the list of kmods loaded with the native kernel
+
+Options
+-------
+  -h : show this help text
+\0
+EOF
+)
+
+declare kmodlog="$MYDATA"/kmod.log
+declare kmodparms="$MYDATA"/kmodparms.log
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	cfg_update_configfile
+	exit $CTLC_EXIT
+}
+
+# exitme
+#
+# Globals
+#   configfile
+#   All vars in configfile
+exitme() {
+	local -i code=$1
+	local artifact="$2"
+
+	cfg_update_configfile
+	ui_exit $code "$artifact"
+}
+
+# init
+#
+# GLOBALS
+#   background
+#   configfile
+#
+init() {
+	local bgtemp
+	local cfgtemplate
+
+	ui_setbg bgtemp
+
+	configfile="$MYDATA"/ipmikmod.conf
+	cfgtemplate="$MYLIB"/ipmikmod.conf
+	cfg_start "$cfgtemplate" "$configfile"
+
+	background=$bgtemp
+	cfg_set_item "background" "$background"
+}
+
+parse_cmd() {
+	local cmd="$1"
+
+	cmd="$1"
+	case "$cmd" in
+	"make"     ) 
+		     ;;
+	"reload"   ) 
+		     ;;
+	"setparm"  ) 
+		     ;;
+	"showparm" ) 
+		     ;;
+	"showmods" ) 
+		     ;;
+	*          ) exitme $ui_err_invcmd "$cmd"
+		     ;;
+	esac
+}
+
+# parseopts
+#
+# Globals
+#
+parseopts() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+
+	    if [ "${arg:0:1}" == "-" ]; then
+		opt="${arg:1}"
+		shift
+		((optcount++))
+
+		case "$opt" in
+		h ) echo -e "$usagestr"
+		    exit 0
+		esac
+	    fi
+	done
+}
+
+main() {
+	init
+	parseopts "$@"
+
+	shift "$optcount"
+	dir="$1"
+
+	exitme $ui_exit_ok
+}
+
+main "$@"
