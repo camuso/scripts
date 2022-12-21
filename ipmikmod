@@ -7,7 +7,6 @@ declare MYDIR=
 declare MYLIB=
 declare MYDATA=
 declare background=
-declare usagestr=
 declare optcount=0
 
 MYDIR="$(dirname "$(which "$(basename "$0")")")"
@@ -20,33 +19,17 @@ source "$MYLIB"/ui.source
 declare configfile=
 source "$MYLIB"/config-manager.source
 
-usagestr=$(
-cat <<EOF
-
-$(basename "$0") [options] dir
-
-Commands
---------
-make - make the kmods
-
-reload [local | native] - reload kmods from local build or native kernel
-
-setparm <kmod> <parm> <value> - set the kmod parms
-
-showparm [parm] - show the value of the specific parm
-                  default is to show all
-
-showmods - show the list of kmods loaded with the native kernel
-
-Options
--------
-  -h : show this help text
-\0
-EOF
-)
-
 declare kmodlog="$MYDATA"/kmod.log
 declare kmodparms="$MYDATA"/kmodparms.log
+declare ipmidir="./drivers/char/ipmi"
+
+#** lsmod header fields
+#
+declare -i modfld=1
+declare -i sizfld=2
+declare -i usefld=3
+declare -i byfld=4
+#*
 
 # control_c: run if user hits control-c
 #
@@ -90,26 +73,109 @@ init() {
 
 	background=$bgtemp
 	cfg_set_item "background" "$background"
+
+	# If the kmodlog is empty, then get the currently loaded
+	# ipmi kmmods.
+	#
+	[ -s "$kmodlog" ] || lsmod | grep 'ipmi' > "$kmodlog"
 }
 
-parse_cmd() {
+help_screen() {
+	local usagestr
+
+	usagestr=$(
+cat <<EOF
+$MNU
+$(basename "$0") cmd [cmd parameters]
+$UND
+Commands$OFF
+
+$MNU make$INF : make the kmods
+
+$MNU reload [local | booted ]$INF : reload kmods from local build or booted kernel
+                            default is booted
+
+$MNU setparm <kmod> <parm> <value>$INF : set the kmod parms
+
+$MNU showparm [parm]$INF : show the value of the specific parm
+                   default is to show all
+
+$MNU showmods$INF : show the list of kmods loaded with the native kernel
+
+$MNU help$INF : show this help text
+$OFF
+EOF
+)
+	echo -e "$usagestr"
+}
+
+parsecmd() {
 	local cmd="$1"
 
-	cmd="$1"
+	shift
+
 	case "$cmd" in
-	"make"     ) 
+	"make"     ) echo -e "$WRN make not implemented$OFF"
 		     ;;
-	"reload"   ) 
+	"reload"   ) reload "$@"
 		     ;;
-	"setparm"  ) 
+	"setparm"  ) echo "setparm"
 		     ;;
-	"showparm" ) 
+	"showparm" ) echo "showparm"
 		     ;;
-	"showmods" ) 
+	"showmods" ) echo "showmods"
 		     ;;
+	"-h"       ) ;&
+	"--help"   ) ;&
+	"help"     ) help_screen
+	             exitme $ui_exit_ok
+	             ;;
 	*          ) exitme $ui_err_invcmd "$cmd"
 		     ;;
 	esac
+}
+
+reload() {
+	local targ="booted"
+	local modcmd="modprobe"
+	local inscmd="insmod"
+	local mods
+
+	(($# == 1)) && targ="$1"
+
+	[ "$USER" == "root" ] || \
+		{ modcmd="sudo modprobe"; inscmd="sudo insmod"; }
+
+	mods="$(cat "$kmodlog" | cut -d' ' -f1)"
+
+	if [ "$targ" == "booted" ]; then
+		"$modcmd" -a $mods
+		lsmod | grep 'ipmi'
+		return $?
+	elif [ "$targ" == "local" ]; then
+
+		"$modcmd" -ra $mods
+
+		# Reverse the order, so that the kmod with the most dependencies
+		# loads first.
+		#
+		mods="$(tac "$kmodlog" | cut -d' ' -f1)"
+
+		# We don't build acpi_ipmi in drivers/char/ipmi, so exclude it
+		# from the local load. The load of ipmi_si will pull in the
+		# booted version of acpi_ipmi.
+		#
+		for mod in ${mods//acpi_ipmi/}; do
+			"$inscmd" "$ipmidir"/"$mod".ko
+		done
+
+		lsmod | grep 'ipmi'
+		return $?
+	else
+		exitme $ui_err_invcmd_arg "$targ"
+	fi
+
+	return 0
 }
 
 # parseopts
@@ -137,10 +203,7 @@ parseopts() {
 
 main() {
 	init
-	parseopts "$@"
-
-	shift "$optcount"
-	dir="$1"
+	parsecmd "$@"
 
 	exitme $ui_exit_ok
 }
