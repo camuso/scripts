@@ -16,22 +16,11 @@ MYDATA=$(realpath ./.data)
 
 source "$MYLIB"/ui.source
 
-declare configfile=
-source "$MYLIB"/config-manager.source
-
 declare kmodlog="$MYDATA"/kmod.log
 declare kmodparms="$MYDATA"/kmodparms.log
 declare ipmidir="./drivers/char/ipmi"
 declare -A msgparmtable
 declare -A siparmtable
-
-#** lsmod header fields
-#
-declare -i modfld=1
-declare -i sizfld=2
-declare -i usefld=3
-declare -i byfld=4
-#*
 
 # control_c: run if user hits control-c
 #
@@ -40,7 +29,6 @@ declare -i byfld=4
 #
 control_c() {
 	echo -e "\nCtrl-c detected\nCleaning up and exiting."
-	cfg_update_configfile
 	exit $CTLC_EXIT
 }
 
@@ -53,7 +41,6 @@ exitme() {
 	local -i code=$1
 	local artifact="$2"
 
-	cfg_update_configfile
 	ui_exit $code "$artifact"
 }
 
@@ -66,7 +53,6 @@ find_parms() {
 }
 
 extract_parms() {
-# echo -e "${STA}extract_parms$OFF"
 	local -n list=$1
 	local -n table=$2
 	local -i idx
@@ -77,8 +63,13 @@ extract_parms() {
 
 	for ((idx = 0; idx < ${#list[@]}; idx++)); do
 		file="${list[idx]}"
+
+		# Assume the parm does not have read permission.
+		# If we determine that we can read it, then extract its val.
+		#
 		val="Does not have read permission"
 		[[ $(stat -c "%A" $file) =~ "r" ]] && val="$(cat "$file")"
+
 		key="$(basename "$file")"
 		table["$key"]="$val"
 	done
@@ -88,13 +79,17 @@ show_parms() {
 	local key
 
 	echo -e "\n $MNU${UND}ipmi_msghandler parameters$OFF"
+	echo -e "$INF Directory :$OFF ${msgparmtable[dir]}/"
 	for key in "${!msgparmtable[@]}"; do
-		printf "$INF %-28s : %s\n" "$key" "${msgparmtable["$key"]}"
+		[ "$key" == "dir" ] && continue
+		printf "$INF %-28s :$OFF %s\n" "$key" "${msgparmtable["$key"]}"
 	done
 
 	echo -e "\n $MNU${UND}ipmi_si parameters$OFF"
+	echo -e "$INF Directory :$OFF ${siparmtable[dir]}/"
 	for key in "${!siparmtable[@]}"; do
-		printf "$INF %-20s : %s\n" "$key" "${siparmtable["$key"]}"
+		[ "$key" == "dir" ] && continue
+		printf "$INF %-20s :$OFF %s\n" "$key" "${siparmtable["$key"]}"
 	done
 	echo -en "$OFF"
 }
@@ -114,20 +109,9 @@ get_parms() {
 #
 # GLOBALS
 #   background
-#   configfile
 #
 init() {
-	local bgtemp
-	local cfgtemplate
-
-	ui_setbg bgtemp
-
-	configfile="$MYDATA"/ipmikmod.conf
-	cfgtemplate="$MYLIB"/ipmikmod.conf
-	cfg_start "$cfgtemplate" "$configfile"
-
-	background=$bgtemp
-	cfg_set_item "background" "$background"
+	ui_setbg background
 
 	# If the kmodlog is empty, then get the currently loaded
 	# ipmi kmmods.
