@@ -1,0 +1,231 @@
+#!/bin/bash
+#
+# lib/cfgmgr.source
+#
+
+declare MYDIR=
+declare MYLIB=
+declare MYDATA=
+declare background=
+declare usagestr=
+declare optcount=0
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+MYDATA=$(realpath ./.data)
+[ -d "$MYDATA" ] || mkdir -p "$MYDATA"
+
+source "$MYLIB"/ui.source
+
+usagestr=$(
+cat <<EOF
+
+cfgmgr [options] config-table
+
+Configuration file manager.
+
+Arguments
+---------
+config-table: name of the associative array, which must be declared
+              by the user in the calling script, e.g:
+	      declare -A mycfgtable
+Options
+-------
+  -c:file : path to file that will contain the config table between
+            invocations of the script.
+	    The default is to create a .conf file in ./.data with
+	    the same basename as the calling script, e.g:
+	    ./data/myscript.conf
+
+  -h      : this help screen
+\0
+EOF
+)
+
+declare cfgfile=
+declare -n cfgtable=
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# parseopts
+#
+# Globals
+#
+parseopts() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+
+	    if [ "${arg:0:1}" == "-" ]; then
+		opt="${arg:1}"
+		shift
+		((optcount++))
+
+		case "$opt" in
+		c ) cfgfile="$1"
+		    shift
+		    ((optcount++))
+		    ;;
+		h ) echo -e "$usagestr"
+		    exit 0
+		esac
+	    fi
+	done
+}
+
+cfg_init_cfgfile() {
+	for key in ${!cfgtbl[@]}; do
+		echo "$key = ${cfgtbl["$key"]}" >> "$cfgfile"
+	done
+}
+
+# cfg_check_cfgfile: if the cfgfile doesn't exist, then create it
+#
+# Globals
+#   cfgfile: if not passed as an option by user, then it will be created
+#            in the default directory using the basename of the calling
+#            script with a .conf extension. The default data directory
+#            is ./.data relative to the path in which the calling script
+#            is invoked.
+# Returns
+#   0 - if cfgfile exists
+#   1 - if cfgfile has to be created
+
+cfg_check_cfgfile() {
+	local dd
+
+	[ -n "$cfgfile" ] && {
+		[ -s "$cfgfile" ] || {
+			cfg_init_cfgfile
+			return 1
+		}
+		return 0
+	}
+
+	dd="$(realpath ./.data)"
+	[ -d "$dd" ] || mkdir -p "$dd"
+	cfgfile="$dd"/"$(basename "$0")"
+	cfg_init_cfgfile
+	return 1
+}
+
+# cfg_check_table: see if the keynames or number of keys has changed
+#
+# Globals
+#    cfgfile; either passed by user or created by cfg_check_cfgfile above.
+#    cfgtbl : declared as a reference to the user's config table
+#
+# Returns
+#   0 - if file already exists
+#   1 - if file had to be created and initialized or if an update to the
+#       cfgfile is needed.
+#
+cfg_check_table() {
+	local key
+
+	cfg_check_cfgfile
+
+	# Check that the file and the table have the same number of
+	# entries
+	#
+	(($(wc -l < "$cfgfile") == ${#cfgtbl[@]})) || return 1
+
+	# Chack that the cfgfile and the cfgtbl have the same keys
+	#
+	for key in ${!cfgtbl[@]}; do
+		grep -q "^$key" "$cfgfile" || return 1
+	done
+
+	return 0
+}
+
+# cfg_renew_cfgfile: renew the contents of the cfgfile with those in the cfgtbl
+#
+# If the cfgtbl has fewer entries than the cfgfile, remove the deprecated
+# entries from the cfgfile.
+#
+# If the cfgtbl has more entries than the cfgfile, then add the new entries
+# to the cfgfile.
+#
+# If the cfgtbl has different entries than the cfgfile, then reconcile the
+# differences.
+#
+# Globals
+#    cfgfile; either passed by user or created by cfg_check_cfgfile above.
+#    cfgtbl : declared as a reference to the user's config table
+#
+cfg_renew_cfgfile() {
+	local -a keys=()
+	local -a tkeys=()
+	local -i idx
+
+	# If there are more entries in the cfgfile than in the cfgtbl
+	#
+	(($(wc -l < "$cfgfile") > ${#cfgtbl[@]})) && {
+		mapfile -c1 -C 'f() {
+			# Extract the key field from each line
+			keys[$1]=$(echo $2 | cut -d'=' -f1)
+			# remove all spaces from the keys field
+			keys[$1]=${keys[$1]// /}
+		}; f' < "$cfgfile"
+
+		for k in $keys; do
+			ui_aryindex keys $k idx && continue
+			sed -i "/$k/d" "$cfgfile"
+		done
+	}
+
+
+}
+
+# cfg_read_cfgfile: read the contents of the config file into user's table
+#
+# Globals
+#    cfgfile; either passed by user or created by cfg_check_cfgfile above.
+#    cfgtbl : declared as a reference to the user's config table
+#
+cfg_read_cfgfile() {
+	
+
+}
+
+# cfg_start: start the cfgmgr
+#
+# If cfgfile exists:
+# * If any of the entries in the user's cfgtbl have changed, then
+#   update the cfgfile with the changes without disturbing existing
+#   and unchanged key/val pairs.
+# * Initialize the user's cfgtbl with the existing values in the
+#   cfgfile.
+# Else
+# * Create the cfgfile according to the -c option passed by the user
+#   or as ./.data/<script-basename>.conf
+# * Populate the cfgfile with the default values in the cfgtbl
+#
+# Globals
+#    cfgfile; either passed by user or created by cfg_check_cfgfile above.
+#    cfgtbl : declared as a reference to the user's config table
+#
+cfg_start() {
+echo "argc: $# argv: $@"
+	parseopts "$@"
+	shift $optcount
+echo "argc: $# argv: $@"
+
+	cfgtbl="$1"
+
+	cfg_check_table
+	cfg_read_cfgfile
+}
+
+
+
