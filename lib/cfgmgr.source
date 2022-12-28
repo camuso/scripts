@@ -3,28 +3,26 @@
 # lib/cfgmgr.source
 #
 
-declare MYDIR=
-declare MYLIB=
-declare MYDATA=
-declare usagestr=
+declare cfgmgr_loaded=true
 
-MYDIR="$(dirname "$(which "$(basename "$0")")")"
-MYLIB="$MYDIR"/lib
-MYDATA=$(realpath ./.data)
+[ -n "$MYDATA" ] || {
+	declare MYDATA=
+	MYDATA=$(realpath ./.data)
+}
 [ -d "$MYDATA" ] || mkdir -p "$MYDATA"
 
-source "$MYLIB"/ui.source
+declare usagestr=
 
 usagestr=$(
 cat <<EOF
 
 A script configuration manager with the following public functions.
 
-cfg_start config-table config-file
+cfg_start configtable
 
-cfg_read_cfgfile config-table
+cfg_read_cfgfile configtable
 
-cfg_write_cfgfile config-table
+cfg_write_cfgfile configtable
 
 Configuration file manager.
 
@@ -45,6 +43,27 @@ EOF
 
 declare cfgfile=
 
+#** is_inarray: returns 0 if exact matching string is in array
+#
+# $1 - array name passed by reference, no leading $
+# $2 - string being sought, passed by value
+#
+# Returns 0 if match is found, 1 if not
+#*
+is_inarray () {
+    local -n ar=$1
+    local fld="$2"
+    local -i ix
+
+    for ((ix = 0; ix < ${#ar[@]}; ix++))
+    do
+        [ "${ar[ix]}" == "$fld" ] && return 0
+    done
+
+    return 1
+}
+
+
 # cfg_init_cfgfile: init the config file with contents of cfgtbl
 #
 # PRIVATE: Not to be called externally
@@ -61,11 +80,18 @@ cfg_init_cfgfile() {
 # PRIVATE: Not to be called externally
 # ************************************
 #
+# If $1 is empty, then create a configfile in the MYDATA directory
+# using the basename of the script with '.confg' extension.
+#
 # Globals
 #   cfgfile: file containing the contents of the cfgtbl
 #
 cfg_set_cfgfile() {
 	cfgfile="$1"
+
+	[ -n "$cfgfile" ] || {
+		cfgfile="$MYDATA"/"$(basename "0")".conf
+	}
 }
 
 # cfg_diff_cfgfile: diff the contents of the cfgfile with those in the cfgtbl
@@ -135,7 +161,7 @@ cfg_diff_cfgfile() {
 		# Remove all non-alphanum chars
 		#
 		key="${key//[!a-zA-Z0-9]/}"
-		ui_aryindex fkeys "$key" idx && continue
+		is_inarray fkeys "$key" && continue
 		echo "$key = ${cfgtbl["$key"]}" >> "$cfgfile"
 		stat=1
 	done
@@ -147,7 +173,7 @@ cfg_diff_cfgfile() {
 	((filentries > tblentries)) && {
 		for key in ${fkeys[@]}; do
 			key="${key//[!a-zA-Z0-9]/}"
-			ui_aryindex tkeys $key idx && continue
+			is_inarray tkeys $key && continue
 			sed -i "/$key/d" "$cfgfile"
 			stat=1
 		done
@@ -159,7 +185,7 @@ cfg_diff_cfgfile() {
 	((tblentries > filentries)) && {
 		for key in ${tkeys[@]}; do
 			key="${key//[!a-zA-Z0-9]/}"
-			ui_aryindex fkeys $key idx && continue
+			is_inarray fkeys $key && continue
 			echo "$key = ${cfgtbl["$key"]}" >> "$cfgfile"
 			stat=1
 		done
