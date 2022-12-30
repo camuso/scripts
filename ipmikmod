@@ -3,24 +3,44 @@
 # ipmikmod
 #
 
-declare MYDIR=
-declare MYLIB=
 declare MYDATA=
-declare background=
 declare optcount=0
 
-MYDIR="$(dirname "$(which "$(basename "$0")")")"
-MYLIB="$MYDIR"/lib
 MYDATA=$(realpath ./.data)
 [ -d "$MYDATA" ] || mkdir -p "$MYDATA"
-
-source "$MYLIB"/ui.source
 
 declare kmodlog="$MYDATA"/kmod.log
 declare kmodparms="$MYDATA"/kmodparms.log
 declare ipmidir="./drivers/char/ipmi"
+declare msgparmfile="$MYDATA"/msgparm.log
+declare siparmfile="$MYDATA"/siparm.log
+declare configfile="$MYDATA"/ipmikmod.conf
 declare -A msgparmtable
 declare -A siparmtable
+declare -A configtable
+declare b_local=false
+
+#** Exit codes and messages
+#
+declare -i ui_exit_ok=0
+declare -i ui_err_invcmd=1
+declare -i ui_err_invcmd_arg=2
+declare -i ui_err_invkmod=3
+declare -i ui_err_invparm=4
+
+declare -a ui_err_msg=(
+""
+": You must enter a valid command"
+"not a valid command argument"
+"kmod must be one of ipmi_msghandler or ipmi_si"
+"not a valid kmod parameter"
+)
+#*
+
+declare -p CTLC_EXIT > /dev/null 2>&1 || declare -i CTLC_EXIT=130
+declare BLD='\e[1m'
+declare UND='\e[4m'
+declare OFF='\e[m'
 
 # control_c: run if user hits control-c
 #
@@ -32,47 +52,156 @@ control_c() {
 	exit $CTLC_EXIT
 }
 
+ui_exit() {
+	local -i msgindex="$1"
+	local artifact="$2"
+	local msg
+
+	msg="$WRN${ui_err_msg[msgindex]}$OFF"
+	[ -n "$artifact" ] && msg="$MNU$artifact $msg"
+	((msgindex == ui_exit_ok)) || echo -e "$BLD$msg$OFF\n"
+	exit "$msgindex"
+}
+
 # exitme
 #
 # Globals
 #   configfile
 #   All vars in configfile
+#
 exitme() {
 	local -i code=$1
 	local artifact="$2"
+
+	write_parms configtable "$configfile"
+	write_parms msgparmtable "$msgparmfile"
+	write_parms siparmtable "$siparmfile"
+
+	((code == ui_err_invcmd)) && {
+		echo -e "\n${BLD}${UND}Please enter a valid command.$OFF"
+		help_screen
+	}
 
 	ui_exit $code "$artifact"
 }
 
 find_parms() {
-	local -n list="$1"
+	local -n fp_list="$1"
 	local kmod="$2"
 
-	mapfile -t list < <(find /sys/module -type f | \
+	mapfile -t fp_list < <(find /sys/module -type f | \
 			    grep "$kmod" | grep 'parameters')
 }
 
 extract_parms() {
-	local -n list=$1
-	local -n table=$2
+	local -n ep_list=$1
+	local -n ep_table=$2
 	local -i idx
 	local key
 	local val
+	local file
+	local catcmd="sudo cat"
 
-	table[dir]="$(dirname "${list[0]}")"
+	[ "$USER" == "root" ] && catcmd="cat"
 
-	for ((idx = 0; idx < ${#list[@]}; idx++)); do
-		file="${list[idx]}"
+	ep_table[dir]="$(dirname "${ep_list[0]}")"
+
+	for ((idx = 0; idx < ${#ep_list[@]}; idx++)); do
+		file="${ep_list[idx]}"
 
 		# Assume the parm does not have read permission.
 		# If we determine that we can read it, then extract its val.
 		#
 		val="Does not have read permission"
-		[[ $(stat -c "%A" $file) =~ "r" ]] && val="$(cat "$file")"
+		[[ $(stat -c "%A" $file) =~ "r" ]] && val="$($catcmd "$file")"
 
 		key="$(basename "$file")"
-		table["$key"]="$val"
+		ep_table["$key"]="$val"
 	done
+}
+
+write_parms() {
+	local -n wp_table="$1"
+	local file="$2"
+	local key
+
+	> "$file"
+
+	for key in "${!wp_table[@]}"; do
+		echo "$key = ${wp_table["$key"]}" >> "$file"
+	done
+}
+
+read_parms() {
+	local -n rp_table="$1"
+	local file="$2"
+	local key
+	local val
+
+	while IFS+="=" read -r key val; do
+		rp_table["$key"]=$val
+	done < "$file"
+}
+
+init_parms() {
+	local kmod="$1"
+	local ip_table="$2"
+	local file="$3"
+	local -a parms
+
+	find_parms parms "$kmod"
+	extract_parms parms "$ip_table"
+	write_parms "$ip_table" "$file"
+}
+
+reinit_parms() {
+	init_parms "ipmi_msghandler" msgparmtable "$msgparmfile"
+	init_parms "ipmi_si" siparmtable "$siparmfile"
+}
+
+get_parms() {
+	local -a msgparms
+	local -a siparms
+
+	if [ -f "$msgparmfile" ] && [ -s "$msgparmfile" ]; then
+		read_parms msgparmtable "$msgparmfile"
+	else
+		init_parms "ipmi_msghandler" msgparmtable "$msgparmfile"
+	fi
+
+	if [ -f "$siparmfile" ] && [ -s "$siparmfile" ]; then
+		read_parms siparmtable "$siparmfile"
+	else
+		init_parms "ipmi_si" siparmtable "$siparmfile"
+	fi
+}
+
+init_cfg() {
+	local key
+	local value
+
+	if [ -f "$configfile" ] && [ -s "$configfile" ]; then
+		read_parms configtable "$configfile"
+	else
+		> "$configfile"
+		configtable[env]="booted"
+		write_parms configtable "$configfile"
+	fi
+}
+
+# init
+#
+# GLOBALS
+#   background
+#
+init() {
+	# If the kmodlog is empty, then get the currently loaded
+	# ipmi kmmods.
+	#
+	[ -s "$kmodlog" ] || lsmod | grep 'ipmi' > "$kmodlog"
+
+	get_parms
+	init_cfg
 }
 
 show_parms() {
@@ -91,34 +220,78 @@ show_parms() {
 		[ "$key" == "dir" ] && continue
 		printf "$INF %-20s :$OFF %s\n" "$key" "${siparmtable["$key"]}"
 	done
-	echo -en "$OFF"
+	echo -e "$OFF"
 }
 
-get_parms() {
-	local -a msgparms
-	local -a siparms
+set_parm() {
+	local kmod="$1"
+	local parm="$2"
+	local val="$3"
+	local kmods="ipmi_msghandler ipmi_si"
+	local -n table
+	local file
+	local modcmd="modprobe"
+	local inscmd="insmod"
+	local mods
 
-	find_parms msgparms ipmi_msghandler
-	find_parms siparms ipmi_si
-
-	extract_parms msgparms msgparmtable
-	extract_parms siparms siparmtable
-}
-
-# init
-#
-# GLOBALS
-#   background
-#
-init() {
-	ui_setbg background
-
-	# If the kmodlog is empty, then get the currently loaded
-	# ipmi kmmods.
+	# Make sure we have valid inputs.
+	# We can only check whether the kmod and parm are valid.
+	# Whether the val is valid will be determined when insmod is done.
 	#
-	[ -s "$kmodlog" ] || lsmod | grep 'ipmi' > "$kmodlog"
+	grep -qow "$kmod" <<< "$kmods" || exitme $ui_invkmod "$kmod"
 
-	get_parms
+	case "$kmod" in
+		"ipmi_msghandler" ) table="msgparmtable"; file="$msgparmfile";;
+		"ipmi_si"         ) table="siparmtable"; file="$siparmfile";;
+	esac
+
+	grep -qow "$parm" <<< "${!table[@]}" || exitme $ui_err_invparm "$parm"
+
+	[ "$USER" == "root" ] || {
+		modcmd="sudo modprobe"
+		inscmd="sudo insmod"
+	}
+
+	# Update the parmtable
+	#
+	table["$parm"]="$val"
+	write_parms "table" "$file"
+
+	# First remove all the modules, because we don't know the dependencies.
+	# Reverse the order, so that the kmod with the most dependencies
+	# loads first.
+	#
+	mods="$(cat "$kmodlog" | cut -d' ' -f1)"
+	$modcmd -ra $mods
+
+	# Insert the kmod with the parameter value, then insert the
+	# rest of them.
+	#
+	if $b_local; then
+
+		# Any mods this kmod depends on will be loaded automatically.
+		#
+		$inscmd "$ipmidir"/"$kmod".ko
+
+		# We don't build acpi_ipmi in drivers/char/ipmi, so exclude it
+		# from the local load. The load of ipmi_si will pull in the
+		# booted version of acpi_ipmi.
+		#
+		for mod in ${mods//acpi_ipmi/}; do
+			# We don't want to atempt to load the kmod we just
+			# loaded with a parameter value.
+			# mods that were already loaded due to dependencies
+			# will just be ignored by insmod
+			#
+			[ "$mod" == "$kmod" ] && continue
+			$inscmd "$ipmidir"/"$mod".ko
+		done
+	else
+		# It's a lot simpler for booted kmods.
+		#
+		$modcmd "$kmod" "$parm"="$val"
+		$modcmd -a $mods
+	fi
 }
 
 help_screen() {
@@ -128,24 +301,27 @@ help_screen() {
 cat <<EOF
 $MNU
 $(basename "$0") cmd [parameters]
+
+A utility to load and unload ipmi kmods, either from the booted lib/modules
+directory of locally built kmods. A command for loading specific kmods with
+parameters is also provided.
+
 $UND
 Commands$OFF
 
-$MNU make$INF : make the kmods
+$MNU source [local | booted]$INF : Determines whether booted or locally built
+                           kmods will be used. Default is booted
 
-$MNU load kmod [local | booted]$INF : loads the ipmi kmod from local build or
-                              booted kernel
-                              default is booted
+$MNU load kmod$INF : load the named kmod from source as set by "source" command
 
-$MNU reload [local | booted]$INF : reload all ipmi kmods from local build or
-                           booted kernel
-                           default is booted
+$MNU reload$INF : reload all ipmi kmods from source set by "source" command.
 
 $MNU setparm kmod parm value$INF : set the kmod parameter value and reload
-                           the kmod with it.
+                           the kmod from source set by "source" command
 
-$MNU showparm [parm]$INF : show the value of the specific parm
-                   default is to show all
+$MNU showparm$INF : show the current kmod parameters
+
+$MNU initparm$INF : restore working kmod parms to booted settings
 
 $MNU showmods$INF : show the list of kmods loaded with the native kernel
 
@@ -162,17 +338,24 @@ parsecmd() {
 	shift
 
 	case "$cmd" in
-	"make"     ) echo -e "$WRN make not implemented$OFF"
+	"local"    ) b_local=true
 		     ;;
-	"load"     ) load "$@"
+	"boot"     ) ;&
+	"booted"   ) b_local=false
 		     ;;
 	"reload"   ) reload "$@"
 		     ;;
-	"setparm"  ) echo "setparm"
+	"setparm"  ) set_parm "$@"
 		     ;;
+	"showparms") ;&
 	"showparm" ) show_parms
 		     ;;
-	"showmods" ) echo "showmods"
+	"initparms") ;&
+	"initparm" ) reinit_parms
+		     show_parms
+		     ;;
+	"showmod"  ) ;&
+	"showmods" ) cat "$kmodlog"
 		     ;;
 	"-h"       ) ;&
 	"--help"   ) ;&
@@ -190,20 +373,14 @@ reload() {
 	local inscmd="insmod"
 	local mods
 
-	(($# == 1)) && targ="$1"
-
 	[ "$USER" == "root" ] || \
 		{ modcmd="sudo modprobe"; inscmd="sudo insmod"; }
 
 	mods="$(cat "$kmodlog" | cut -d' ' -f1)"
 
-	if [ "$targ" == "booted" ]; then
-		"$modcmd" -a $mods
-		lsmod | grep 'ipmi'
-		return $?
-	elif [ "$targ" == "local" ]; then
-
-		"$modcmd" -ra $mods
+	if $b_local; then
+		# First remove all the mods
+		$modcmd -ra $mods
 
 		# Reverse the order, so that the kmod with the most dependencies
 		# loads first.
@@ -221,7 +398,11 @@ reload() {
 		lsmod | grep 'ipmi'
 		return $?
 	else
-		exitme $ui_err_invcmd_arg "$targ"
+		$modcmd -ra $mods
+		sleep 1
+		$modcmd -a $mods
+		lsmod | grep 'ipmi'
+		return $?
 	fi
 
 	return 0
