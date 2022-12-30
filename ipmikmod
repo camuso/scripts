@@ -257,9 +257,9 @@ set_parm() {
 	table["$parm"]="$val"
 	write_parms "table" "$file"
 
-	# First remove all the modules, because we don't know the dependencies.
-	# Reverse the order, so that the kmod with the most dependencies
-	# loads first.
+	# First remove all the ipmi modules, because we don't know the
+	# dependencies. Reverse the order, so that the kmod with the most
+	# dependencies 	# loads first.
 	#
 	mods="$(cat "$kmodlog" | cut -d' ' -f1)"
 	$modcmd -ra $mods
@@ -303,8 +303,9 @@ $MNU
 $(basename "$0") cmd [parameters]
 
 A utility to load and unload ipmi kmods, either from the booted lib/modules
-directory of locally built kmods. A command for loading specific kmods with
-parameters is also provided.
+directory of locally built kmods.
+
+A command for loading the kmods with specific parameters is also provided.
 
 $UND
 Commands$OFF
@@ -318,6 +319,7 @@ $MNU reload$INF : reload all ipmi kmods from source set by "source" command.
 
 $MNU setparm kmod parm value$INF : set the kmod parameter value and reload
                            the kmod from source set by "source" command
+                           Example: ipmikmod setparm ipmi_si kcs_debug 7
 
 $MNU showparm$INF : show the current kmod parameters
 
