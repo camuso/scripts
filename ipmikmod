@@ -15,10 +15,13 @@ declare ipmidir="./drivers/char/ipmi"
 declare msgparmfile="$MYDATA"/msgparm.log
 declare siparmfile="$MYDATA"/siparm.log
 declare configfile="$MYDATA"/ipmikmod.conf
+declare b_local=false
+declare b_verbose=false
 declare -A msgparmtable
 declare -A siparmtable
 declare -A configtable
-declare b_local=false
+configtable[local]=$b_local
+configtable[verbose]=$b_verbose
 
 #** Exit codes and messages
 #
@@ -176,17 +179,46 @@ get_parms() {
 	fi
 }
 
+check_cfg() {
+	# If the configtable has changed, nuke the configfile and
+	# start fresh.
+	#
+	for key in ${!configtable[@]}; do
+		grep -qow "$key" "$configfile" || {
+			> "$configfile"
+			return 1
+		}
+	done
+
+	while IFS+="=" read -r key value; do
+		grep -qow "$key" <<< ${!configtable[@]} || {
+			> "$configfile"
+			return 1
+		}
+	done < "$configfile"
+
+	return 0
+}
+
 init_cfg() {
 	local key
 	local value
 
 	if [ -f "$configfile" ] && [ -s "$configfile" ]; then
-		read_parms configtable "$configfile"
-	else
-		> "$configfile"
-		configtable[env]="booted"
-		write_parms configtable "$configfile"
+		check_cfg && {
+			read_parms configtable "$configfile"
+			b_local=${configtable[local]}
+			b_verbose=${configtable[verbose]}
+			return 0
+		}
 	fi
+
+	> "$configfile"
+	configtable[local]=$b_local
+	configtable[verbose]=$b_verbose
+	write_parms configtable "$configfile"
+
+	return 1
 }
 
 # init
@@ -233,6 +265,9 @@ set_parm() {
 	local modcmd="modprobe"
 	local inscmd="insmod"
 	local mods
+	local v=
+
+	$b_verbose && v="-v"
 
 	# Make sure we have valid inputs.
 	# We can only check whether the kmod and parm are valid.
@@ -271,6 +306,7 @@ set_parm() {
 
 		# Any mods this kmod depends on will be loaded automatically.
 		#
+		$b_verbose && echo "insmod $ipmidir/$kmod.ko"
 		$inscmd "$ipmidir"/"$kmod".ko
 
 		# We don't build acpi_ipmi in drivers/char/ipmi, so exclude it
@@ -284,12 +320,15 @@ set_parm() {
 			# will just be ignored by insmod
 			#
 			[ "$mod" == "$kmod" ] && continue
+			$b_verbose && echo "insmod $ipmidir/$mod.ko"
 			$inscmd "$ipmidir"/"$mod".ko
 		done
 	else
 		# It's a lot simpler for booted kmods.
 		#
+		$b_verbose && echo "$modcmd $kmod $parm=$val"
 		$modcmd "$kmod" "$parm"="$val"
+		$b_verbose && echo "$modcmd -a $mods"
 		$modcmd -a $mods
 	fi
 }
@@ -300,7 +339,7 @@ help_screen() {
 	usagestr=$(
 cat <<EOF
 $MNU
-$(basename "$0") cmd [parameters]
+$(basename "$0") [OPTIONS] cmd [parameters]
 
 A utility to load and unload ipmi kmods, either from the booted lib/modules
 directory of locally built kmods.
@@ -328,6 +367,10 @@ $MNU initparm$INF : restore working kmod parms to booted settings
 $MNU showmods$INF : show the list of kmods loaded with the native kernel
 
 $MNU help$INF : show this help text
+$UND
+Options$OFF
+$MNU -v  : verbose output ON, sticky - persists across invocations
+$MNU -v- : verbose output OFF
 $OFF
 EOF
 )
@@ -341,9 +384,11 @@ parsecmd() {
 
 	case "$cmd" in
 	"local"    ) b_local=true
+		     set_cfg "local" "$b_local"
 		     ;;
 	"boot"     ) ;&
 	"booted"   ) b_local=false
+		     set_cfg "local" "$b_local"
 		     ;;
 	"reload"   ) reload "$@"
 		     ;;
@@ -369,11 +414,23 @@ parsecmd() {
 	esac
 }
 
+set_cfg() {
+	local key="$1"
+	local val="$2"
+
+	configtable["$key"]="$val"
+	$b_verbose && echo "setting ipmikmods \"$key\" to \"$val\""
+	write_parms configtable "$configfile"
+}
+
 reload() {
 	local targ="booted"
 	local modcmd="modprobe"
 	local inscmd="insmod"
 	local mods
+	local v=
+
+	$b_verbose && v="-v"
 
 	[ "$USER" == "root" ] || \
 		{ modcmd="sudo modprobe"; inscmd="sudo insmod"; }
@@ -394,15 +451,16 @@ reload() {
 		# booted version of acpi_ipmi.
 		#
 		for mod in ${mods//acpi_ipmi/}; do
+			$b_verbose && echo "insmod $ipmidir/$mod.ko"
 			"$inscmd" "$ipmidir"/"$mod".ko
 		done
 
 		lsmod | grep 'ipmi'
 		return $?
 	else
-		$modcmd -ra $mods
+		$modcmd $v -ra $mods
 		sleep 1
-		$modcmd -a $mods
+		$modcmd $v -a $mods
 		lsmod | grep 'ipmi'
 		return $?
 	fi
@@ -426,8 +484,14 @@ parseopts() {
 		((optcount++))
 
 		case "$opt" in
-		h ) echo -e "$usagestr"
-		    exit 0
+		"v"  ) b_verbose=true;
+		       set_cfg "verbose" "$b_verbose"
+		       ;;
+		"v-" ) b_verbose=false
+		       set_cfg "verbose" "$b_verbose"
+		       ;;
+		"h"  ) echo -e "$usagestr"
+		       exit 0
 		esac
 	    fi
 	done
@@ -435,8 +499,9 @@ parseopts() {
 
 main() {
 	init
+	parseopts "$@"
+	((optcount > 0)) && shift $opcount
 	parsecmd "$@"
-
 	exitme $ui_exit_ok
 }
 
