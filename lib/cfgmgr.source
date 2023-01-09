@@ -16,32 +16,60 @@ declare usagestr=
 usagestr=$(
 cat <<EOF
 
-A script configuration manager with the following public functions.
+cfgmgr - Configuration file manager.
+         Call this library script by name from the command line
+	 to see this help text.
 
-cfg_start configtable
-
-cfg_read_cfgfile configtable
-
-cfg_write_cfgfile configtable
-
-Configuration file manager.
+A script configuration manager.
 
 Arguments
 ---------
-config-table: name of the associative array, which must be declared
-              by the user in the calling script, e.g:
-	      declare -A mycfgtable
-	      It is passed by reference, so no leading $ in front of
-	      the identifier when calling cfg_start.
+configtable: name of the associative array, which must be declared
+             by the user in the calling script, e.g:
+             declare -A mycfgtable
+             It is passed by reference, so no leading $ in front of
+             the identifier when calling cfg_start.
 
-config-file:  name of the file to contain the config-table contents
-              between invocations of the encapsulating script.
+configfile:  Optional path of the file to contain the configtable
+             contents between invocations of the encapsulating script.
+	     If no name is provided, cfgmgr will create one in ./.data
+	     relative to the PWD of the executing script and using the
+	     script's basename with .conf extension, e.g.
+	     ./.data/myscript.conf.
 
+Public Functions
+----------------
+cfg_start configtable [configfile]
+            Called at the beginning of your script to initialize and
+	    synchronize your script's config table asssociative array
+	    with its config file.
+
+cfg_read_cfgfile configtable
+            Reads the contents of the config file into the config table
+	    associative array.
+
+cfg_write_cfgfile configtable
+            Writes the contents of the config table associative array
+	    into the config file.
+
+cfg_dump_cfgtbl configtable
+            Dumps the contents of the config table associative array
+	    to the screen.
 \0
 EOF
 )
 
 declare cfgfile=
+
+# Print the help text to the screen if this lib source is called from the
+# command line. Help text will not be printed if this file is sourced in
+# another script.
+# From:
+# https://stackoverflow.com/questions/2683279/how-to-detect-if-a-script-is-being-sourced
+(return 0 2>/dev/null) || {
+	echo -e "$usagestr"
+	exit 0
+}
 
 #** is_inarray: returns 0 if exact matching string is in array
 #
@@ -62,7 +90,6 @@ is_inarray () {
 
     return 1
 }
-
 
 # cfg_init_cfgfile: init the config file with contents of cfgtbl
 #
