@@ -297,7 +297,7 @@ set_parm() {
 	# dependencies 	# loads first.
 	#
 	mods="$(cat "$kmodlog" | cut -d' ' -f1)"
-	$modcmd -ra $mods
+	$modcmd $v -ra $mods
 
 	# Insert the kmod with the parameter value, then insert the
 	# rest of them.
@@ -327,9 +327,9 @@ set_parm() {
 		# It's a lot simpler for booted kmods.
 		#
 		$b_verbose && echo "$modcmd $kmod $parm=$val"
-		$modcmd "$kmod" "$parm"="$val"
+		$modcmd $v "$kmod" "$parm"="$val"
 		$b_verbose && echo "$modcmd -a $mods"
-		$modcmd -a $mods
+		$modcmd $v -a $mods
 	fi
 }
 
@@ -366,11 +366,19 @@ $MNU initparm$INF : restore working kmod parms to booted settings
 
 $MNU showmods$INF : show the list of kmods loaded with the native kernel
 
+$MNU status$INF   : show the current status
+                    - booted ipmi kmods
+		    - currently loaded ipmi kmods
+		    - current script parameters
+
 $MNU help$INF : show this help text
 $UND
-Options$OFF
-$MNU -v  : verbose output ON, sticky - persists across invocations
-$MNU -v- : verbose output OFF
+Options$INF
+The following options are sticky, persisting across invocations
+$MNU -v  : verbose output ON, sticky
+$MNU -q  : verbose output OFF
+$MNU -l  : use locally built kmods
+$MNU -b  : use booted kmods (default)
 $OFF
 EOF
 )
@@ -403,6 +411,9 @@ parsecmd() {
 		     ;;
 	"showmod"  ) ;&
 	"showmods" ) cat "$kmodlog"
+		     ;;
+	"stat"     ) ;&
+	"status"   ) show_status
 		     ;;
 	"-h"       ) ;&
 	"--help"   ) ;&
@@ -484,11 +495,20 @@ parseopts() {
 		((optcount++))
 
 		case "$opt" in
-		"v"  ) b_verbose=true;
+		"v"  ) b_verbose=true
 		       set_cfg "verbose" "$b_verbose"
 		       ;;
+		"q"  ) ;&
 		"v-" ) b_verbose=false
 		       set_cfg "verbose" "$b_verbose"
+		       ;;
+		"b-" ) ;&
+		"l"  ) b_local=true
+		       set_cfg "local" "$b_local"
+		       ;;
+		"l-" ) ;&
+		"b"  ) b_local=false
+		       set_cfg "local" "$b_local"
 		       ;;
 		"h"  ) echo -e "$usagestr"
 		       exit 0
