@@ -373,7 +373,7 @@ $MNU status$INF   : show the current status
 
 $MNU help$INF : show this help text
 $UND
-Options$INF
+Options$OFF$INF
 The following options are sticky, persisting across invocations
 $MNU -v  : verbose output ON, sticky
 $MNU -q  : verbose output OFF
