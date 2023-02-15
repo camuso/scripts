@@ -88,6 +88,8 @@ parseopts() {
 		esac
 	    fi
 	done
+
+	return 0
 }
 
 main() {
@@ -98,7 +100,12 @@ main() {
 
 	parseopts "$@"
 	shift "$optcount"
+
+	(($# > 0)) || { echo -e "$usagestr"; exit 1; }
+
 	file="$1"
+
+	[ -f "$file" ] || { echo -e "$usagestr"; exit 1; }
 
 	while IFS= read -r line; do
 		read -ra lary <<< "$line"
