@@ -463,7 +463,7 @@ reload() {
 		#
 		for mod in ${mods//acpi_ipmi/}; do
 			$b_verbose && echo "insmod $ipmidir/$mod.ko"
-			"$inscmd" "$ipmidir"/"$mod".ko
+			$inscmd "$ipmidir"/"$mod".ko
 		done
 
 		lsmod | grep 'ipmi'
