@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# findbydate
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+declare optcount=0
+declare date
+
+declare usagestr=
+usagestr=$(
+cat <<EOF
+
+$(basename "$0") [options] date
+
+Arguments
+---------
+   date : formatted as "yyyy-mm-dd"
+
+Options
+-------
+   o:file  : Optional output file
+   d:depth : Recursion depth. Minimum is 0 to include the currend dir.
+
+\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# parseopts
+#
+# Globals
+#
+parseopts() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+
+	    if [ "${arg:0:1}" == "-" ]; then
+		opt="${arg:1}"
+		shift
+		((optcount++))
+
+		case "$opt" in
+		o ) file=$1
+		    shift
+		    ((optcount++))
+		    ;;
+		d ) depth=$1
+		    shift
+		    ((optcount++))
+		    ;;
+		h ) echo -e "$usagestr"
+		    exit 0
+		esac
+	    fi
+	done
+}
+
+main() {
+	local out="/dev/stdout"
+	parseopts "$@"
+
+	shift "$optcount"
+	date="$1"
+
+	[ -n "$file" ] && out="$file"
+	find . -mindepth $depth -type f -newermt "$date" -exec ls -1t {} +
+	exit 0
+}
+
+main "$@"
