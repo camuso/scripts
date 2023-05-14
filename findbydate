@@ -77,7 +77,8 @@ main() {
 	shift "$optcount"
 	date="$1"
 
-	[ -n "$file" ] && out="$file"
+	[ -n "$file" ] && { out="$file"; :> "$out"; }
+
 	find . -mindepth $depth -type f -newermt "$date" -exec ls -1t {} +
 	exit 0
 }
