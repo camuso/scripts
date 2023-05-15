@@ -9,6 +9,7 @@
 }
 declare optcount=0
 declare date
+declare depth=0
 
 declare usagestr=
 usagestr=$(
@@ -79,7 +80,7 @@ main() {
 
 	[ -n "$file" ] && { out="$file"; :> "$out"; }
 
-	find . -mindepth $depth -type f -newermt "$date" -exec ls -1t {} +
+	find . -mindepth $depth -type f -newermt "$date" -exec ls -1t {} + > "$out"
 	exit 0
 }
 
