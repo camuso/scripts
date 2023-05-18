@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# repotask
+
+declare outfile=/work/repotask.log
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) [all]
+
+Description:
+	Update the repo(s) in the current directory.
+	With the "all" argument, update all repos in
+	all directories under /work.
+
+Arguments:
+	all - optional argument to update all directories
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+strtok ()
+{
+    IFS="$2" read -r -a $3 <<< "$1"
+}
+
+putline() {
+	echo -e "$1" | tee -a "$outfile"
+}
+
+update_repo() {
+	local branches=$(grep "^\[branch" .git/config)
+	local br
+	local bary
+	local brindex=2
+
+	git fetch --all -p | tee -a "$outfile"
+
+#	while read br; do
+#		echo "$br"
+#		echo "----------------"
+#		strtok "$br" '"[]' bary
+#		arysiz=${#bary[@]}
+#		git checkout ${bary[brindex]}
+#		git pull
+#		echo
+#	done <<< $branches
+#
+#	echo $PWD | grep -q "upstream" && return
+
+	br=$(grep -A2 branch .git/config)
+	echo $br | grep -q origin && strtok "$br" '"[]' bary
+	br=${bary[brindex]}
+	putline "$br"
+	putline "----------------"
+	git checkout $br | tee -a "$outfile"
+	git pull | tee -a "$outfile"
+#	git rebase origin/$br
+#	git push tcamuso $br
+	putline ""
+}
+
+main() {
+
+	cd /work
+	:> "$outfile"
+
+	repos=$(find ./ -maxdepth 2 -type d -name kernel -exec realpath {} \;)
+
+	while read dir; do
+		[ -f "$dir/.git/config" ] || continue
+		putline "Updating $dir"
+		putline "========================"
+		cd $dir
+		update_repo
+		putline ""
+	done <<< $repos
+}
+
+main $@
+
+exit 0
+
