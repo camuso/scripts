@@ -68,7 +68,7 @@ update_repo() {
 main() {
 
 	cd /work
-	:> "$outfile"
+	date > "$outfile"
 
 	repos=$(find ./ -maxdepth 2 -type d -name kernel -exec realpath {} \;)
 
@@ -80,6 +80,11 @@ main() {
 		update_repo
 		putline ""
 	done <<< $repos
+
+	echo -n "Completion: "
+	date >> "$outfile"
+	echo "******************************************************" >> "$outfile"
+
 }
 
 main $@
