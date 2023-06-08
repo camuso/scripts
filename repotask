@@ -46,7 +46,7 @@ update_repo() {
 #		echo "----------------"
 #		strtok "$br" '"[]' bary
 #		arysiz=${#bary[@]}
-#		git checkout ${bary[brindex]}
+#	 	git checkout ${bary[brindex]}
 #		git pull
 #		echo
 #	done <<< $branches
@@ -67,6 +67,7 @@ update_repo() {
 
 main() {
 
+	date | tee "$outfile"
 	cd /work
 
 	repos=$(find ./ -maxdepth 2 -type d -name kernel -exec realpath {} \;)
@@ -81,8 +82,8 @@ main() {
 	done <<< $repos
 
 	echo -n "Completion: "
-	date
-	echo "******************************************************"
+	date | tee -a "$outfile"
+	echo "******************************************************" | tee -a "$outfile"
 
 }
 
