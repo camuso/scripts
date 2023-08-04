@@ -4,10 +4,6 @@
 # a usage function
 #
 
-
-
-source lib/getyn
-
 declare MYDIR=
 declare MYLIB=
 declare usagestr=
@@ -84,7 +80,7 @@ test_help() {
 	local opt="$1"
 
 	shopt -s nocasematch
-	[[ $opt =~ (h|help) ]] && { usage; exitme $exit_ok; }
+	( [ -z "$opt" ] || [[ $opt =~ (h|help) ]] ) && { usage; exitme $exit_ok; }
 	shopt -u nocasematch
 }
 
