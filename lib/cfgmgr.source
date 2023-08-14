@@ -66,10 +66,15 @@ declare cfgfile=
 # another script.
 # From:
 # https://stackoverflow.com/questions/2683279/how-to-detect-if-a-script-is-being-sourced
+: << 'COMMENT'
+Commenting this out for now, because it's impractical when concatenating
+this source to another source, instead of using the source operator.
+
 (return 0 2>/dev/null) || {
 	echo -e "$usagestr"
 	exit 0
 }
+COMMENT
 
 #** is_inarray: returns 0 if exact matching string is in array
 #
