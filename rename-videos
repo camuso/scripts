@@ -136,9 +136,9 @@ main() {
 		echo "\"$newname\""
 
 		if $b_destdir; then
-			mv "$mp4" "$destdir"/"$newname".mp4
+			mv "$mp4" "$destdir"/"$prefix$newname$suffix".mp4
 		else
-			mv "$mp4" "$newname".mp4
+			mv "$mp4" "$prefix$newname$suffix".mp4
 		fi
 	done
 
