@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# rename-videos
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+[ -n "$MYLIB" ] || {
+	declare MYLIB=
+	MYLIB="$MYDIR"/lib
+}
+
+[ "$ui_loaded" ] || source "$MYLIB"/ui.source
+
+declare optcount=0
+declare srcdir=
+declare destdir=
+declare prefix=
+declare suffix=
+
+declare usagestr=
+usagestr=$(
+cat <<EOF
+
+$(basename "$0") [options] srcdir
+
+Arguments
+---------
+   srcdir : location of the mp4 files to be renamed
+
+Options
+-------
+   p:prefix  : prefix to be prepended to the name
+   s:suffix  : suffix to be appended to the name
+   c:destdir : destination directory, if different from srcdir
+   h         : this help screen
+
+\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# init
+#
+# GLOBALS
+#
+init() {
+	local -i bgtemp
+
+	ui_setbg bgtemp
+}
+
+# parseopts
+#
+# Globals
+#
+parseopts() {
+	local arg=
+	local opt=
+
+	for arg in $@; do
+
+	    if [ "${arg:0:1}" == "-" ]; then
+		opt="${arg:1}"
+		shift
+		((optcount++))
+
+		case "$opt" in
+		p ) prefix=$1
+		    shift
+		    ((optcount++))
+		    ;;
+		s ) suffix=$1
+		    shift
+		    ((optcount++))
+		    ;;
+		c ) destdir=$1
+		    shift
+		    ((optcount++))
+		    ;;
+		h ) echo -e "$usagestr"
+		    exit 0
+		esac
+	    fi
+	done
+}
+
+main() {
+	local -a mp4ary=()
+	local newname=
+	local b_destdir=false
+
+	init
+
+	(($# >= 1)) || ui_exit ui_err_invargc "$usagestr"
+
+	parseopts "$@"
+
+	shift "$optcount"
+	srcdir="$1"
+
+	# Check the directories
+	[ -n "$srcdir" ] || ui_exit ui_err_missing_arg "Must provide src directory argument"
+	[ -d "$srcdir" ] || ui_exit ui_err_invdir "$srcdir"
+
+	if [ -n "$destdir" ]; then
+		[ -d "$destdir" ] || i_exit ui_err_invdir "$destdir"
+		b_destdir=true
+	fi
+
+	mapfile -t mp4ary < <(find "$srcdir" -type f -name "*.mp4")
+
+	for mp4 in ${mp4ary[@]}; do
+		# Get the exif create date
+		newname=$(exiftool -CreateDate "$mp4")
+		# Isolate the date and time
+		newname=$(echo "$newname" | cut -d':' -f2-)
+		# Remove leading and trailing spaces
+		newname=$(echo $newname)
+		# Replace colons with dashes
+		newname=${newname//:/-}
+		# Replace spaces with double dashes
+		newname=${newname// /--}
+		echo "\"$newname\""
+
+		if $b_destdir; then
+			mv "$mp4" "$destdir"/"$newname".mp4
+		else
+			mv "$mp4" "$newname".mp4
+		fi
+	done
+
+	ui_exit ui_exit_ok
+}
+
+main "$@"
