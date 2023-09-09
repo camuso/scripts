@@ -2,30 +2,6 @@
 #
 # rename-photos.sh
 #
-# PhotosPath="/media/4GBSD/DCIM/101CANON"
-# SortPath="/home/angus/.imagesort"
-# LibraryPath="/home/angus/Photos"
-# CameraPath="/media/4GBSD"
-
-function usage {
-	echo
-	echo "Recursively rename .jpg files from one tree and into another."
-	echo ""
-	echo "Usage: rename-photos source-dir dest-dir <prefix> <suffix>"
-	echo "       prefix and suffix are filenaming options."
-	echo
-}
-
-function min_parms {
-	echo "**************************************************************"
-	echo "You did not enter both the source and destination directories,"
-	echo "Try again."
-	echo "**************************************************************"
-	echo
-	exit $FAILURE
-}
-
-usage
 
 declare -i optcount=0
 declare -i argcount=1
