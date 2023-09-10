@@ -142,6 +142,7 @@ main() {
 	local b_destdir=false
 	local ext=
 	local path=
+	local bump=1
 
 	init
 
@@ -170,6 +171,7 @@ main() {
 	# of the directory path.
 	path="${path%/}"
 	path="$path/"
+echo "path: $path"
 
 	mapfile -t mp4jpgary < <(find "$srcdir" -type f \( -iname "*.mp4" -o -iname "*.jpg" \))
 
@@ -187,9 +189,23 @@ main() {
 		newname=${newname//:/-}
 		# Replace spaces with double dashes
 		newname=${newname// /--}
-		echo "$mp4jpg --> $path$prefix$newname$suffix.$ext"
+		# Get the full name of the file and its path
+		newname="$path$prefix$newname$suffix.$ext"
 
-		$b_execute && mv "$mp4jpg" "$path"/"$prefix$newname$suffix".mp4
+# TODO:
+# Create an array of newnames to lookup existing ones. Bump the newname
+# as needed, rather than depending on the pre-existing file.
+
+		if [ -f "$newname" ]; then
+			newname="$newname-$bump"
+			((bump++))
+		fi
+
+		if $b_execute; then
+			mv -n -u -v "$mp4jpg" "$newname"
+		else
+			echo "$mp4jpg --> $newname"
+		fi
 	done
 
 	ui_exit ui_exit_ok
