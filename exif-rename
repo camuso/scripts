@@ -138,11 +138,11 @@ parseopts() {
 
 main() {
 	local -a mp4jpgary=()
+	local -A nameary	# associate name with a bump number
 	local newname=
 	local b_destdir=false
 	local ext=
 	local path=
-	local bump=1
 
 	init
 
@@ -171,10 +171,13 @@ main() {
 	# of the directory path.
 	path="${path%/}"
 	path="$path/"
-echo "path: $path"
 
+	# Create an array of mp4 and jpg file names.
 	mapfile -t mp4jpgary < <(find "$srcdir" -type f \( -iname "*.mp4" -o -iname "*.jpg" \))
 
+	# Loop through the array of mp4 and jpg filenames to rename them
+	# according to exif tag for CreateDate (default) or FileModifyDate,
+	# as specified by user.
 	for mp4jpg in ${mp4jpgary[@]}; do
 		# Get the filename extension
 		ext="${mp4jpg##*.}"
@@ -190,16 +193,25 @@ echo "path: $path"
 		# Replace spaces with double dashes
 		newname=${newname// /--}
 		# Get the full name of the file and its path
-		newname="$path$prefix$newname$suffix.$ext"
+		newname="$path$prefix$newname$suffix"
 
-# TODO:
-# Create an array of newnames to lookup existing ones. Bump the newname
-# as needed, rather than depending on the pre-existing file.
-
-		if [ -f "$newname" ]; then
-			newname="$newname-$bump"
-			((bump++))
+		# Assure that each file has a unique filename, even if the
+		# time stamps are identical.
+		# If this newname already exists in the nameary, then bump its
+		# value by one.
+		# Else, if it's a NEW newname, then set its value to zero.
+		if [[ -v nameary["$newname"] ]]; then
+			nameary["$newname"]=$((${nameary["$newname"]} + 1))
+		else
+			nameary["$newname"]=0
 		fi
+
+		# Set the new name accordint to its bump value in the nameary.
+		# If it's greater than 0, then append the bump value.
+		(( ${nameary["$newname"]} != 0)) && newname="$newname-${nameary["$newname"]}"
+
+		# Add the file extension to the new name.
+		newname="$newname.$ext"
 
 		if $b_execute; then
 			mv -n -u -v "$mp4jpg" "$newname"
@@ -208,7 +220,8 @@ echo "path: $path"
 		fi
 	done
 
-	ui_exit ui_exit_ok
+	$b_execute || echo -e \
+		"\n${MNU}You must use the -x option to actually rename the files.\n$OFF"
 }
 
 main "$@"
