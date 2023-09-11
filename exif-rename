@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# exif-rename 
+# exif-rename
 #
 
 [ -n "$MYDIR" ] || {
@@ -93,6 +93,10 @@ init() {
 	local -i bgtemp
 
 	ui_setbg bgtemp
+
+	which exiftool || \
+		ui_exit ui_err_missing_exec \
+		"\n$INF You must install$MNU exiftool$INF to run this script.$OFF\n"
 }
 
 # parseopts
