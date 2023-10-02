@@ -1,0 +1,30 @@
+#!/bin/bash
+#
+# g0
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	gnome-terminal --geometry=80x24 &
+}
+
+main $@
+
+exit 0
+
