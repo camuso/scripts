@@ -72,6 +72,9 @@ Arguments:
 Use sshfs directly:
   $ sudo sshfs -o allow_other user@host:/remote/directory /mnt/remote
 
+Use umount to un-mount the remote directory.
+  $ umount /mnt/remote
+
 Options:
   -h  - help
 \0
@@ -89,6 +92,13 @@ declare local="$2"
 main() {
         # Trap for control-c
         trap control_c SIGINT
+
+	(($# >=1)) || usage
+
+	which sshfs > /dev/null 2>&1 || {
+		echo -e "\nYou must '${BLD}sudo dnf install sshfs${OFF}' to use this tool.\n"
+		exitme $EXIT_OK
+	}
 
 	while getopts ":h" OPTION; do
     	    case "$OPTION" in
