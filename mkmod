@@ -37,8 +37,7 @@ alias kmodorig='$MYDIR/kmodorig'
 #######################################
 declare kmoddir
 declare libdir="/lib/modules"
-declare arch=$(uname -i)
-declare lasttag
+declare -i cpucount
 declare cmdline="$@"
 declare -i shcount=0
 declare clean=false	# boolean to run "make clean"
@@ -112,33 +111,9 @@ iskerneltree() {
 	[[ "$line_1" == *"Linux kernel"* ]] && return 0 || return 1
 }
 
-# getkver
-#
-# Echo "kernel-V.P.S", where:
-# 	V is the kernel version
-# 	P is the patch level
-# 	S is the sublevel
-# 	(see first three lines of kernel Makefile)
-#
-getkver() {
-	local verhdr=$(head -3 Makefile)
-	local line
-	local ver=""
-	local kstr="kernel"
-
-	while read line; do
-		ver="$ver".$(echo $line | cut -d' ' -f3)
-	done <<< "$verhdr"
-
-	[ "${ver:1:1}" == "4" ] && kstr="kernel-pegas"
-	ver=$kstr${ver/./-}
-	echo $ver
-}
-
 mkconfig() {
-	local kver=$(getkver)
-	make rh-configs-prep
-	cp -vf configs/$kver-$arch.config .config
+	(( $(wc -l <<< $(grep dist-configs redhat/Makefile)) > 1 )) && make dist-configs || make rh-configs
+	cp -vf redhat/configs/*-$(uname -i).config .config
 }
 
 $(iskerneltree) || { echo -e "$notktreestr"; exit 1; }
@@ -182,8 +157,18 @@ shift $shcount
 $orig && { mkcfg=false; clean=false; prep=false; sync=false; }
 
 kmoddir="$1"
-$mkcfg && { echo "make rh-configs"; mkconfig; }
+
+# Get the cpu count, but don't use all the cpu. Save some for other
+# processses.
+cpucount=$(wc -l <<< $(grep processor /proc/cpuinfo))
+((cpucount > 2)) && cpucount=$((cpucount - 2)) || cpucount=1
+
+$mkcfg && { echo "making configs"; mkconfig; }
 $clean && { echo "make clean"; make clean; }
+
+# If there's no Module.symvers file, then we have to make all the modules.
+[ -f "Module.symvers" ] || make -j$cpucount modules
+
 $prep && { echo "make prepare"; make prepare; \
 	   echo "make modules_prepare"; make modules_prepare; }
 
