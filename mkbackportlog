@@ -174,6 +174,12 @@ EOF
 	exitme 0
 }
 
+#** get_pathopt - validate and return a pathname
+#
+# Arguments:
+#   $1 - path to be verified
+#   $2 - receives the realpath name of path
+#*
 get_pathopt() {
 	local path=$1
 	local -n optname="$2"
@@ -182,6 +188,12 @@ get_pathopt() {
 	optname=$(realpath "$path")
 }
 
+#** get_varopt - replace commas with spaces
+#
+# Arguments:
+#   $1 - variables separated by commas
+#   $2 - receives variables as space separated string
+#*
 get_varopt() {
 	local var="$1"
 	local -n varname="$2"
@@ -189,6 +201,11 @@ get_varopt() {
 	varname="${var//,/ }"
 }
 
+#** test_help - determines whether the string invokes help
+#
+# Arguments:
+#   $1 - string to be parsed for whether it is asking for help
+#*
 test_help() {
 	local opt="$1"
 
@@ -197,12 +214,15 @@ test_help() {
 	shopt -u nocasematch
 }
 
-# is_validcmtexpr
+#** is_validcmtexpr - validate a commit expression
 #
 # Break the commit expression into separate strings, dividing on a
 # double dot elipsis, and cycle through the resulting array to
 # check each of the commits.
 #
+# Arguments:
+#    $1 - commit expression
+#*
 is_validcmtexpr() {
 	local tmp="$1"
 	local -a cary=()
@@ -221,6 +241,13 @@ is_validcmtexpr() {
 	return 0
 }
 
+#** getcmt - validate a commit expression supplied at the cmd line
+#
+# ArgumentsL
+#   $1 - commit expression passed by user
+#   $2 - the switch name used to pass the commit expression
+#   $3 - receives the commit expression after validation
+#*
 getcmt() {
 	local tmp="$1"
 	local op="$2"
@@ -236,11 +263,9 @@ getcmt() {
 	return 0
 }
 
-# parseops() - parse the input options
+#** parseops - parse the input options
 #
-# Needed multicharacter optionis, but didn't want to use longopts.
-#
-# Inputs: $@, the whole command line
+# Arguments: $@, the whole command line
 #
 # Globals:
 # 	optcount
@@ -252,7 +277,7 @@ getcmt() {
 # 	upscope
 # 	outdir
 # 	version
-#
+#*
 parseops() {
 	local arg=
 	local opt=
@@ -294,7 +319,8 @@ parseops() {
 	done
 }
 
-# compare_strings() - compare strings
+#** compare_strings() - create the backport.log
+#
 #    Compare the commits from the upstream and downstream commit logs
 #    to identify those that have already been backported.
 #    Output all commit lines to the log file, marking the ones that
@@ -306,7 +332,7 @@ parseops() {
 #	dnlog - downstream commits file
 #	outdir - directory for all the commit log files
 #	upcmt - start from this upstream commit
-#
+#*
 compare_strings() {
 	local uppath="$outdir/$uplog"
 	local dnpath="$outdir/$dnlog"
@@ -354,6 +380,16 @@ compare_strings() {
 	done
 }
 
+#** init_env - initialize the sticky variables and other env stuff
+#
+#  Arguments: none
+#
+#  Globals:
+#    configfile
+#    configtable
+#    backgrouond
+#    MYDATA
+#*
 init_env() {
 	local bgtemp
 
@@ -367,6 +403,11 @@ init_env() {
 	cfg_write_cfgfile configtable
 }
 
+#** check_log - notify user if logfile already exists
+#
+# Arguments:
+#   $1 - the logfile to check
+#*
 check_log() {
 	log="$1"
 
@@ -378,18 +419,26 @@ check_log() {
 	}
 }
 
+#** get_currentbranch - echo the current git branch
+#*
 get_currentbranch() {
 	git branch | grep -E '^\*' | cut -d' ' -f2
 }
 
+#** seek_str - look for a string in the commits in the upstream.log
+#
+# Globals:
+#   updir
+#   outdir
+#   chlog
+#*
 seek_str() {
 	local prepend=
 	local outfile=
 	local commit
 	local str
 
-	[ -d "$updir" ] && { cd "$updir" || exitme $exit_invdir; }
-
+	ui_cd "$updir"
 	for str in $searchstr; do
 		prepend=$(echo "$str" | cut -d' ' -f1)
 		outfile="$outdir/$prepend-$chlog"
@@ -403,9 +452,21 @@ seek_str() {
 			echo "$line" | tee -a "$outfile"
 		done < "$outdir/$chlog"
 	done
-	cd - > /dev/null 2>&1 || exitme $exit_invdir
+	ui_cd -
 }
 
+#** select_remote - choose from available repo/branches in current dir
+#
+# Provides the upstream reference for searching for upstream commits.
+#
+# Arguments:
+#   $1 - receives the chosen repo/branch
+#
+# Globals:
+#   updir
+#   repobr
+#   configtable
+#*
 select_remote() {
 	local -n gusr_cur="$1"
 	local brstr=
@@ -432,22 +493,19 @@ select_remote() {
 	return 0
 }
 
-# limit_scope - backport log stops at  the supplied upstream commit
+#** limit_scope - backport log stops at  the supplied upstream commit
 #
 # This is done by commenting out hashes in the backport log that are
 # beyond the supplied scope commit. These comment delimiter will be a
 # leading '#+ ' on the lines of the commits that go beyond the scope.
 #
 # GLOBALS:
+#   outdir  - destination directory for files output by this script
 #   chlog   - the backport log file
 #   upscope - the upstream limiting commit
 #             this commit will also be excluded, if it's in the
 #             backport log.
-#
-# ARGUMENTS: none
-#
-# RETURNS: none
-#
+#*
 limit_scope() {
 	local delim=
 	local line
@@ -479,6 +537,8 @@ limit_scope() {
 	echo -e "$OFF"
 }
 
+#** main
+#*
 main() {
 	local mainbranch
 	local currentbranch
