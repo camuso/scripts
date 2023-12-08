@@ -12,6 +12,8 @@ declare optcount=0
 declare b_verbose=false
 declare file=
 declare b_func=false
+declare begdelim="#+"
+declare enddelim="#-"
 
 MYDIR="$(dirname "$(which "$(basename "$0")")")"
 MYLIB="$MYDIR"/lib
