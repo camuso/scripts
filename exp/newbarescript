@@ -1,0 +1,59 @@
+#!/bin/bash
+#
+# newsimplescript
+#
+
+exitme() {
+	echo
+	echo "Provide a name for the new script thus:"
+	echo "  $(basename $0) new-script-name"
+	echo
+	exit 1
+}
+
+[ "$1" ] || exitme
+
+declare script="$1"
+wrln="echo -e "$1" >> $script"
+
+body="#!/bin/bash
+#
+# $script
+
+declare usagestr=\$(
+cat <<EOF
+
+\$(basename \$0) 
+
+Description:
+
+Arguments:
+
+\\\0
+EOF
+)
+
+usage() {
+	echo -en "\$usagestr"
+	exit 1
+}
+
+main() {
+
+}
+
+main \$@
+
+exit 0
+"
+
+main() {
+	[ -f "$script" ] && { echo "$script already exists."; exit 1; }
+	echo -e "$body" > $script
+	chmod +x $script
+}
+
+main $@
+
+exit 0
+

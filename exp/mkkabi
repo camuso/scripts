@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# mkkabi
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+declare usagestr=
+usagestr=$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+main() {
+	workdir="/work/kabitools"
+	cat lib/ui.source > $workdir/kabiscan
+	cat lib/cfgmgr.source >> $workdir/kabiscan
+	cat $workdir/kabiscan.source >> $workdir/kabiscan
+	chmod +x $workdir/kabiscan
+	exit 0
+}
+
+main "$@"

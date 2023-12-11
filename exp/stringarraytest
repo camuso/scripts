@@ -1,0 +1,17 @@
+
+declare -a crmsg
+
+create_checkrepo_msgs() {
+crmsg=(
+""
+"$STA$PWD$WRN is not a git repo"
+"$STA$PWD$WRN is not the top of a RHEL kernel tree$OFF"
+"$STA$PWD$WRN You must create the kabi graph\n${INF}'g' from main menu.$OFF"
+)
+}
+declare -i crm_nogit=1
+declare -i crm_norhel=2
+declare -i crm_nokabi=3
+
+create_checkrepo_msgs
+echo ${crmsg[crm_nogit]}

@@ -1,0 +1,13 @@
+#!/bin/bash
+get_pathopt() {
+	local path="$1"
+	local pathary=( $path )
+	local -n optname="$2"
+printf "%s\n" ${pathary[@]}
+
+	[ -e "$path" ] || exitme $exit_invpath "$path"
+	optname="${pathary[@]}"
+	echo "optname: $optname"
+}
+
+get_pathopt "$@"

@@ -1,0 +1,436 @@
+#!/bin/bash
+#
+# init-my-stuff 1.0
+# set -x
+
+declare -i optcount=0
+declare remotename
+declare logfile="$HOME/.initmystuff.log"
+declare repolist="rcbak hints etcbk misc ipmi"
+declare b_pushpriv=false
+declare b_gitrepo=true
+declare clonestr
+declare distro
+declare installagent
+declare installflags
+declare fetched=false
+declare majersion=
+
+echo "Installing environment on ..."
+hostname
+echo
+
+while getopts hpg OPTION; do
+    case "$OPTION" in
+
+	h ) optcount=$((optcount+1))
+	    ;;
+	p ) optcount=$((optcount+1))
+	    b_pushpriv=true
+	    ;;
+	g ) optcount=$((optcount+1))
+	    b_gitrepo=false
+	    ;;
+	* ) echo "unrecognized option -$OPTION"
+	    exit 127
+    esac
+done
+
+shift $optcount
+remotename="$1"
+
+# ========================================================================
+# To determine whether dnf or yum is the installagent, get the distro and
+# version numbers.
+# ------------------------------------------------------------------------
+#
+if [ -f /etc/os-release ]; then
+	foo=$(grep -w 'ID' /etc/os-release | cut -d"=" -f2)
+
+	# Strip off the double quote marks
+	#
+	foo=${foo%\"}
+	foo=${foo#\"}
+
+	# distro is the lowercase of the ID we pulled out of /etc/os-release
+	#
+	distro=$(echo "$foo" | tr '[:upper:]' '[:lower:]')
+
+	# ([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
+	#	{ echo  "$distro is not Redhat" }
+
+	echo "Distro: $distro"
+
+	if [[ "$distro" == "fedora" ]]; then
+		installagent=dnf
+		installflags="--allowerasing --best"
+	elif [[ "$distro" == "rhel" ]]; then
+		# Get the major version and strip off any leading double quotes
+		#
+		majversion=$(grep -w 'VERSION_ID' /etc/os-release | cut -d= -f2 | cut -d. -f1)
+		majversion=${majversion#\"}
+
+		# Determine the install agent based on the major version
+		#
+		if [ $majversion -lt 8 ]; then
+			installagent="yum"
+			installflags="--nogpgcheck --skip-broken"
+		else
+			installagent="dnf"
+			installflags="--allowerasing --best"
+		fi
+
+	elif [[ "$distro" == "ubuntu" ]]; then
+		installagent='apt-get'
+	else
+		echo "$distro is not a distro supported by this script."
+	fi
+
+else
+	echo "No /etc/os-release file. Assuming distro is RHEL less than 8."
+	distro="rhel"
+	installagent="yum"
+	installflags="--nogpgcheck --skip-broken"
+fi
+
+# ========================================================================
+# Can't go any further without rsync and git
+# ------------------------------------------------------------------------
+#
+which rsync
+[ $? -eq 0 ] || $installagent install -y rsync
+
+which git
+[ $? -eq 0 ] || $installagent install -y git
+
+cd		# make sure we're home
+> "$logfile"	# init the log file
+
+# If we're creating a system that will have push privileges to the
+# repos, then use ssh access, else use http.
+# For ssh access, the user will have to add the ssh key to the github
+# account.
+#
+$b_pushpriv && clonestr="git clone git@github.com:camuso/" \
+	    || clonestr="git clone https://github.com/camuso/"
+
+# If we don't have an ssh key, generate it.
+#
+[ -f $HOME/.ssh/id_rsa ] || \
+	ssh-keygen -N "" -f $HOME/.ssh/id_rsa | tee -a "$logfile" 2>&1
+
+echo "*******************************" >> "$logfile" 2>&1
+echo "* Clone or update Env Files   *" >> "$logfile" 2>&1
+echo "*******************************" >> "$logfile" 2>&1
+echo
+
+for repo in $repolist; do
+	if [ -e $repo ]; then
+		if [ -d "$repo"/.git ]; then
+			echo "Updating $repo" | tee -a "$logfile" 2>&1
+			cd $repo
+			git config pull.rebase false
+			git pull
+			cd -
+		else
+			echo "Converting directory $repo to git repo" | tee -a "$logfile" 2>&1
+			rm -rf $repo
+			$clonestr$repo.git $repo
+			cd $repo
+			git config pull.rebase false
+		fi
+	else
+		echo "Cloning $repo ..." | tee -a "$logfile" 2>&1
+		$clonestr$repo.git $repo
+	fi
+	chown -R tcamuso.tcamuso $repo
+	chmod -R u+wrx,go+rx,go-w $repo
+done
+
+echo "*******************************" >> "$logfile" 2>&1
+echo "* Clone or update bin scripts  *" >> "$logfile" 2>&1
+echo "*******************************" >> "$logfile" 2>&1
+echo
+
+# Update or create the bin directory.
+#
+if [ -d bin/.git ]; then
+	cd bin
+	echo "Updating bin repo..." | tee -a "$logfile" 2>&1
+	git config pull.rebase false
+	git pull
+	cd -
+else
+	[ -e bin ] && rm -rf bin
+	echo "Creating bin repo..."  | tee -a "$logfile" 2>&1
+	${clonestr}scripts.git bin
+	cd bin
+	git config pull.rebase false
+fi
+
+
+# Copy etc and rc files out of their archive directories into their respective
+# real directories, but only if they're newer.
+#
+echo "************************************************" >> "$logfile" 2>&1
+echo "* Copying Env files from Backup Directories    *" >> "$logfile" 2>&1
+echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
+echo "************************************************" >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
+
+# Get the full pathname so we can use that to copy from.
+# If the file or directory already exists, then copy it into a .orig before
+# performing the rsync and possibley overwriting it with new content.
+# If the .orig file already exists, do not write over it.
+#
+find rcbak/ -maxdepth 1 -exec sh -c \
+	'name=$(basename $1);
+	if [ -f $1 ] && [ -f "$name" ]; then
+		[[ -f "$name".orig ]] \
+			|| cp -v $name "$name".orig 2>&1 | tee -a $2; \
+	fi' \
+	sh '{}' $logfile \;
+
+rsync -Pvat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
+exit
+
+# Can only do the following if root
+#
+if [ $(id -u) -eq 0 ]; then
+	# Get the full pathname so we can use that to copy from.
+	# If the file or directory already exists, then copy it into a .orig before
+	# performing the rsync and possibley overwriting it with new content.
+	# If the .orig file already exists, do not write over it.
+	#
+	for f in $(ls -rtd1 etcbk/{*,.*}); do
+		name=$(basename $f);
+		if [ -f $f ] && [ -f "$name" ]; then
+			[[ -f "$name".orig ]] \
+				|| cp -v $name "$name".orig 2>&1 | tee -a $logfile
+		fi
+	done
+
+	rsync -Pvat --cvs-exclude etcbk/ /etc/. 2>&1 | tee -a $logfile
+fi
+
+if [ "$remotename" == "root" ]; then
+	for file in \
+	"hosts" \
+	"vpnc.conf" \
+	"krb5.conf"
+	do
+		echo "--------------" >> "$logfile" 2>&1
+		echo "Checking $file" >> "$logfile" 2>&1
+		[ -f /etc/"$file".orig ] || cp -vf /etc/$file /etc/$file.orig 2>&1 | tee -a "$logfile"
+		cp -vf ~/etcbk/$file /etc/$file 2>&1 | tee -a "$logfile"
+		echo "* * * * * * * * * " >> "$logfile" 2>&1
+		echo "" >> "$logfile" 2>&1
+	done
+fi
+echo "************************************************" >> "$logfile" 2>&1
+echo >> "$logfile" 2>&1
+
+# If we have a "user" it's because were running remotely, so
+# do the remote cleanup.
+#
+if [ "$remotename" ]; then
+	echo "*********************" >> "$logfile" 2>&1
+	echo "* Doing Rmote Fixup *" >> "$logfile" 2>&1
+	echo "*********************" >> "$logfile" 2>&1
+	echo "" >> "$logfile" 2>&1
+	bin/fixup-rsync $remotename >> "$logfile" 2>&1
+fi
+cd -
+
+echo
+
+# If we are running as root and install has been requested, then install
+# the development tools.
+#
+get_rcmtools()
+{
+	# if rcm-tools is already installed with the distro, then skip this.
+	[ -f /etc/yum.repos.d/rcm-tools.repo ] && return
+
+	case "$majversion" in
+		"6" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
+			return 0
+ 			;;
+		"7" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
+			return 0
+			;;
+		"8" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
+			return 0
+			;;
+		"9" ) curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
+			return 0
+			;;
+	esac
+
+	echo ""
+	return 1
+}
+
+get_certs()
+{
+	# If rcm tools are already installed, favor them over the downloaded ones.
+	#
+	local b_rcmsaved=false
+
+	if [ -f /etc/yum.repos.d/rcm-tools.repo ]; then
+		mv /etc/yum.repos.d/rcm-tools.repo /etc/yum.repos.d/rcm-tools.repo.save
+		b_rcmsaved=true
+	fi
+
+	which wget
+	[ $? -eq 0 ] || yum install -y wget
+
+	# install the RH certs
+	# See: https://docs.engineering.redhat.com/display/RCMDOC/RCM+Tools+Release+Guide#RCMToolsReleaseGuide-Installredhat-internal-cert-installrpm
+	#
+	~/bin/install-rhit-cert
+
+	$b_rcmsaved && \
+		mv /etc/yum.repos.d/rcm-tools.repo.save /etc/yum.repos.d/rcm-tools.repo
+}
+
+if [ "$2" == "install" ] && [ "$remotename" == "root" ]; then
+
+	declare arch=$(uname -m)
+	declare rcmurl=""
+	declare installagent""
+
+	# Get the additional repos according to distro
+	#
+	if [[ "$distro" == "fedora" ]]; then
+		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo
+		dnf install -y fedpkg
+
+	elif [[ "$distro" == "rhel" ]]; then
+		get_certs
+		get_rcm_tools
+	fi
+
+
+	# $installagent groupinstall -y 'X Window System' 'GNOME'
+
+	$installagent group install "Development Tools"
+
+	$installagent install --nogpgcheck -y $installflags \
+	automake \
+	annobin \
+	annnobin-annocheck \
+	elfutils-libelf-devel \
+	gcc \
+	gcc-c++ \
+	go \
+	bc \
+	bind-utils \
+	bison \
+	brewkoji \
+	ca-certificates \
+	cmake \
+	conserver-client \
+	cscope \
+	dwarves libdwarves1 \
+	elfutils-devel elfutils-libs elfutils-libelf \
+	elinks \
+	flex \
+	git-email \
+	hostname \
+	ipmitool \
+	kmod \
+	kmod-libs \
+	krb5-workstation krb5-libs \
+	libdwarf libdwarf-devel \
+	lynx \
+	make \
+	mutt \
+	ncurses ncurses-devel \
+	net-tools \
+	OpenIPMI \
+	openssl openssl-devel \
+	patch patchutils \
+	rhpkg \
+	rpm-build \
+	rsync \
+	texinfo \
+	vim vim-enhanced vim-filesystem \
+	watchdog \
+	xz \
+	2>&1 | tee -a $logfile
+
+	# orphaned packages
+	#
+	# trousers trousers-devel \
+	# koji \
+	# http://dl.fedoraproject.org/pub/epel/7/x86_64/q/quilt-0.63-2.el7.noarch.rpm
+	# vim-powerline \
+	# krb5-auth-dialog \
+	# kmodtool \
+
+	mkdir -p /work/us
+	cd /work/us
+
+	[ -d /work/us/netperf ] || {
+		git clone https://github.com/HewlettPackard/netperf.git 2>&1 | tee -a $logfile
+		cd netperf
+		./autogen.sh 2>&1 | tee -a $logfile
+		./configure 2>&1 | tee -a $logfile
+		make 2>&1 | tee -a $logfile
+		make install 2>&1 | tee -a $logfile
+	}
+
+	# If the caller passed a -g option, it means no git repo,
+	# so return to the top directory and exit.
+	#
+	$b_gitrepo || { cd; exit; }
+
+	cd /work/us
+	[ -d /work/us/linux ] || \
+		git clone \
+		git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+		2>&1 | tee -a $logfile
+
+	echo 2>&1 | tee -a $logfile
+
+	cd /work/us/linux
+	rhrepo="rh$majversion"
+	git branch -r | grep $rhrepo
+	stat=$?
+
+	if [ $stat -eq 0 ]; then
+		echo "$rhrepo already added to tree" 2>&1 | tee -a $logfile
+	else
+		echo "Adding $rhrepo to tree" 2>&1 | tee -a $logfile
+		if [ $majversion == "8" ]; then
+			git remote add $rhrepo \
+				https://code.engineering.redhat.com/gerrit/kernel-rhel \
+				2>&1 | tee -a $logfile
+			git -c http.sslVerify=false fetch $rhrepo
+			git checkout -b 810 $rhrepo/rhel-8.1.0 2>&1 | tee -a $logfile
+			git checkout -b 820 $rhrepo/rhel-8.2.0 2>&1 | tee -a $logfile
+			git checkout -b 830 $rhrepo/rhel-8.3.0 2>&1 | tee -a $logfile
+			git checkout -b 840 $rhrepo/rhel-8.4.0 2>&1 | tee -a $logfile
+		elif [ $majversion == "9" ]; then
+			git remote add $rhrepo https://gitlab.com/redhat/rhel/src/kernel/rhel-9
+			git -c http.sslVerify=false fetch $rhrepo
+		else
+			git remote add $rhrepo \
+				git://git.app.eng.bos.redhat.com/rhel$majversion.git \
+				2>&1 | tee -a $logfile
+			git fetch $rhrepo
+			git checkout -b $rhrepo $rhrepo/master 2>&1 | tee -a $logfile
+		fi
+		fetched=true
+	fi
+
+	$fetched || git remote update 2>&1 | tee -a $logfile
+	cd
+fi
+
+exit 0

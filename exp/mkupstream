@@ -1,0 +1,60 @@
+#!/bin/bash
+#
+# mkupstream
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+declare usagestr=
+usagestr=$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+main() {
+	[ -d /work ] || { echo "No /work directory .."; exit 1; }
+
+	[ -d /work/upstream ] || mkdir -p /work/upstream
+	cd /work/upstream
+	[ -f kernel/.git/config ] || {
+		git clone \
+		git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+		kernel
+		cd kernel
+		git remote add gh-ipmi https://github.com/cminyard/linux-ipmi.git
+		git remote add net-next \
+			https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git
+		git remote add scsi \
+			https://git.kernel.org/pub/scm/linux/kernel/git/jejb/scsi.git
+		git remote add power \
+			https://git.kernel.org/pub/scm/linux/kernel/git/powerpc/linux.git
+		git remote add perf \
+			https://git.kernel.org/pub/scm/linux/kernel/git/jolsa/perf.git
+		git remote add linux-rt-devel \
+			https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git
+		git remote add crypto \
+			https://git.kernel.org/pub/scm/linux/kernel/git/herbert/cryptodev-2.6.git
+		git remote add bluetooth \
+			git://git.kernel.org/pub/scm/linux/kernel/git/bluetooth/bluetooth-next.git
+		git fetch -p --all
+	}
+
+	exit 0
+}
+
+main "$@"

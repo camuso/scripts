@@ -1,0 +1,3 @@
+			printf "$MNU%02s.$OFF\n" \
+				"$(paste <(seq 1 $patharysiz) \
+				<(printf "%s\n" "${pathary[@]}"))"

@@ -1,0 +1,71 @@
+#!/bin/bash
+#
+# cfg-test
+#
+
+declare MYDIR=
+declare MYLIB=
+declare MYDATA=
+declare background=
+declare usagestr=
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+MYDATA=$(realpath ./.data)
+[ -d "$MYDATA" ] || mkdir -p "$MYDATA"
+
+source "$MYLIB"/ui.source
+source "$MYLIB"/cfgmgr.source
+
+usagestr=$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)
+
+declare configfile=
+declare -A configtable
+configtable[mydir]="$PWD"
+configtable[mylib]="$MYLIB"
+configtable[mydata]="$MYDATA"
+configtable[new]="good"
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# init
+#
+# GLOBALS
+#   background
+#
+init() {
+	local bgtemp
+
+	ui_setbg bgtemp
+	background=$bgtemp
+	configfile="$MYDATA"/"$(basename "$0")".conf
+}
+
+main() {
+	init
+
+	cfg_start configtable "$configfile"
+	configtable["one"]=1
+	configtable["four"]="one-two-three-four"
+	echo ${configtable["four"]}
+	echo ${configtable["one"]}
+	cfg_write_cfgfile configtable
+	cfg_dump_cfgtbl configtable
+
+	ui_exit ui_exit_ok
+}
+
+main "$@"

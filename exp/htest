@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# htest
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+
+	echo $HOME
+	echo "$HOME"
+}
+
+main $@
+
+exit 0
+

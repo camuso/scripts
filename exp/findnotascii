@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# findnotascii
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	find . -type f -exec sh -c '\
+	file $1 | grep ASCII > /dev/null 2>&1; \
+	[ $? -eq 1 ] && echo $1' \
+	sh '{}' \;
+
+}
+
+main $@
+
+exit 0
+

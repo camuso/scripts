@@ -1,0 +1,5 @@
+while read line; do
+	strtok "$line" ": " lary
+	eval ${lary[0]}=${lary[1]}
+	echo "${lary[0]} is ${!lary[0]}"
+done < lib/patchreview.yaml

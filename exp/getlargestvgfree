@@ -1,0 +1,14 @@
+
+        vgfree=0
+	vgslog="$(vgs --units g --noheadings)"
+
+	while read -r -a line; do
+		free=0
+		# truncate at decimal
+		free=${line[5]%.*}
+		# remove all non-numeric chars
+		free=${free//[!0-9]}
+		((free > vgfree)) && vgfree=$free
+	done <<< "$vgslog"
+
+	echo "largest free: $vgfree"

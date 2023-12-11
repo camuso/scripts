@@ -1,0 +1,42 @@
+#!/bin/bash
+#
+# textest
+
+source lib/ui.source
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0)
+
+Description:
+
+Arguments:
+
+\0
+EOF
+)
+
+usage() {
+	echo -en $usagestr
+	exit 1
+}
+
+main() {
+	local b_flag="$1"
+	local str=$(
+cat <<EOF
+
+$( $b_flag && echo "b_flag = true" || echo "b_flag = false")
+
+\0
+EOF
+)
+
+	echo -e "$str"
+}
+
+main $@
+
+exit 0
+

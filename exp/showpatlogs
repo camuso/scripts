@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# showpatlogs
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+[ -n "$MYLIB" ] || {
+	declare MYLIB=
+	MYLIB="$MYDIR"/lib
+}
+
+[ "$ui_loaded" ] || source "$MYLIB"/ui.source
+declare files
+
+declare usagestr=
+usagestr=$(
+cat <<EOF
+
+$(basename "$0") files
+
+Arguments
+---------
+   files :  list of files, can be a $(find ...) expression
+
+\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# init
+#
+# GLOBALS
+#
+init() {
+	local -i bgtemp
+
+	ui_setbg bgtemp
+}
+
+main() {
+	init
+	files="$1"
+
+
+
+	ui_exit ui_exit_ok
+}
+
+main "$@"
