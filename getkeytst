@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# getkeytst
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+declare usagestr=
+usagestr=$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+main() {
+	local foo=
+	local fee=
+	local fie=
+	local foe=
+
+	while [[ $foe != 'q' ]]; do
+		foo=$(python3 getkey.py)
+		fee=$(echo $foo | rev)
+		fie=$(echo ${fee:0:8} | rev)
+		foe=$(echo ${fie:6} | xxd -p -r)
+		[[ ${fie:0:4} == "0x1b" ]] && echo "alt-$foe" || echo "$foe"
+	done
+	exit 0
+}
+
+main "$@"
