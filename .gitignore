@@ -2,7 +2,8 @@ temp/
 test/
 coventry/
 recovery/
-deprecated
+deprecated/
+exp/
 .*
 .*.swp
 *.tgz
@@ -18,6 +19,7 @@ extract-html-pre
 togglebit
 chkbit
 getbit
+keypress
 funcs
 cscope*
 test-inspect
