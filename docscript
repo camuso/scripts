@@ -111,7 +111,8 @@ main() {
 		read -ra lary <<< "$line"
 
 		$b_doc || [ "${line:0:1}" == "#" ] || continue
-		if [ "${lary[0]}" == "#**" ]; then
+		if [ "${lary[0]:0:3}" == "#**" ]; then
+
 			if $b_func; then
 				fnamsiz=${#fname}
 				[[ "${lary[1]}" == *"$fname"* ]] || continue
@@ -125,7 +126,7 @@ main() {
 		fi
 		$b_verbose || continue
 
-		if [[ "${lary[0]}" != "#*" ]]; then
+		if [[ "${lary[0]:0:2}" != "#*" ]]; then
 			if $b_doc; then
 				[[ "${line:0:1}" == "#" ]] && echo "${line:1}" || echo "$line"
 			fi
