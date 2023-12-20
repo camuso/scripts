@@ -80,7 +80,7 @@ test_help() {
 	local opt="$1"
 
 	shopt -s nocasematch
-	( [ -z "$opt" ] || [[ $opt =~ (h|help) ]] ) && { usage; exitme $exit_ok; }
+	( [ -z "$opt" ] || [[ $opt =~ (\bh\b|^help) ]] ) && { usage; exitme $exit_ok; }
 	shopt -u nocasematch
 }
 
@@ -186,8 +186,8 @@ if [ -f "$ofile" ]; then
 # set -x
 	echo
 	echo "File: $ofile already exists!"
-	getyn "Do you want to overwrite?" answer
-	$answer && echo "Overwriting file: $ofile" || exit 1
+	loop_yn "Do you want to overwrite?" || exit 1
+	echo "Overwriting file: $ofile"set -x
 # set +x
 fi
 
@@ -208,7 +208,7 @@ $b_source && echo -en '
 echo -en '
 [ -n "$MYDIR" ] || {
 	declare MYDIR=
-	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+	MYDIR="$(dirname -- "${0}")"
 }
 ' >> "$ofile"
 
@@ -246,7 +246,7 @@ $b_args && {
 
 echo -en '
 declare usagestr=
-usagestr=$(
+usagestr="$(
 cat <<EOF
 
 $(basename "$0")' >> "$ofile"
@@ -260,7 +260,7 @@ $b_cmds && print_usagearts "$cmds" "Commands"
 
 echo -en '\\0
 EOF
-)
+)"
 
 # control_c: run if user hits control-c
 #
