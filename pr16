@@ -1,0 +1,57 @@
+#!/bin/bash
+#
+# pr16
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname -- "${0}")"
+}
+declare clr
+declare bg
+
+declare usagestr=
+usagestr="$(
+cat <<EOF
+
+$(basename "$0") clr bg
+
+Arguments
+---------
+   clr : color code between 31 and 37
+   bkg : background code betweeen 41 and 47
+
+\0
+EOF
+)"
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+main() {
+	clr="$1"
+	bkg="$2"
+
+	bclr=$((clr + 60))
+	bbkg=$((bkg + 60))
+
+	(($# > 0)) || { echo -e "$usagestr"; exit; }
+	printf "\e[0;${clr}m16-Color \\\e[0;${clr}m \e[1;${clr}m \\\e[1;${clr}m BOLD \n \e[0m"
+	printf "\e[0;${bclr}mBRIGHT \\\e[0;${bclr}m \e[1;${bclr}m \\\e[1;${bclr}m BRIGHT BOLD \n \e[0m"
+	[ -n "$bkg" ] && { \
+	printf "\e[0;${1}m\033[${bkg}m \\\e[0;${1}m\\\033[${bkg}m 16-Color Background "
+	printf "\e[1;${1}m\033[${bkg}m \\\e[1;${1}m\\\033[${bkg}m BOLD \e[0m\n"
+	}
+
+
+	exit 0
+}
+
+main "$@"

@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# pr-256
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname -- "${0}")"
+}
+declare clr
+declare bkg
+
+declare usagestr=
+usagestr="$(
+cat <<EOF
+
+$(basename "$0") clr
+
+Run colortable-256 for the palette
+
+Arguments
+---------
+   clr : Select a range from 0 to 255
+\0
+EOF
+)"
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+main() {
+	clr="$1"
+
+	(($# > 0)) || { echo -e "$usagestr"; exit; }
+
+	printf "\033[38;5;${clr}m 256 Color: \\\033[38;5;${clr}m "
+	printf "\033[1;38;5;${clr}m 256  BOLD:\\\033[1;38;5;${clr}m \e[0m\n"
+	exit 0
+}
+
+main "$@"
