@@ -21,7 +21,7 @@ usage() {
 }
 
 main() {
-	gnome-terminal --geometry=180x48 &
+	gnome-terminal --geometry=200x48 &
 }
 
 main $@
