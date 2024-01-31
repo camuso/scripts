@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+# mk-certs
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname -- "${0}")"
+}
+
+declare rcmtools="https://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-9-baseos.repo"
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)"
+
+usage() {
+	echo -e "$usagestr"
+}
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	# If not the root, exit with an error code.
+	(( $(id -u) == 0 )) || exitme 1 "Must be root user to run this script"
+
+	# Get the rcmtools repo or exit.
+	cd /etc/yum.repos.d/
+	wget --no-check-certificate "$rcmtools" || exitme 2 "Can't get rcmtools"
+
+	# Install the IT CA certificates:
+
+	curl -o /etc/pki/ca-trust/source/anchors/RH-IT-Root-CA.crt \
+		https://certs.corp.redhat.com/certs/2015-IT-Root-CA.pem
+
+	curl -o /etc/pki/ca-trust/source/anchors/2022-IT-Root-CA.pem \
+		https://certs.corp.redhat.com/certs/2022-IT-Root-CA.pem
+
+	update-ca-trust
+
+	exitme 0
+}
+
+main "$@"
