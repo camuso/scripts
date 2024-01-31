@@ -1,0 +1,119 @@
+#!/bin/bash
+#
+# install-pkgs
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname -- "${0}")"
+}
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)"
+
+usage() {
+	echo -e "$usagestr"
+}
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	# If not the root, exit with an error code.
+	(( $(id -u) == 0 )) || exitme 1 "Must be root user to run this script"
+
+	for pkg in \
+	annobin-annocheck \
+	automake \
+	annobin \
+	annobin-annocheck \
+	centpkg \
+	elfutils-libelf-devel \
+	gcc \
+	gcc-c++ \
+	go \
+	bc \
+	bind-utils \
+	bison \
+	brewkoji \
+	ca-certificates \
+	cmake \
+	conserver-client \
+	cscope \
+	dwarves libdwarves1 \
+	elfutils-devel elfutils-libs elfutils-libelf \
+	elinks \
+	ethtool \
+	flex \
+	git-email \
+	golang \
+	hostname \
+	ipmitool \
+	kmod \
+	kmod-libs \
+	krb5-workstation krb5-libs \
+	lab \
+	libdwarf libdwarf-devel \
+	lynx \
+	make \
+	mutt \
+	ncurses ncurses-devel \
+	net-tools \
+	nmap \
+	OpenIPMI \
+	openssl openssl-devel \
+	patch patchutils \
+	perl \
+	pv \
+	python-bugzilla-cli \
+	rhpkg \
+	rpm-build \
+	rsync \
+	texinfo \
+	tpm-tools \
+	usbutils \
+	vim vim-enhanced vim-filesystem \
+	watchdog \
+	waiverdb-cli \
+	xclip \
+	xorg-x11-apps \
+	xz \
+	zenity \
+	; do
+		dnf install -y $pkg
+	done
+
+	exitme 0
+}
+
+main "$@"
