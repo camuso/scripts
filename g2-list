@@ -7,27 +7,4 @@ declare BLD="\033[1m"
 declare UND="\033[4m"
 declare OFF="\033[0m"
 
-declare grubconfigfile=$(find /boot/grub2 -name grub.cfg)
-declare grublist=$(grep "^menuentry" $grubconfigfile | cut -d "'" -f2)
-declare olddef=$(grub2-editenv list | head -1 | cut -d'=' -f2)
-declare entries=$(find /boot -type d -name entries)
-
-index=0
-echo "From $grubconfigfile"
-while read line
-do
-    	let index++
-
-	spacer="   "
-	if [[ "$line" == "$olddef" ]]; then
-		echo -en $BLD
-		spacer=" * "
-	fi
-
-    	printf "%s%2d %s\n" "$spacer" $index "$line"
-	echo -en $OFF
-
-done <<< "$grublist"
-echo
-echo "From $entries"
-ls -1 "$entries"
+grubby --info=ALL | grep -A1 index
