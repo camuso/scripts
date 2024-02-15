@@ -406,7 +406,7 @@ ui_padfield() {
 	((${#str} >= fldw)) && echo -n "$str" && return
 	padn=$((fldw - ${#str}))
 	padstr=$(ui_putnchar "$padch" "$padn")
-	echo -n "$padstr$str"
+	echo -en "$padstr$str"
 	return
 }
 
