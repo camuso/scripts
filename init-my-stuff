@@ -102,15 +102,14 @@ else
 fi
 
 # ========================================================================
-# Can't go any further without which rsync and git
+# Can't go any further without which rsync, wget, curl, and git
 # ------------------------------------------------------------------------
 #
 $installagent install -y which
-which rsync
-[ $? -eq 0 ] || $installagent install -y rsync
-
-which git
-[ $? -eq 0 ] || $installagent install -y git
+which rsync || $installagent install -y rsync
+which wget || $installagent install -y wget
+which curl || $installagent install -y curl
+which git || $installagent install -y git
 
 cd		# make sure we're home
 > "$logfile"	# init the log file
@@ -226,10 +225,17 @@ echo
 #
 get_rcmtools()
 {
+	local rh6tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-workstation.repo"
+	local rh7tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-workstation.repo"
+	local rh8tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo"
+	local rh9tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-9-baseos.repo"
+
 	# if rcm-tools is already installed with the distro, then skip this.
-	[ -f /etc/yum.repos.d/rcm-tools.repo ] && return
+	# [ -f /etc/yum.repos.d/rcm-tools*.repo ] && return
 
 	echo -n "Installing rcm tools for " | tee -a "$logfile"
+
+	cd /etc/yum.repos.d/
 
 	if [[ "$distro" == "fedora" ]]; then
 		echo "fedora" | tee -a "$logfile"
@@ -241,33 +247,34 @@ get_rcmtools()
 
 	case "$majversion" in
 		"6" )   echo "$distro-6" | tee -a "$logfile"
-			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
-			return 0
+			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			# http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
+			wget --no-check-certificate "$rh6tools"
  			;;
 		"7" )	echo "$distro-7" | tee -a "$logfile"
-			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
-			return 0
+			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			#http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
+			wget --no-check-certificate "$rh7tools"
 			;;
 		"8" )	echo "$distro-8" | tee -a "$logfile"
-			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
+			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			#http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
 			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
-			return 0
+			wget --no-check-certificate "$rh8tools"
 			;;
 		"9" ) 	echo "$distro for RHEL-9" | tee -a "$logfile"
-			curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
+			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			#http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
 			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
 			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
-			return 0
+			wget --no-check-certificate "$rh9tools"
 			;;
 	esac
 
+	cd -
 	echo ""
-	return 1
+	return 0
 }
 
 
@@ -298,25 +305,17 @@ get_epel() {
 
 get_certs()
 {
-	# If rcm tools are already installed, favor them over the downloaded ones.
-	#
-	local b_rcmsaved=false
-
-	if [ -f /etc/yum.repos.d/rcm-tools.repo ]; then
-		mv /etc/yum.repos.d/rcm-tools.repo /etc/yum.repos.d/rcm-tools.repo.save
-		b_rcmsaved=true
-	fi
-
-	which wget
-	[ $? -eq 0 ] || yum install -y wget
-
 	# install the RH certs
 	# See: https://docs.engineering.redhat.com/display/RCMDOC/RCM+Tools+Release+Guide#RCMToolsReleaseGuide-Installredhat-internal-cert-installrpm
 	#
-	~/bin/install-rhit-cert
 
-	$b_rcmsaved && \
-		mv /etc/yum.repos.d/rcm-tools.repo.save /etc/yum.repos.d/rcm-tools.repo
+	curl -o /etc/pki/ca-trust/source/anchors/RH-IT-Root-CA.crt \
+		https://certs.corp.redhat.com/certs/2015-IT-Root-CA.pem
+
+	curl -o /etc/pki/ca-trust/source/anchors/2022-IT-Root-CA.pem \
+		https://certs.corp.redhat.com/certs/2022-IT-Root-CA.pem
+
+	update-ca-trust
 }
 
 if $b_install && [ "$remotename" == "root" ]; then
@@ -324,6 +323,7 @@ if $b_install && [ "$remotename" == "root" ]; then
 	declare rcmurl=""
 	declare installagent=""
 
+	yes | $HOME/bin/mkworkdir-noq
 	get_certs
 	get_rcmtools
 
