@@ -1,0 +1,111 @@
+#!/bin/bash
+#
+# g2-next
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname -- "${0}")"
+}
+
+[ -n "$MYLIB" ] || {
+	declare MYLIB=
+	MYLIB="${MYDIR}/lib"
+}
+
+[ "$ui_loaded" ] || source "${MYLIB}/ui.source"
+
+declare -i termbkgnd=
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")\0
+EOF
+)"
+
+usage() {
+	echo -e "$usagestr"
+}
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# exitme
+#
+# Globals
+#   ui exit codes - see lib/ui.source
+#   ui_err_msg array
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional string to precede cli message
+#
+exitme() {
+	local -i code=$1
+	local str="$2"
+
+	((code == ui_exit_ok)) && exit "$code"
+	ui_print_climsg "$code" "$str"
+	usage
+	exit "$code"
+}
+
+# init
+#
+# GLOBALS
+#
+init() {
+	ui_setbg termbkgnd
+
+	echo "b_color: $b_color"
+}
+
+choose_kernel() {
+	local gstr="$1"
+	local choice
+	local kstr
+	local -i idx=1
+	local -i total
+	local -i nwidth
+
+	total=$(wc -l < <(grep index <<< "$g2raw"))
+	nwidth=${#total}
+
+	echo -e "${MNU}Choose one of these kernels for next boot$OFF"
+	while read line; do
+		grep -q '^kernel' <<< "$line" || continue
+		kstr=$(cut -d= -f2 <<< "$line")
+		echo -en "  $MNU"
+		ui_padfield "$idx. " " " "$nwidth"
+		echo -e "$OFF$kstr"
+		let ++idx
+	done <<< "$gstr"
+
+	loop_range 1 "$total" choice
+	grub2-reboot "$((choice -1 ))"
+
+}
+
+main() {
+	local g2raw
+	local kern
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	init
+
+	g2raw="$(grubby --info=ALL | grep -A1 index)"
+	choose_kernel "$g2raw" kern
+
+	exitme $ui_exit_ok
+}
+
+main "$@"
