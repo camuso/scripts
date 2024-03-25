@@ -322,8 +322,18 @@ if $b_install && [ "$remotename" == "root" ]; then
 	declare arch=$(uname -m)
 	declare rcmurl=""
 	declare installagent=""
+	declare filesys
 
-	yes | $HOME/bin/mkworkdir-noq
+	filesys=$(awk '{print $2}' < <(df -hT | grep -w '\/'))
+	echo "filesys:$filesys:"
+
+	case "$filesys" in
+		"xfs" ) yes | $HOME/bin/mkworkdir-noq
+			;;
+		"btrfs" ) btrfs subvolume create /work
+			;;
+	esac
+
 	get_certs
 	get_rcmtools
 
