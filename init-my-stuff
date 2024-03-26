@@ -229,6 +229,7 @@ get_rcmtools()
 	local rh7tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-workstation.repo"
 	local rh8tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo"
 	local rh9tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-9-baseos.repo"
+	local fedtools="https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-38/bmeneguele-rhkernel-devtools-fedora-38.repo"
 
 	# if rcm-tools is already installed with the distro, then skip this.
 	# [ -f /etc/yum.repos.d/rcm-tools*.repo ] && return
@@ -242,6 +243,9 @@ get_rcmtools()
 		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo \
 			| tee -a "$logfile"
+			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
+			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-38/bmeneguele-rhkernel-devtools-fedora-38.repo
+			wget --no-check-certificate "$fedtools"
 		return
 	fi
 
