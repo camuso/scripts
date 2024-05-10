@@ -1,0 +1,117 @@
+#!/bin/bash
+#
+# prfromindex
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+declare string
+declare index
+declare -a argv=()
+declare -i argc=2
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0") string index
+
+Prints the contents of the given string starting at the word given
+by the index to the end of the string.
+
+Arguments
+---------
+   string : string to parse
+   index  : index of word in string to start from
+
+\0
+EOF
+)"
+
+usage() {
+	echo -e "$usagestr"
+}
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+# check_arg
+#
+# Globals:
+#   argv - array containing command line arguments
+#
+check_arg() {
+        local arg="$1"
+
+        # If 1st char is a hyphen, then invalid switch
+        [ "${arg:0:1}" == "-" ] && return 1
+
+        # Otherwise, add the arg to the argary
+        argv+=("$arg")
+        return 0
+}
+
+# parseopts
+#
+# Globals
+#   argv
+#   argc
+#
+parseopts() {
+	while (($# > 0)); do
+	    case "$1" in
+		-h | --help )
+		     echo -e "$usagestr"
+		     exit 0
+		     ;;
+		* )  argv+=("$1")
+		     ;;
+	    esac
+	    shift
+	done
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+	local outstr=
+
+	parseopts "$@"
+	string="${argv[0]}"
+	index="${argv[1]}"
+
+	# Index into the string to the starting word.
+	outstr=$(echo "$string" | \
+		awk -v n="$index" '{for (i=1; i<n; i++) $i=""; print $0}')
+
+	# No quotes around string to remove leading space.
+	echo $outstr
+
+	exitme 0
+}
+
+main "$@"
