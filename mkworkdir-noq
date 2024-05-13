@@ -90,6 +90,24 @@ aryindex() {
     ((ix < ${#ar[@]})) && return 0 || return 1
 }
 
+update_fstab() {
+	local dir="$1"
+	local map="$2"
+	local fstr
+	local uid
+	local fline
+
+	uid="$(blkid "$map" | tr -d \" | awk -F" " '{print $2}')"
+	fstr="$uid $dir                   xfs     defaults        0 0"
+	fline="$(grep -n '/home' /etc/fstab | awk -F':' '{print $1}')"
+
+	# If the line already exists in the fstab, delete it, because
+	# we're going to replace it.
+	[ -n "$fline" ] && sed -i.bak "$fline"d /etc/fstab
+
+	echo "$fstr" >> /etc/fstab
+}
+
 main() {
 	local lvsfldary # array of field names in lvs output
 	local lvhome	# line with home dir info in lvs ouput
@@ -97,6 +115,16 @@ main() {
 	local vghome	# volume group that contains the /home directory
 	local lvsizeidx # index to the LSize field in lvs output
 	local homesiz	# size of the home directory extracted from lvs
+	# /dev/mapper names
+	local homemap	# e.g. /dev/mapper/rhel_dell--per440--01-home
+	local workmap	# e.g. /dev/mapper/rhel_dell--per440--01-work
+	# uuid extracted from blkid
+	local homeid	# uuid of /dev/mapper/rhel_dell--per440--01-home
+	local workid	# uuid of /dev/mapper/rhel_dell--per440--01-work
+	# fstab entries
+	local homefs	# fstab entry for /home
+	local workfs	# fstab entry for /work
+	local line
 
 	[[ "$1" == *"h"* ]] && usage
 
@@ -105,7 +133,7 @@ main() {
 
 	# Find which logical volume is the home directory
 	#
-	homemnt=$(grep home /etc/fstab)
+	homemnt="$(grep home /etc/fstab)"
 	[ $? -eq 0 ] || {
 		exitme 1 "Can't find \'home\' in /etc/fstab"
 	}
@@ -113,9 +141,9 @@ main() {
 	# Create temporary workmnt by replacing 'home' with 'work'
 	# in the home string grepped from /etc/fstab
 	#
-	workmnt=${homemnt//home/work}
-	homedir=$(echo $homemnt | cut -d' ' -f1)
-	workdir=${homedir//home/work}
+	workmnt="${homemnt//home/work}"
+	homedir="$(echo $homemnt | awk -F " " '{print $2}')"
+	workdir="${homedir//home/work}"
 
 	# Get the volume group that contains the home directory and get the
 	# current size of the home directory (home logical volume).
@@ -126,15 +154,15 @@ main() {
 	# 5. Get the home logical volume size from the LSize field
 	# 6. Truncate the decimal and remove non-numeric chars from homesiz
 	#
-	read -ra lvsfldary <<< $(lvs | head -1)
-	read -ra lvhome <<< $(lvs --unit g | grep home)
+	read -ra lvsfldary <<< $(lvs | head -1)		# 1st line has field names
+	read -ra lvhome <<< $(lvs --unit g | grep home)	# /home fields
 	aryindex lvsfldary "VG" vgnameidx
 	aryindex lvsfldary "LSize" lvsizeidx
-	vghome=${lvhome[vgnameidx]}
-	homesiz=${lvhome[lvsizeidx]%.*}
-	homesiz=${homesiz//[!0-9]}
-	newhomesiz=$((homesiz / 2))
-	worksiz=$((homesiz - newhomesiz))
+	vghome="${lvhome[vgnameidx]}"
+	homesiz="${lvhome[lvsizeidx]%.*}"	# remove any decimal and suffix
+	homesiz="${homesiz//[!0-9]}"		# remove all non-digit chars
+	newhomesiz="$((homesiz / 2))"		# split /home with /work
+	worksiz="$((homesiz - newhomesiz))"
 
 	# echo the parameters before continuing.
 	#
@@ -152,29 +180,28 @@ main() {
 	echo "        /work size: $worksiz GB"
 	echo
 
-	umount -v -l $homedir
-	lvremove -v $homedir
-	lvcreate -v -L ${newhomesiz}G -n home $vghome
-	lvcreate -v -L ${worksiz}G -n work $vghome
+	umount -v -l "$homedir"
+	lvremove -v /dev/"$vgname"/"$homedir"
+	lvcreate -v -L "${newhomesiz}"G -n home "$vghome"
+	lvcreate -v -L "${worksiz}"G -n work "$vghome"
 
-	homedir=$(find /dev/mapper/ | grep home)
-	workdir=$(find /dev/mapper/ | grep work)
+	homemap=$(find /dev/mapper/ | grep home)
+	workmap=$(find /dev/mapper/ | grep work)
 
-	mkfs.xfs $homedir
-	mkfs.xfs $workdir
+	mkfs.xfs "$homemap"
+	mkfs.xfs "$workmap"
 	[ -d /home ] || mkdir /home
 	[ -d /work ] || mkdir /work
 
-	grep $workdir /etc/fstab || {
-		cp -v /etc/fstab /etc/fstab.orig
-		echo "$workmnt" >> /etc/fstab
-	}
+	lvextend -l +100%FREE "$workmap"
+	xfs_growfs "$workmap"
 
-	mount -v $homedir
-	mount -v $workdir
+	update_fstab "/home" "$homemap"
+	update_fstab "/work" "$workmap"
 
-	lvextend -l +100%FREE $workdir
-	xfs_growfs $workdir
+	systemctl daemon-reload
+	mount -a
+
 	restorecon -R /work
 	restorecon -R /home
 }
