@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# copykey
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+declare remote_user
+declare remote_host
+declare -a argv=()
+declare -i argc=2
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0") remote_user remote_host
+
+Arguments
+---------
+   remote_user : username on the remote host
+   remote_host : ip of the remote host
+
+\0
+EOF
+)"
+
+usage() {
+	echo -e "$usagestr"
+}
+
+# control_c: run if user hits control-c
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+# exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+# check_arg
+#
+# Globals:
+#   argv - array containing command line arguments
+#
+check_arg() {
+        local arg="$1"
+
+        # If 1st char is a hyphen, then invalid switch
+        [ "${arg:0:1}" == "-" ] && return 1
+
+        # Otherwise, add the arg to the argary
+        argv+=("$arg")
+        return 0
+}
+
+# parseopts
+#
+# Globals
+#   argv
+#   argc
+#
+parseopts() {
+	while (($# > 0)); do
+	    case "$1" in
+		-h | --help )
+		     echo -e "$usagestr"
+		     exit 0
+		     ;;
+		* )  argv+=("$1")
+		     ;;
+	    esac
+	    shift
+	done
+}
+
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	parseopts "$@"
+	remote_user="${argv[0]}"
+	remote_host="${argv[1]}"
+
+	### Detailed Explanation:
+
+	# `LOCAL_HOST=$(hostname)`: This captures the hostname of your local machine.
+	# `localkey=$(cat ~/.ssh/id_rsa.pub)`: This captures the content of your public key.
+
+	# `remote_script`: This is a here document that contains the script to
+	# be run on the remote host.
+	#
+	# - Ensures the `.ssh` directory exists.
+	# - Appends the local public key to the `authorized_keys` file.
+	#
+	# - Uses `ssh-keyscan` to add the local host's public key to the
+	#   `known_hosts` file on the remote host.
+	#
+	# - Sets the correct permissions for the `authorized_keys` file and the
+	#   `.ssh` directory.
+	#
+	# `ssh -o "StrictHostKeyChecking=no" $remote_user@$remote_host "$remote_script"`
+	#  - connects to the remote host and runs the script.
+
+	### Script to Automate the Process
+
+	key=${3:-~/.ssh/id_rsa.pub}
+
+	if [ -z "$remote_user" ] || [ -z "$remote_host" ]; then
+	echo "Usage: $0 <remote_user> <remote_host> [ssh_key_path]"
+	exit 1
+	fi
+
+	LOCAL_HOST=$(hostname)
+	localkey=$(cat "$key")
+
+remote_script=$(cat <<EOF
+mkdir -p ~/.ssh
+echo "$localkey" >> ~/.ssh/authorized_keys
+ssh-keyscan -H $LOCAL_HOST >> ~/.ssh/known_hosts
+chmod 600 ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+EOF
+)
+
+ssh -o "StrictHostKeyChecking=no" "$remote_user@$remote_host" "$remote_script"
+	exitme 0
+}
+
+main "$@"
