@@ -3,6 +3,8 @@
 #
 # Copy archives to a remote host and unpack them.
 #
+# Uses copykey to copy the local host's ssh key to the remote host.
+#
 # Uses 'runremote' script to run local script 'init-my-stuff' on
 # the remote system.
 #
@@ -37,13 +39,13 @@ declare -a errmsg=(
 " not a valid file."
 )
 
-function do_usage {
+do_usage() {
 	local exval=$1
 	echo "$usage"
 	exit $exval
 }
 
-function err_exit {
+err_exit() {
 	local err=$1
 	local str="$2"
 	echo -e "\n$BLD$str${errmsg[$err]}$OFF"
@@ -55,13 +57,11 @@ argc=$#
 
 remote=${!argc}
 
-sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-rsyncmd="rsync -Pvat --no-owner --no-group"
-file=""
-user=""
-pushpriv=""
-installer=false
-nolinuxrepo=""
+declare file=
+declare user=
+declare pushpriv=
+declare installer=false
+declare nolinuxrepo=""
 
 while getopts "giphf:" OPTION; do
 	case "$OPTION" in
@@ -80,14 +80,25 @@ while getopts "giphf:" OPTION; do
 done
 
 user="$(echo "$remote" | cut -d'@' -f1)"
-hos="$(echo $remote | cut -d'@' -f2)"
+host="$(echo $remote | cut -d'@' -f2)"
+
+# copy the localhost's ssh key to the remote host
+copykey "$user" "$host"
+
+# Copy the lab.toml file
+if [ -f ~/.config/lab/lab.toml ]; then
+	rsync -Pat --rsync-path='mkdir -p .config/lab/ && rsync' \
+		~/.config/lab/lab.toml "$user"@"$host":.config/lab/lab.toml
+else
+	echo "Can't find .config/lab/lab.toml"
+fi
 
 echo "connecting with $remote..."
 
 if $installer; then
-	runremote $user $hos ~/bin/init-my-stuff -i $pushpriv $nolinuxrepo $user
+	runremote $user $host ~/bin/init-my-stuff -i $pushpriv $nolinuxrepo $user
 else
-	runremote $user $hos ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user
+	runremote $user $host ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user $host
 fi
 
 echo
