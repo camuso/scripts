@@ -4,7 +4,7 @@
 # set -x
 
 declare -i optcount=0
-declare remotename
+declare remoteuser
 declare logfile="$HOME/.initmystuff.log"
 declare repolist="rcbak hints etcbk misc ipmi"
 declare b_pushpriv=false
@@ -17,6 +17,7 @@ declare fetched=false
 declare majersion=
 declare b_install=false
 declare pkg=
+declare gitlabtok
 
 echo "Installing environment on ..."
 hostname
@@ -42,7 +43,8 @@ while getopts hipg OPTION; do
 done
 
 shift $optcount
-remotename="$1"
+remoteuser="$1"
+remotehost="$2"
 
 # ========================================================================
 # To determine whether dnf or yum is the installagent, get the distro and
@@ -122,10 +124,29 @@ cd		# make sure we're home
 $b_pushpriv && clonestr="git clone git@github.com:camuso/" \
 	    || clonestr="git clone https://github.com/camuso/"
 
+# Get the gitlab token
+# If called by ark2host, then the lab.toml file should be there.
+#
+if [ -f ~/.config/lab/lab.toml ]; then
+	cd ~/.config/lab/
+	gitlabtok="$(grep token lab.toml | awk -F' ' '{print $3}' | tr -d \")"
+	cd -
+else
+	echo "No lab.toml file!"
+fi
+
 # If we don't have an ssh key, generate it.
 #
 [ -f $HOME/.ssh/id_rsa ] || \
 	ssh-keygen -N "" -f $HOME/.ssh/id_rsa | tee -a "$logfile" 2>&1
+
+# copy the ssh key to gitlab and github
+#
+curl --request POST \
+	--form "private_token=$gitlabtok" \
+	--form "title=Automated Key" \
+	--form "key=$(cat ~/.ssh/id_rsa.pub)" \
+	https://gitlab.com/api/v4/user/keys
 
 echo "*******************************" | tee -a "$logfile"
 echo "* Clone or update Env Files   *" | tee -a "$logfile"
@@ -209,12 +230,12 @@ echo >> "$logfile" 2>&1
 # If we have a "user" it's because were running remotely, so
 # do the remote cleanup.
 #
-if [ "$remotename" ]; then
+if [ "$remoteuser" ]; then
 	echo "*********************" >> "$logfile" 2>&1
 	echo "* Doing Rmote Fixup *" >> "$logfile" 2>&1
 	echo "*********************" >> "$logfile" 2>&1
 	echo "" >> "$logfile" 2>&1
-	bin/fixup-rsync $remotename | tee -a "$logfile"
+	bin/fixup-rsync $remoteuser | tee -a "$logfile"
 fi
 cd -
 
@@ -229,7 +250,7 @@ get_rcmtools()
 	local rh7tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-workstation.repo"
 	local rh8tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo"
 	local rh9tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-9-baseos.repo"
-	local fedtools="https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-38/bmeneguele-rhkernel-devtools-fedora-38.repo"
+	local fedtools="https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-39/bmeneguele-rhkernel-devtools-fedora-39.repo"
 
 	# if rcm-tools is already installed with the distro, then skip this.
 	# [ -f /etc/yum.repos.d/rcm-tools*.repo ] && return
@@ -253,26 +274,33 @@ get_rcmtools()
 		"6" )   echo "$distro-6" | tee -a "$logfile"
 			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			# http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
-			wget --no-check-certificate "$rh6tools"
+			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh6tools"
  			;;
 		"7" )	echo "$distro-7" | tee -a "$logfile"
 			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			#http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
-			wget --no-check-certificate "$rh7tools"
+			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh7tools"
 			;;
 		"8" )	echo "$distro-8" | tee -a "$logfile"
 			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			#http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
 			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
 			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
-			wget --no-check-certificate "$rh8tools"
+			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh8tools"
 			;;
-		"9" ) 	echo "$distro for RHEL-9" | tee -a "$logfile"
+		"9" ) 	echo "$distro" | tee -a "$logfile"
 			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
 			#http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
 			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
 			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
-			wget --no-check-certificate "$rh9tools"
+			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh9tools"
+			;;
+		"10" )	echo "fedora tools for RHEL-10" | tee -a "$logfile"
+			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
+			#http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
+			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
+			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-39/bmeneguele-rhkernel-devtools-fedora-39.repo
+			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$fedtools"
 			;;
 	esac
 
@@ -297,7 +325,11 @@ get_epel() {
 			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
 			return 0
 			;;
-		"9" ) 	echo "$distro-8 for $distro-9" | tee -a "$logfile"
+		"9" ) 	echo "$distro-9" | tee -a "$logfile"
+			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+			return 0
+			;;
+		"10" ) 	echo "$distro-9 for $distro-10" | tee -a "$logfile"
 			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
 			return 0
 			;;
@@ -322,21 +354,11 @@ get_certs()
 	update-ca-trust
 }
 
-if $b_install && [ "$remotename" == "root" ]; then
+if $b_install && [ "$remoteuser" == "root" ]; then
 	declare arch=$(uname -m)
 	declare rcmurl=""
 	declare installagent=""
 	declare filesys
-
-	filesys=$(awk '{print $2}' < <(df -hT | grep -w '\/'))
-	echo "filesys:$filesys:"
-
-	case "$filesys" in
-		"xfs" ) yes | $HOME/bin/mkworkdir-noq
-			;;
-		"btrfs" ) btrfs subvolume create /work
-			;;
-	esac
 
 	get_certs
 	get_rcmtools
@@ -419,6 +441,16 @@ if $b_install && [ "$remotename" == "root" ]; then
 		$installagent install -y $installflags $pkg \
 		2>&1 | tee -a $logfile
 	done
+
+	filesys=$(awk '{print $2}' < <(df -hT | grep -w '/'))
+	echo "filesys:$filesys:"
+
+	case "$filesys" in
+		"xfs" ) yes | $HOME/bin/mkworkdir-noq
+			;;
+		"btrfs" ) btrfs subvolume create /work
+			;;
+	esac
 
 	# orphaned packages
 	#
