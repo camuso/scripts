@@ -97,7 +97,7 @@ main() {
 
 	# Find which logical volume is the home directory
 	#
-	homemnt=$(grep home /etc/fstab)
+	homemnt="$(grep home /etc/fstab)"
 	[ $? -eq 0 ] || {
 		echo "Can't find \'home\' in /etc/fstab"
 		exit 1
@@ -106,9 +106,9 @@ main() {
 	# Create temporary workmnt by replacing 'home' with 'work'
 	# in the home string grepped from /etc/fstab
 	#
-	workmnt=${homemnt//home/work}
-	homedir=$(echo $homemnt | cut -d' ' -f1)
-	workdir=${homedir//home/work}
+	workmnt="${homemnt//home/work}"
+	homedir="$(echo $homemnt | awk -F " " '{print $2}')"
+	workdir="${homedir//home/work}"
 
 	# Get the volume group that contains the home directory and get the
 	# current size of the home directory (home logical volume).
@@ -119,13 +119,13 @@ main() {
 	# 5. Get the home logical volume size from the LSize field
 	# 6. Truncate the decimal and remove non-numeric chars from homesiz
 	#
-	read -ra lvsfldary <<< $(lvs | head -1)
-	read -ra lvhome <<< $(lvs --unit g | grep home)
+	read -ra lvsfldary <<< $(lvs | head -1) 	# 1st line has field names
+	read -ra lvhome <<< $(lvs --unit g | grep home) # /home fields
 	aryindex lvsfldary "VG" vgnameidx
 	aryindex lvsfldary "LSize" lvsizeidx
-	vghome=${lvhome[vgnameidx]}
-	homesiz=${lvhome[lvsizeidx]%.*}
-	homesiz=${homesiz//[!0-9]}
+	vghome="${lvhome[vgnameidx]}"		# volume group for /home
+	homesiz="${lvhome[lvsizeidx]%.*}"	# Lsize of /home
+	homesiz="${homesiz//[!0-9]}"		# :
 
 	# echo the parameters before continuing.
 	#
@@ -155,16 +155,16 @@ main() {
 	done
 	echo
 
-	umount -v -l $homedir
-	lvremove -v $homedir
-	lvcreate -v -L ${newhomesiz}G -n home $vghome
-	lvcreate -v -L ${worksiz}G -n work $vghome
+	umount -v -l "$homedir"
+	lvremove -v "$homedir"
+	lvcreate -v -L "${newhomesiz}"G -n home "$vghome"
+	lvcreate -v -L "${worksiz}"G -n work "$vghome"
 
 	homedir=$(find /dev/mapper/ | grep home)
 	workdir=$(find /dev/mapper/ | grep work)
 
-	mkfs.xfs $homedir
-	mkfs.xfs $workdir
+	mkfs.xfs "$homedir"
+	mkfs.xfs "$workdir"
 	[ -d /home ] || mkdir /home
 	[ -d /work ] || mkdir /work
 
@@ -173,11 +173,11 @@ main() {
 		echo "$workmnt" >> /etc/fstab
 	}
 
-	mount -v $homedir
-	mount -v $workdir
+	mount -v "$homedir"
+	mount -v "$workdir"
 
-	lvextend -l +100%FREE $workdir
-	xfs_growfs $workdir
+	lvextend -l +100%FREE "$workdir"
+	xfs_growfs "$workdir"
 	restorecon -R /work
 	restorecon -R /home
 }
