@@ -2,16 +2,30 @@
 #
 # mkrepos
 
+declare repolist=
 declare b_spec=false
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) 
+$(basename $0)
 
-Description:
+Description: Create the upstream and downstream kernel repo(s)
+   Repos will be created in the /work directory, as follows.
+   /work/upstream/kernel
+   /work/7/kernel
+   /work/8/kernel
+   /work/9/kernel
+   /work/c9s/kernel
+   /work/c10s/kernel
 
 Arguments:
-
+  spec - literally the string "spec" to clone only the downstream kernel repo for the
+         major version of this system.
+	 For example...
+		$ mkrepos spec
+	...will only make the following repos on a system provisioned with centos-9.
+	/work/upstream/kernel
+	/work/c9s/kernel
 EOF
 )
 
@@ -21,6 +35,41 @@ declare majversion=
 usage() {
 	echo -e "$usagestr"
 	exit 1
+}
+
+
+mkrepo() {
+	local mr_distro="$1"
+	local majver="$2"
+	local reponam
+	local repodir
+	local repo
+
+	if [ "$mr_distro" == "rhel" ]; then
+		reponam="/rhel-$majver"
+		repodir="/work/$majver"
+		repo="git@gitlab.com:redhat/rhel/src/kernel/rhel-${majver}.git"
+	else
+		reponam="centos-stream-$majver"
+		repodir="/work/c${majver}s"
+		repo="git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-${majver}.git"
+	fi
+
+	[ -d "$repodir" ] || mkdir -p "$repodir"
+	cd "$repodir" || { echo "cannot cd into $repodir!"; exit 1; }
+
+	if [ -f kernel/.git/config ] ; then
+		echo "$PWD/kernel repo already exists."
+		return
+	else
+		echo "cloning $reponam.git into $PWD/kernel..."
+		git clone "$repo" kernel
+		cd kernel || { echo "cannot cd into $PWD/$repodir!"; exit 1; }
+		git fetch
+		git pull
+		git remote add tcamuso git@gitlab.com:tcamuso/rhel-7.git
+		echo "$PWD" >> "$repolist"
+	fi
 }
 
 create_upstream() {
@@ -48,102 +97,16 @@ create_upstream() {
 		git remote add bluetooth \
 			git://git.kernel.org/pub/scm/linux/kernel/git/bluetooth/bluetooth-next.git
 		git fetch -p --all
+		echo "/work/upstream/kernel" >> "$repolist"
 	}
-}
-
-create_specdistro() {
-	if [ "$distro" == "rhel" ]; then
-		cd /work
-		mkdir $majversion
-		cd $majversion
-		[ -f kernel/.git/config ] || {
-			git clone \
-				git@gitlab.com:redhat/rhel/src/kernel/rhel-$majversion.git \
-				kernel
-		}
-		cd kernel
-		git fetch
-		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/rhel-$majversion.git
-	fi
-
-	if [ "$distro" == "centos" ]; then
-		cd /work
-		mkdir c${majversion}s
-		cd c${majversion}s
-		[ -f kernel/.git/config ] || {
-			git clone \
-			git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-$majversion.git \
-			kernel
-		}
-		cd kernel
-		git fetch
-		git pull
-		[ "$majversion" == "9" ] && \
-			git remote add tcamuso git@gitlab.com:tcamuso/centos-stream-9.git
-	fi
 }
 
 create_downstream() {
-
-	[ -d /work/7 ] || mkdir -p /work/7
-	cd /work/7
-	[ -f kernel/.git/config ] || {
-		git clone \
-			git@gitlab.com:redhat/rhel/src/kernel/rhel-7.git \
-			kernel
-		cd kernel
-		git fetch
-		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/rhel-7.git
-	}
-
-	[ -d /work/8 ] || mkdir -p /work/8
-	cd /work/8
-	[ -f kernel/.git/config ] || {
-		git clone \
-			git@gitlab.com:redhat/rhel/src/kernel/rhel-8.git \
-			kernel
-		cd kernel
-		git fetch
-		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/rhel-8.git
-	}
-
-	[ -d /work/9 ] || mkdir -p /work/9
-	cd /work/9
-	[ -f kernel/.git/config ] || {
-		git clone \
-			git@gitlab.com:redhat/rhel/src/kernel/rhel-9.git
-			kernel
-		cd kernel
-		git fetch
-		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/rhel-9.git
-	}
-
-	[ -d /work/c9s ] || mkdir -p /work/c9s
-	cd /work/c9s
-	[ -f kernel/.git/config ] || {
-		git clone \
-			git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-9.git \
-			kernel
-		cd kernel
-		git fetch
-		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/centos-stream-9.git
-	}
-
-	[ -d /work/ark ] || mkdir -p /work/ark
-	cd /work/ark
-	[ -f kernel/.git/config ] || {
-		git clone git@gitlab.com:cki-project/kernel-ark.git \
-			kernel
-		cd kernel
-		git fetch
-		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/kernel-ark.git
-	}
+	mkrepo "rhel" "7"
+	mkrepo "rhel" "8"
+	mkrepo "rhel" "9"
+	mkrepo "centos" "9"
+	mkrepo "centos" "10"
 }
 
 get_distro() {
@@ -176,6 +139,9 @@ get_distro() {
 }
 
 main() {
+	local pr_cfg_dir="$HOME/.config/patchreview"
+
+	repolist="${pr_cfg_dir}/repolist"
 
 	[ "$1" == "spec" ] && b_spec=true || b_spec=false
 
@@ -186,6 +152,10 @@ main() {
 
 	cd /work
 
+	[ -d "$pr_cfg_dir" ] || mkdir -p "$pr_cfg_dir"
+
+	[ -f "$repolist" ] || > "$repolist"
+: '
 	[ -d /work/netperf ] || {
 		git clone https://github.com/HewlettPackard/netperf.git
 		cd netperf
@@ -202,18 +172,19 @@ main() {
 		make install
 		cd -
 	}
-
-	declare repolist="/root/.config/patchreview/repolist"
-	while read line; do
-		echo "$line"
-		[ -d "$line" ] || mkdir -p $line
-	done < "$repolist"
+'
+	if [ -f "$repolist" ]; then
+		while read line; do
+			echo "$line"
+			[ -d "$line" ] || mkdir -p $line
+		done < "$repolist"
+	fi
 
 	ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts
 
 	get_distro
 	create_upstream
-	$b_spec && create_specdistro || create_downstream
+	$b_spec && mkrepo "$distro" "$majversion" || create_downstream
 }
 
 main $@
