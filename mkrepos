@@ -59,10 +59,10 @@ mkrepo() {
 	cd "$repodir" || { echo "cannot cd into $repodir!"; exit 1; }
 
 	if [ -f kernel/.git/config ] ; then
-		echo "$PWD/kernel repo already exists."
+		echo "$PWD/kernel repo $repodir/$reponam already exists."
 		return
 	else
-		echo "cloning $reponam.git into $PWD/kernel..."
+		echo "Cloning $repo into $PWD/kernel..."
 		git clone "$repo" kernel
 		cd kernel || { echo "cannot cd into $PWD/$repodir!"; exit 1; }
 		git fetch
@@ -139,6 +139,11 @@ get_distro() {
 }
 
 main() {
+        # The following line will single step through this script.
+        # Use the # to comment it out.
+        #trap 'read -p "$(printf "%$((${#BASH_SOURCE[0]}+8))s" "")" \
+	#	line && eval "$line" || exit $?' DEBUG
+
 	local pr_cfg_dir="$HOME/.config/patchreview"
 
 	repolist="${pr_cfg_dir}/repolist"
@@ -184,6 +189,7 @@ main() {
 
 	get_distro
 	create_upstream
+
 	$b_spec && mkrepo "$distro" "$majversion" || create_downstream
 }
 
