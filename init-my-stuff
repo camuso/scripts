@@ -3,6 +3,7 @@
 # init-my-stuff 1.0
 # set -x
 
+declare tcmd="| tee -a "$logfile" 2>&1"
 declare -i optcount=0
 declare remoteuser
 declare logfile="$HOME/.initmystuff.log"
@@ -18,9 +19,72 @@ declare majersion=
 declare b_install=false
 declare pkg=
 declare gitlabtok
+declare yumrepo="/etc/yum.repos.d"
+declare host="$(hostname)"
+declare tmpstr=
 
-echo "Installing environment on ..."
-hostname
+# Init the logfile
+> "$logfile"
+
+###############################################################################
+# This trick uses the bash DEBUG command to trap every command issued
+# and log it into the logfile.
+#
+log_command() {
+	local output=
+	local command="$BASH_COMMAND"
+	local -a tokens=( $command )
+
+	# Exclude some commands
+	case ${tokens[0]} in
+		"trap"  ) ;&
+		"rptch" ) return
+			  ;;
+		"for"   ) ;&
+		"while" ) echo "$command" >> "$logfile"
+			  return
+	esac
+
+	output=$({ eval "$command"; } 2>&1)
+	grep -q 'echo' <<< "$command" || echo "$command" >> "$logfile"
+	[ -n "$output" ] && echo "$output" >> "$logfile"
+	# eval "$command" 2>&1 | tee -a "$logfile"
+}
+
+trap 'log_command' DEBUG
+###############################################################################
+
+rptch() {
+	local ch="$1"
+	local -i num="$2"
+	local -i idx
+
+	for ((idx = 0; idx < num; ++idx)); do
+		echo -n "$ch"
+	done
+}
+
+tmpstr="$(rptch "*" ${#host})"
+
+echo "******************************$tmpstr"
+echo "* Installing environment on $host *"
+echo "******************************$tmpstr"
+
+echo "logfile: $logfile" >> "$logfile"
+
+[ -f /etc/os-release ] || { echo "No os-release file!" ; exit 1; }
+
+echo "Getting distro and version information"
+distro="$(grep -m1 ID /etc/os-release | awk -F '=' '{print $2}' | tr -d '"')"
+echo " distro: $distro"
+
+version="$(grep -m1 VERSION_ID /etc/os-release | awk -F '=' '{print $2}' | tr -d '"')"
+echo "version: $version"
+
+if ([ "$distro" == "rhel" ] || [ "$distro" == "centos" ]]); then
+	majvers="$(echo "$version" | awk -F '.' '{print $1}')"
+	echo "majvers: $majvers"
+fi
 echo
 
 while getopts hipg OPTION; do
@@ -45,63 +109,33 @@ done
 shift $optcount
 remoteuser="$1"
 remotehost="$2"
+echo "remoteuser: $remoteuser"
+echo "remotehost: $remotehost"
 
 # ========================================================================
-# To determine whether dnf or yum is the installagent, get the distro and
-# version numbers.
+# Determine whether dnf or yum is the installagent
 # ------------------------------------------------------------------------
 #
-if [ -f /etc/os-release ]; then
-	foo=$(grep -w 'ID' /etc/os-release | cut -d"=" -f2)
+if [[ "$distro" == "fedora" ]]; then
+	installagent=dnf
+	installflags="--allowerasing --best"
 
-	# Strip off the double quote marks
-	#
-	foo=${foo%\"}
-	foo=${foo#\"}
-
-	# distro is the lowercase of the ID we pulled out of /etc/os-release
-	#
-	distro=$(echo "$foo" | tr '[:upper:]' '[:lower:]')
-
-	# ([ "$distro" == "rhel" ] || [ "$distro" == "fedora" ]) || \
-	#	{ echo  "$distro is not Redhat" }
-
-	echo "Distro: $distro"
-
-	if [[ "$distro" == "fedora" ]]; then
-		installagent=dnf
-		installflags="--allowerasing --best"
-	elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
-		# Get the major version and strip off any leading double quotes
-		#
-		majversion=$(grep -w 'VERSION_ID' /etc/os-release | cut -d= -f2 | cut -d. -f1)
-		majversion=${majversion#\"}
-		majversion=${majversion%\"}
-
-echo "majversion: $majversion"
-
-		# Determine the install agent based on the major version
-		#
-		if [ $majversion -lt 8 ]; then
-			installagent="yum"
-			installflags="--nogpgcheck --skip-broken"
-		else
-			installagent="dnf"
-			installflags="--allowerasing --best"
-		fi
-
-	elif [[ "$distro" == "ubuntu" ]]; then
-		installagent='apt-get'
+elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+	if [ $majvers -lt 8 ]; then
+		installagent="yum"
+		installflags="--nogpgcheck --skip-broken"
 	else
-		echo "$distro is not a distro supported by this script."
+		installagent="dnf"
+		installflags="--allowerasing --best"
 	fi
 
+elif [[ "$distro" == "ubuntu" ]]; then
+	installagent='apt-get'
 else
-	echo "No /etc/os-release file. Assuming distro is RHEL less than 8."
-	distro="rhel"
-	installagent="yum"
-	installflags="--nogpgcheck --skip-broken"
+	echo "$distro is not a distro supported by this script."
 fi
+
+echo
 
 # ========================================================================
 # Can't go any further without which rsync, wget, curl, and git
@@ -114,7 +148,6 @@ which curl || $installagent install -y curl
 which git || $installagent install -y git
 
 cd		# make sure we're home
-> "$logfile"	# init the log file
 
 # If we're creating a system that will have push privileges to the
 # repos, then use ssh access, else use http.
@@ -138,104 +171,102 @@ fi
 # If we don't have an ssh key, generate it.
 #
 [ -f $HOME/.ssh/id_rsa ] || \
-	ssh-keygen -N "" -f $HOME/.ssh/id_rsa | tee -a "$logfile" 2>&1
+	ssh-keygen -N "" -f $HOME/.ssh/id_rsa
 
-# copy the ssh key to gitlab and github
+# copy the ssh key to gitlab
 #
-curl --request POST \
-	--form "private_token=$gitlabtok" \
-	--form "title=Automated Key" \
-	--form "key=$(cat ~/.ssh/id_rsa.pub)" \
-	https://gitlab.com/api/v4/user/keys
-
-echo "*******************************" | tee -a "$logfile"
-echo "* Clone or update Env Files   *" | tee -a "$logfile"
-echo "*       Version 3.0           *" | tee -a "$logfile"
-echo "*******************************" | tee -a "$logfile"
+if [ -n "$gitlabtok" ]; then
+	curl --header "PRIVATE-TOKEN: $gitlabtok" \
+		--request POST \
+		--form "title=Automated Key" \
+		--form "key=$(cat ~/.ssh/id_rsa.pub)" \
+		https://gitlab.com/api/v4/user/keys \
+		|| echo "You must enter your keys manually."
+fi
 echo
 
+echo "*******************************"
+echo "* Clone or update Env Files   *"
+echo "*******************************"
+echo
+
+echo "repolist: $repolist"
 for repo in $repolist; do
 	if [ -e $repo ]; then
 		if [ -d "$repo"/.git ]; then
-			echo "Updating $repo" | tee -a "$logfile" 2>&1
+			echo "Updating $repo"
 			cd $repo
 			git config pull.rebase false
 			git pull
 			cd -
 		else
-			echo "Converting directory $repo to git repo" | tee -a "$logfile" 2>&1
+			echo "Converting directory $repo to git repo"
 			rm -rf $repo
 			$clonestr$repo.git $repo
 			cd $repo
 			git config pull.rebase false
 		fi
 	else
-		echo "Cloning $repo ..." | tee -a "$logfile" 2>&1
+		echo "Cloning $repo ..."
 		$clonestr$repo.git $repo
 	fi
 	# chown -R tcamuso.tcamuso $repo
 	# chmod -R u+wrx,go+rx,go-w $repo
 done
-echo -e "---------------" | tee -a "$logfile"
 
-echo "*******************************" >> "$logfile" 2>&1
-echo "* Clone or update bin scripts  *" >> "$logfile" 2>&1
-echo "*******************************" >> "$logfile" 2>&1
+echo "*******************************"
+echo "* Clone or update bin scripts *"
+echo "*******************************"
 echo
 
 # Update or create the bin directory.
 #
 if [ -d bin/.git ]; then
 	cd bin
-	echo "Updating bin repo..." | tee -a "$logfile" 2>&1
+	echo "Updating bin repo..."
 	git config pull.rebase false
 	git pull
 else
 	[ -e bin ] && rm -rf bin
-	echo "Creating bin repo..."  | tee -a "$logfile" 2>&1
+	echo "Creating bin repo..."
 	${clonestr}scripts.git bin
 	cd bin
 	git config pull.rebase false
 fi
 cd
 echo "Returning to $PWD..."
-echo -e "---------------\n" | tee -a "$logfile"
-
+echo -e "---------------\n"
 
 # Copy etc and rc files out of their archive directories into their respective
 # real directories, but only if they're newer.
 #
-echo "************************************************" >> "$logfile" 2>&1
-echo "* Copying Env files from Backup Directories    *" >> "$logfile" 2>&1
-echo "* but only if they're newer than existing ones *" >> "$logfile" 2>&1
-echo "************************************************" >> "$logfile" 2>&1
-echo >> "$logfile" 2>&1
-echo "rsync contents of rcbak to home directory" | tee -a "$logfile"
-rsync -Pat --cvs-exclude rcbak/ . 2>&1 | tee -a $logfile
-echo -e "---------------\n" | tee -a "$logfile"
+echo "************************************************"
+echo "* Copying Env files from Backup Directories    *"
+echo "* but only if they're newer than existing ones *"
+echo "************************************************"
+echo >> "$logfile"
+echo "rsync contents of rcbak to home directory"
+rsync -Pat --cvs-exclude rcbak/ .
+echo -e "---------------\n"
 
 # Can only do the following if root
 #
-if [ $(id -u) -eq 0 ]; then
-	useradd tcamuso
+if [ $(id -u) -eq 0 ] && useradd tcamuso; then
 	echo 'tcamuso ALL=(ALL)NOPASSWD: ALL' >> /etc/sudoers
-	echo "rsync contents of etcbk to /etc" | tee -a "$logfile"
-	rsync -Pat --cvs-exclude etcbk/ /etc/.| tee -a "$logfile"
-	echo -e "---------------\n" | tee -a "$logfile"
+	echo "rsync contents of etcbk to /etc"
+	rsync -Pat --cvs-exclude etcbk/ /etc/.
+	echo -e "---------------\n"
 fi
-
-echo "************************************************" >> "$logfile" 2>&1
-echo >> "$logfile" 2>&1
 
 # If we have a "user" it's because were running remotely, so
 # do the remote cleanup.
 #
 if [ "$remoteuser" ]; then
-	echo "*********************" >> "$logfile" 2>&1
-	echo "* Doing Rmote Fixup *" >> "$logfile" 2>&1
-	echo "*********************" >> "$logfile" 2>&1
-	echo "" >> "$logfile" 2>&1
-	bin/fixup-rsync $remoteuser | tee -a "$logfile"
+	echo "**********************"
+	echo "* Doing Remote Fixup *"
+	echo "**********************"
+	echo
+	$HOME/bin/fixup-rsync $remoteuser
 fi
 cd -
 
@@ -244,101 +275,66 @@ echo
 # If we are running as root and install has been requested, then install
 # the development tools.
 #
-get_rcmtools()
-{
-	local rh6tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-workstation.repo"
-	local rh7tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-workstation.repo"
-	local rh8tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo"
-	local rh9tools="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-9-baseos.repo"
-	local fedtools="https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-39/bmeneguele-rhkernel-devtools-fedora-39.repo"
+# Globals:
+#   distro
+#   version
+#   majverson - rhel and centos only
+#
+get_rcmtools() {
+	echo "**********************"
+	echo "* Getting tools repos *"
+	echo "**********************"
+	echo
+	local fedpre="https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-"
+	local fedtools="$fedpre$version/bmeneguele-rhkernel-devtools-fedora-$version.repo"
+	local rhpre="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-"
+	local rhrepo=
+
+	(( $majvers > 7 )) && rhrepo="$rhpre$majvers-baseos.repo" || rhrepo="$rhpre$majvers-workstation.repo"
 
 	# if rcm-tools is already installed with the distro, then skip this.
 	# [ -f /etc/yum.repos.d/rcm-tools*.repo ] && return
 
-	echo -n "Installing rcm tools for " | tee -a "$logfile"
+	echo "Installing rcm tools for $distro-$version"
 
-	cd /etc/yum.repos.d/
+	[ -d "$yumrepo" ] || { echo "Can't find $yumrepo" ; return; }
+	cd "$yumrepo"  || { echo "Can't cd into $yumrepo" ; exit 1; }
 
 	if [[ "$distro" == "fedora" ]]; then
-		echo "fedora" | tee -a "$logfile"
+		echo "fedora"
 		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo \
-			| tee -a "$logfile"
-			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
-			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-38/bmeneguele-rhkernel-devtools-fedora-38.repo
-			wget --no-check-certificate "$fedtools"
+			http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo
+		curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo "$fedtools"
 		return
-	fi
+	else
 
-	case "$majversion" in
-		"6" )   echo "$distro-6" | tee -a "$logfile"
-			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			# http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-6-server.repo
-			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh6tools"
- 			;;
-		"7" )	echo "$distro-7" | tee -a "$logfile"
-			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			#http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-7-server.repo
-			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh7tools"
-			;;
-		"8" )	echo "$distro-8" | tee -a "$logfile"
-			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			#http://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-8-baseos.repo
-			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
-			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
-			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh8tools"
-			;;
-		"9" ) 	echo "$distro" | tee -a "$logfile"
-			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			#http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
-			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
-			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/epel-8/bmeneguele-rhkernel-devtools-epel-8.repo
-			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rh9tools"
-			;;
-		"10" )	echo "fedora tools for RHEL-10" | tee -a "$logfile"
-			# curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			#http://download.eng.brq.redhat.com/rel-eng/internal/rcm-tools-rhel-9-baseos.repo
-			curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo \
-			https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-39/bmeneguele-rhkernel-devtools-fedora-39.repo
-			wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$fedtools"
-			;;
-	esac
+		cd "$yumrepo" || { echo "Can't access $yumrepo!"; exit 1; }
+		wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rhrepo"
+	fi
 
 	cd -
 	echo ""
 	return 0
 }
 
-
+# Globals:
+#   distro
+#   version
+#   majverson - rhel and centos only
+#   installagent - dnf or yum
+#
 get_epel() {
-	echo -n "Installing EPEL for " | tee -a "$logfile"
-	case "$majversion" in
-		"6" )   echo "$distro-6" | tee -a "$logfile"
-			yum install -y https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm
-			return 0
- 			;;
-		"7" )	echo "$distro-7" | tee -a "$logfile"
-			yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-			return 0
-			;;
-		"8" )	echo "$distro-8" | tee -a "$logfile"
-			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-			return 0
-			;;
-		"9" ) 	echo "$distro-9" | tee -a "$logfile"
-			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
-			return 0
-			;;
-		"10" ) 	echo "$distro-9 for $distro-10" | tee -a "$logfile"
-			dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
-			return 0
-			;;
-	esac
-
-	echo | tee -a "$logfile"
+	echo -n "Installing EPEL for $distro-$version"
+	$nstallagent install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-"$majvers".noarch.rpm
+	echo
 	return 1
 }
 
+# Globals:
+#   distro
+#   version
+#   majverson - rhel and centos only
+#
 get_certs()
 {
 	# install the RH certs
@@ -354,26 +350,29 @@ get_certs()
 	update-ca-trust
 }
 
+# Globals:
+#   distro
+#   version
+#   majverson - rhel and centos only
+#   installagent - dnf or yum
+#
 if $b_install && [ "$remoteuser" == "root" ]; then
 	declare arch=$(uname -m)
 	declare rcmurl=""
-	declare installagent=""
 	declare filesys
 
 	get_certs
 	get_rcmtools
 
-	dnf copr enable -y bmeneguele/rhkernel-devtools
+	$installagent copr enable -y bmeneguele/rhkernel-devtools
 
 	if [ "$distro" == "fedora" ]; then
-		installagent=dnf
-		dnf copr enable -y james/centpkg
-		dnf install -y fedpkg rhel-packager centpkg-sig
+		$installagent copr enable -y james/centpkg
+		$installagent install -y fedpkg rhel-packager centpkg-sig
 	fi
 
 	if [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 		get_epel
-		installagent=yum
 	fi
 
 	# $installagent groupinstall -y 'X Window System' 'GNOME'
@@ -438,19 +437,8 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 	xz \
 	zenity \
 	; do
-		$installagent install -y $installflags $pkg \
-		2>&1 | tee -a $logfile
+		$installagent install -y $installflags $pkg
 	done
-
-	filesys=$(awk '{print $2}' < <(df -hT | grep -w '/'))
-	echo "filesys:$filesys:"
-
-	case "$filesys" in
-		"xfs" ) yes | $HOME/bin/mkworkdir-noq
-			;;
-		"btrfs" ) btrfs subvolume create /work
-			;;
-	esac
 
 	# orphaned packages
 	#
@@ -462,6 +450,19 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 	# kmodtool \
 	# python-bugzilla \
 	# git-lab-porcelain \
+
+
+	[ -d /work ] || {
+		filesys=$(awk '{print $2}' < <(df -hT | grep -w '/'))
+		echo "filesys:$filesys:"
+
+		case "$filesys" in
+			"xfs" ) yes | $HOME/bin/mkworkdir-noq
+				;;
+			"btrfs" ) btrfs subvolume create /work
+				;;
+		esac
+	}
 fi
 # We're gonna quit here, because we need to create the /work mountpoint as a logical
 # volume. For that, we will use mkworkdir interactively.
