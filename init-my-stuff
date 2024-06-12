@@ -451,19 +451,13 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 	# python-bugzilla \
 	# git-lab-porcelain
 
-# We're gonna quit here, because we need to create the /work mountpoint as a logical
-# volume. For that, we will use mkworkdir interactively.
-# The creation of the repos will be done separately at command line of the new
-# system.
-#
-exit 0
-
 	[ -d /work ] || {
 		filesys=$(awk '{print $2}' < <(df -hT | grep -w '/'))
 		echo "filesys:$filesys:"
 trap : DEBUG
 		case "$filesys" in
-			"xfs" ) yes | $HOME/bin/mkworkdir-noq
+			"xfs" ) # yes | $HOME/bin/mkworkdir-noq
+				mkdir /work
 				;;
 			"btrfs" ) btrfs subvolume create /work
 				;;
