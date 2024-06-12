@@ -109,6 +109,11 @@ update_fstab() {
 }
 
 main() {
+        # The following line will single step through this script.
+        # Use the # to comment it out.
+        trap 'read -p "$(printf "%$((${#BASH_SOURCE[0]}+8))s" "")" \
+		line && eval "$line" || exit $?' DEBUG
+
 	local lvsfldary # array of field names in lvs output
 	local lvhome	# line with home dir info in lvs ouput
 	local vgnameidx	# index to volume group name in lvs output
