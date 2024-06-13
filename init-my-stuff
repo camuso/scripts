@@ -258,6 +258,7 @@ if [ $(id -u) -eq 0 ] && useradd tcamuso; then
 	echo -e "---------------\n"
 fi
 
+:<<****
 # If we have a "user" it's because were running remotely, so
 # do the remote cleanup.
 #
@@ -269,6 +270,7 @@ if [ "$remoteuser" ]; then
 	$HOME/bin/fixup-rsync $remoteuser
 fi
 cd -
+****
 
 echo
 
