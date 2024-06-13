@@ -142,10 +142,10 @@ echo
 # ------------------------------------------------------------------------
 #
 $installagent install -y which
-which rsync || $installagent install -y rsync
-which wget || $installagent install -y wget
-which curl || $installagent install -y curl
-which git || $installagent install -y git
+which rsync || sudo $installagent install -y rsync
+which wget || sudo $installagent install -y wget
+which curl || sudo $installagent install -y curl
+which git || sudo $installagent install -y git
 
 cd		# make sure we're home
 
@@ -285,35 +285,10 @@ get_rcmtools() {
 	echo "* Getting tools repos *"
 	echo "**********************"
 	echo
-	local fedpre="https://copr.fedorainfracloud.org/coprs/bmeneguele/rhkernel-devtools/repo/fedora-"
-	local fedtools="$fedpre$version/bmeneguele-rhkernel-devtools-fedora-$version.repo"
-	local rhpre="https://download.hosts.prod.upshift.rdu2.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel-"
-	local rhrepo=
 
-	(( $majvers > 7 )) && rhrepo="$rhpre$majvers-baseos.repo" || rhrepo="$rhpre$majvers-workstation.repo"
-
-	# if rcm-tools is already installed with the distro, then skip this.
-	# [ -f /etc/yum.repos.d/rcm-tools*.repo ] && return
-
-	echo "Installing rcm tools for $distro-$version"
-
-	[ -d "$yumrepo" ] || { echo "Can't find $yumrepo" ; return; }
-	cd "$yumrepo"  || { echo "Can't cd into $yumrepo" ; exit 1; }
-
-	if [[ "$distro" == "fedora" ]]; then
-		echo "fedora"
-		curl -k -L -o /etc/yum.repos.d/rcm-tools.repo \
-			http://download.devel.redhat.com/rel-eng/internal/rcm-tools-fedora.repo
-		curl -k -L -o /etc/yum.repos.d/kernel-devtools.repo "$fedtools"
-		return
-	else
-
-		cd "$yumrepo" || { echo "Can't access $yumrepo!"; exit 1; }
-		wget --no-hsts --no-hpkp --no-ocsp --no-check-certificate "$rhrepo"
-	fi
-
-	cd -
-	echo ""
+	yes | dnf copr enable bmeneguele/rhkernel-devtools
+	yes | dnf copr enable james/centpkg
+	echo
 	return 0
 }
 
@@ -324,8 +299,8 @@ get_rcmtools() {
 #   installagent - dnf or yum
 #
 get_epel() {
-	echo -n "Installing EPEL for $distro-$version"
-	$nstallagent install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-"$majvers".noarch.rpm
+	echo -n "Installing EPEL for $distro-$majvers"
+	$installagent install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-"$majvers".noarch.rpm
 	echo
 	return 1
 }
