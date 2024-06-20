@@ -139,6 +139,7 @@ fi
 
 echo
 
+:<<****
 if [ $(id -u) -eq 0 ]; then
 trap DEBUG
 	echo "You are installing to root"
@@ -146,7 +147,8 @@ trap DEBUG
 	read -s -p "Enter a password for the user: " password
 trap 'log_command' DEBUG
 fi
- 
+****
+
 # ========================================================================
 # Can't go any further without which rsync, wget, curl, and git
 # ------------------------------------------------------------------------
