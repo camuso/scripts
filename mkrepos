@@ -191,6 +191,10 @@ main() {
 	create_upstream
 
 	$b_spec && mkrepo "$distro" "$majversion" || create_downstream
+
+	crontab << EOF
+0 7 * * * date > /work/crontab-repotask; /home/tcamuso/bin/repotask >> /work/crontab-repotask
+EOF
 }
 
 main $@
