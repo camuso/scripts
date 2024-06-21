@@ -63,7 +63,7 @@ declare pushpriv=
 declare installer=false
 declare nolinuxrepo=""
 
-while getopts "giphf:" OPTION; do
+while getopts "giphf:u:" OPTION; do
 	case "$OPTION" in
 		g )	nolinuxrepo="-g"
 			;;
@@ -76,11 +76,17 @@ while getopts "giphf:" OPTION; do
 			;;
 		h )	do_usage $NOERR
 			;;
+		u )	newuser="$OPTARG"
 	esac
 done
 
 user="$(echo "$remote" | cut -d'@' -f1)"
 host="$(echo $remote | cut -d'@' -f2)"
+
+if [ -n "$newuser" ] && [ "$user" != "root" ]; then
+	echo "Cannot add $newuser unless invoking with root."
+	echo "That is, 'ark2host -i -u $newuser root@$host'"
+fi
 
 # copy the localhost's ssh key to the remote host
 copykey "$user" "$host"
@@ -98,7 +104,7 @@ echo "connecting with $remote..."
 if $installer; then
 	runremote $user $host ~/bin/init-my-stuff -i $pushpriv $nolinuxrepo $user
 else
-	runremote $user $host ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user $host
+	runremote $user $host ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user $host $newuser
 fi
 
 echo
