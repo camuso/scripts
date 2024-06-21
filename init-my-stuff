@@ -23,6 +23,7 @@ declare yumrepo="/etc/yum.repos.d"
 declare host="$(hostname)"
 declare tmpstr=
 declare newuser=
+declare majvers
 
 # Init the logfile
 > "$logfile"
@@ -285,13 +286,21 @@ echo
 # Globals:
 #   distro
 #   version
-#   majverson - rhel and centos only
+#   majvers - rhel and centos only
 #
 get_rcmtools() {
+	local rcmlink="https://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel"
+
 	echo "**********************"
 	echo "* Getting tools repos *"
 	echo "**********************"
 	echo
+
+	if [ "$distro" == "rhel" ]; then
+		cd /etc/yum.repos.d
+		wget --no-check-certificate "$rcmlink-majvers-baseos.repo"
+		cd -
+	fi
 
 	yes | dnf copr enable bmeneguele/rhkernel-devtools
 	yes | dnf copr enable james/centpkg
@@ -302,7 +311,7 @@ get_rcmtools() {
 # Globals:
 #   distro
 #   version
-#   majverson - rhel and centos only
+#   majvers - rhel and centos only
 #   installagent - dnf or yum
 #
 get_epel() {
@@ -315,7 +324,7 @@ get_epel() {
 # Globals:
 #   distro
 #   version
-#   majverson - rhel and centos only
+#   majvers - rhel and centos only
 #
 get_certs()
 {
@@ -335,7 +344,7 @@ get_certs()
 # Globals:
 #   distro
 #   version
-#   majverson - rhel and centos only
+#   majvers - rhel and centos only
 #   installagent - dnf or yum
 #
 if $b_install && [ "$remoteuser" == "root" ]; then
