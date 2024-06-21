@@ -22,8 +22,7 @@ declare gitlabtok
 declare yumrepo="/etc/yum.repos.d"
 declare host="$(hostname)"
 declare tmpstr=
-declare username=
-declare password=
+declare newuser=
 
 # Init the logfile
 > "$logfile"
@@ -111,8 +110,11 @@ done
 shift $optcount
 remoteuser="$1"
 remotehost="$2"
+newuser="$3"
+
 echo "remoteuser: $remoteuser"
 echo "remotehost: $remotehost"
+[ -n "$newuser" ] && echo "newuser: $newuser"
 
 # ========================================================================
 # Determine whether dnf or yum is the installagent
@@ -138,16 +140,6 @@ else
 fi
 
 echo
-
-:<<****
-if [ $(id -u) -eq 0 ]; then
-trap DEBUG
-	echo "You are installing to root"
-	read -p "Enter a username other than root: " username
-	read -s -p "Enter a password for the user: " password
-trap 'log_command' DEBUG
-fi
-****
 
 # ========================================================================
 # Can't go any further without which rsync, wget, curl, and git
@@ -264,13 +256,11 @@ echo -e "---------------\n"
 # Can only do the following if root
 # . Change the user's password to the one collected at the beginning
 # . Add the user to the NOPASSD users in sudoers
-if [ $(id -u) -eq 0 ] && useradd $username; then
- 	echo $username:$password | chpasswd
-	grep -q $username /etc/sudoers || \
-		echo "$username ALL=(ALL)NOPASSWD: ALL" >> /etc/sudoers
+if [ $(id -u) -eq 0 ] && [ -n "$newuser" ] && useradd $newuser; then
+	grep -q $newuser /etc/sudoers || \
+		echo "$newuser ALL=(ALL)NOPASSWD: ALL" >> /etc/sudoers
 	echo "rsync contents of etcbk to /etc"
 	rsync -Pat --cvs-exclude etcbk/ /etc/.
-	echo -e "---------------\n"
 fi
 
 :<<****
