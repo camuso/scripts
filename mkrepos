@@ -17,6 +17,7 @@ Description: Create the upstream and downstream kernel repo(s)
    /work/9/kernel
    /work/c9s/kernel
    /work/c10s/kernel
+   /work/ark/kernel
 
 Arguments:
   spec - literally the string "spec" to clone only the downstream kernel repo for the
@@ -49,10 +50,19 @@ mkrepo() {
 		reponam="/rhel-$majver"
 		repodir="/work/$majver"
 		repo="git@gitlab.com:redhat/rhel/src/kernel/rhel-${majver}.git"
-	else
+
+	elif [ "$mr_distro" == "centos-stream" ]; then
 		reponam="centos-stream-$majver"
 		repodir="/work/c${majver}s"
 		repo="git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-${majver}.git"
+
+	elif [ "$mr_distro" == "kernel-ark" ]; then
+		reponam="kernel-ark"
+		repodir="/work/ark"
+		repo="git@gitlab.com:cki-project/kernel-ark.git"
+	else
+		echo "$mr_distro is not supported by this script."
+		return
 	fi
 
 	[ -d "$repodir" ] || mkdir -p "$repodir"
@@ -107,6 +117,7 @@ create_downstream() {
 	mkrepo "rhel" "9"
 	mkrepo "centos" "9"
 	mkrepo "centos" "10"
+	mkrepo "kernel-ark"
 }
 
 get_distro() {
