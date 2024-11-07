@@ -264,20 +264,6 @@ if [ $(id -u) -eq 0 ] && [ -n "$newuser" ] && useradd $newuser; then
 	rsync -Pat --cvs-exclude etcbk/ /etc/.
 fi
 
-:<<****
-# If we have a "user" it's because were running remotely, so
-# do the remote cleanup.
-#
-if [ "$remoteuser" ]; then
-	echo "**********************"
-	echo "* Doing Remote Fixup *"
-	echo "**********************"
-	echo
-	$HOME/bin/fixup-rsync $remoteuser
-fi
-cd -
-****
-
 echo
 
 # If we are running as root and install has been requested, then install
