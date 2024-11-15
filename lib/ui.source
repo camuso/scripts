@@ -655,7 +655,7 @@ getuser() {
     uigu_var+="$(eval "echo $input_line" | sed 's/\\$//')"
 }
 
-#** getuser: reads user input
+#** getuser_noslash: reads user input
 #
 # Read multi char input terminated by RETURN/ENTER.
 # Does not support backslash continuation lines.
