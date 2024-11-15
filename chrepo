@@ -123,6 +123,23 @@ promptgetchar() {
 	return 0
 }
 
+#** _getuser_: reads user input
+#
+# Read multi char input terminated by RETURN/ENTER.
+# Does not support backslash continuation lines.
+#
+# $1 - prompt string
+# $2 - reference variable to receive user input
+#*
+_getuser_() {
+	local promptstring="$1"
+	local -n uigu_var="$2"
+
+	echo -ne "$INF$promptstring$OFF"
+	read -e -r uigu_var
+	eval "uigu_var=\"$uigu_var\""
+}
+
 #** loop_range_q()
 #
 # $1 - minimum
@@ -141,7 +158,7 @@ loop_range_q() {
 "$OFF${INF}Please enter a number between $MNU$min$INF and $MNU$max$OFF or $qstr: "
 
 	echo -e "${INF}Press $qstr$INF to return without making a selection.$OFF"
-	((max < 10)) && cmd=promptgetchar || cmd=getuser
+	((max < 10)) && cmd=promptgetchar || cmd=_getuser_
 	# echo "cmd: $cmd"
 
 	while true; do
