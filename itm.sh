@@ -6,17 +6,57 @@ R88_START="ITM1:2022-09-05"
 R89_START="ITM1:2023-03-06"
 R810_START="ITM1:2023-09-04"
 R95_START="ITM1:2024-03-04"
-R100_BETA_START="$R95_START"
 R96_START="ITM1:2024-09-02"
-R100_START="$R95_START"
+R100_BETA_START="$R95_START"
+R100_START="$R96_START"
+R97_START="ITM1:2025-03-03"
+R101_START="$R97_START"
+
+declare -i arel=0	# index to release name
+declare -i astart=1	# index to ITM start date
+
+get_reltbl() {
+	local idx="$1"
+	local itm="$2"
+	local val=
+
+	IFS=' ' read -ra val <<< "$itm"
+	echo "$val"
+}
+
+declare -A reltbl
+# RHEL-8
+reltbl[R85]="RHEL-8.5 ITM1:2021-03-08"
+reltbl[R86]="RHEL-8.6 ITM1:2021-09-06"
+reltbl[R87]="RHEL-8.7 ITM1:2022-03-07"
+reltbl[R88]="RHEL-8.8 ITM1:2022-09-05"
+reltbl[R89]="RHEL-8.9 ITM1:2022-03-06"
+reltbl[R810]="RHEL-8.10 ITM1:2023-09-04"
+# RHEL-9
+reltbl[R95]="RHEL-9.5 ITM1:2024-03-04"
+reltbl[R96]="RHEL-9.6 ITM1:2024-09-02"
+reltbl[R97]="RHEL-9.7 ITM1:2025-03-03"
+# RHEL-10
+reltbl[R10B]="RHEL-10 Beta $(get_reltbl $astart ${reltbl[R95]})"
+reltbl[R100]="RHEL-10.0 $(get_reltbl $astart ${reltbl[R96]})"
+reltbl[R101]="RHEL-10.1 $(get_reltbl $astart ${reltbl[R97]})"
+
+print_releases() {
+	local akey
+
+	for akey in "${!reltbl[@]}"; do
+		echo "$(get_reltbl $arel "${reltbl[$akey]}")"
+	done
+}
 
 usage()
 {
     echo "itm.sh [itm] [-a|--all] [-n|--next] [-p|--prev] [-h|--help]"
     echo "  itm         : specific itm (1-36) or all if not specified"
     echo "  -a|--all    : show all 36 itms (instead of 26)"
-    echo "  -n|--next   : show next release (8.8/9.2)"
-    echo "  -p|--prev   : show old release (8.6/9.0)"
+    echo "  -n|--next   : show next release"
+    echo "  -p|--prev   : show prev release"
+    echo "  -r|--rel    : show all releases supported by this script"
     echo "  -h|--help   : show this menu"
 }
 
@@ -140,6 +180,10 @@ while [[ $# > 0 ]]; do
 	    all=true
 	    start=$R810_START
 	    ;;
+	-r|--rel)
+	   print_releases
+	   exit 0
+	   ;;
 	*)
 	    [ $itm != "all" ] && usage && exit
 	    itm=$key
