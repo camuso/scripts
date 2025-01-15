@@ -1,62 +1,101 @@
 #!/bin/bash
-R85_START="ITM1:2021-03-08"
-R86_START="ITM1:2021-09-06"
-R87_START="ITM1:2022-03-07"
-R88_START="ITM1:2022-09-05"
-R89_START="ITM1:2023-03-06"
-R810_START="ITM1:2023-09-04"
-R95_START="ITM1:2024-03-04"
-R96_START="ITM1:2024-09-02"
-R100_BETA_START="$R95_START"
-R100_START="$R96_START"
-R97_START="ITM1:2025-03-03"
-R101_START="$R97_START"
+#
+# itm - a script to display itm dates for variouos releases.
+#
+# This script uses an associative array to map the release to a descriptor
+# string containing the ITM1 date string.
 
-declare -i arel=0	# index to release name
-declare -i astart=1	# index to ITM start date
+declare myfullpath=
+myfullpath="$(realpath "$0")"
 
-get_reltbl() {
-	local idx="$1"
-	local itm="$2"
-	local val=
+declare -i psfw=0	# print same field width - see print_same()
+declare -i arel=0	# index in reltbl descriptor string to release name
+declare -i astart=1	# index in reltbl descriptor string to ITM start date
 
-	IFS=' ' read -ra val <<< "$itm"
-	echo "$val"
+declare current_release
+current_release="9.6"
+
+# Release table
+# Maps the release to strings that act as descriptors for the
+# release.
+#
+declare -A reltbl
+#      rel   ITM1 date
+#      ----  ----------------
+reltbl[8.5]="ITM1:2021-03-08"
+reltbl[8.6]="ITM1:2021-09-06"
+reltbl[8.7]="ITM1:2022-03-07"
+reltbl[8.8]="ITM1:2022-09-05"
+reltbl[8.9]="ITM1:2022-03-06"
+reltbl[8.10]="ITM1:2023-09-04"
+reltbl[9.5]="ITM1:2024-03-04"
+reltbl[9.6]="ITM1:2024-09-02"
+reltbl[9.7]="ITM1:2025-03-03"
+reltbl[10.0-Beta]="${reltbl[9.5]}"
+reltbl[10.0]="${reltbl[9.6]}"
+reltbl[10.1]="${reltbl[9.7]}"
+
+get_psfw() {
+	local key;
+	local gprel
+	local -i fw
+
+	for key in "${!reltbl[@]}"; do
+		fw=${#key}
+		(( fw > psfw )) && psfw=$((fw + 10))
+	done;
 }
 
-declare -A reltbl
-# RHEL-8
-reltbl[R85]="RHEL-8.5 ITM1:2021-03-08"
-reltbl[R86]="RHEL-8.6 ITM1:2021-09-06"
-reltbl[R87]="RHEL-8.7 ITM1:2022-03-07"
-reltbl[R88]="RHEL-8.8 ITM1:2022-09-05"
-reltbl[R89]="RHEL-8.9 ITM1:2022-03-06"
-reltbl[R810]="RHEL-8.10 ITM1:2023-09-04"
-# RHEL-9
-reltbl[R95]="RHEL-9.5 ITM1:2024-03-04"
-reltbl[R96]="RHEL-9.6 ITM1:2024-09-02"
-reltbl[R97]="RHEL-9.7 ITM1:2025-03-03"
-# RHEL-10
-reltbl[R10B]="RHEL-10 Beta $(get_reltbl $astart ${reltbl[R95]})"
-reltbl[R100]="RHEL-10.0 $(get_reltbl $astart ${reltbl[R96]})"
-reltbl[R101]="RHEL-10.1 $(get_reltbl $astart ${reltbl[R97]})"
-
 print_releases() {
-	local akey
+	local key
+	local val
+	local tmpfil
+	local curdate=
+	local curkeys=
+	local line
+	local date
 
-	for akey in "${!reltbl[@]}"; do
-		echo "$(get_reltbl $arel "${reltbl[$akey]}")"
-	done
+	tmpfil=$(mktemp)
+	get_psfw
+
+	for key in "${!reltbl[@]}"; do
+		echo "$key ${reltbl[$key]}"
+	done | sort -t: -k2,2 > "$tmpfil"
+
+	while read -r line; do
+		key="${line%% *}"	# extract the key
+		val="${line#* }"	# Extract the value (date)
+		date="${val#*:}"	# Get the date part after the colon
+
+		if [[ "$date" == "$curdate" ]]; then
+			curkeys+="/$key" # Append to curkeys if date matches
+		else
+			if [[ -n "$curdate" ]]; then
+				printf "%-*s ITM1:%s\n" $psfw "$curkeys" "$curdate"
+			fi
+
+			curdate="$date"
+			curkeys="$key"
+		fi
+	done < "$tmpfil"
+
+	if [[ -n "$curdate" ]]; then
+		printf "%-*s ITM1:%s\n" $psfw "$curkeys" "$curdate"
+	fi
+
+	rm -f "$tmpfil"
 }
 
 usage()
 {
-    echo "itm.sh [itm] [-a|--all] [-n|--next] [-p|--prev] [-h|--help]"
+    echo "itm.sh [itm] [-a|--all] [-n|--next] [-p|--prev] [-r|--rel] [-s|--show] [-h|--help]"
     echo "  itm         : specific itm (1-36) or all if not specified"
     echo "  -a|--all    : show all 36 itms (instead of 26)"
     echo "  -n|--next   : show next release"
     echo "  -p|--prev   : show prev release"
-    echo "  -r|--rel    : show all releases supported by this script"
+    echo "  -s|--show   : show all releases supported by this script"
+    echo "  -r|--rel	: add a new release and ITM1 start date"
+    echo "  -f|--find   : find releases having same ITM dates"
     echo "  -h|--help   : show this menu"
 }
 
@@ -156,8 +195,9 @@ today=$(date -d "$today days" "+%s")
 normal=$(tput sgr0)
 bold="$normal  "
 
-start=$R96_START
-rel="9.5/10.0 Public Beta"
+rel="$current_release"
+start="${reltbl[$rel]}"
+
 itm=all
 all=false
 while [[ $# > 0 ]]; do
@@ -173,17 +213,17 @@ while [[ $# > 0 ]]; do
 	-n|--next)
 	    echo "WARNING: Estimated start date"
 	    rel="9.6/10.0GA"
-	    start=$R96_START
+	    start=
 	    ;;
 	-p|--prev)
 	    rel="8.10/9.4"
 	    all=true
-	    start=$R810_START
+	    start=
 	    ;;
-	-r|--rel)
-	   print_releases
-	   exit 0
-	   ;;
+	-s|--show)
+	    print_releases
+	    exit 0
+	    ;;
 	*)
 	    [ $itm != "all" ] && usage && exit
 	    itm=$key
