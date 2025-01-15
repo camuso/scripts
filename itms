@@ -1,0 +1,298 @@
+#!/bin/bash
+#
+# itms - a script to display itm dates for variouos releases.
+#
+
+declare myfullpath="$(realpath "$0")"
+declare mydir=$(realpath $(dirname $0))
+declare relfile="$mydir"/releases.yaml
+
+declare -i psfw=0	# print field width
+declare current_release
+current_release="10.0"
+
+# Releases associated array
+# Maps the release to an ITM1 date.
+# See relfile declared above
+#
+declare -A releases
+
+# read_itms - read the releases.yaml file into the associated array
+#
+# Globals
+#   releases - associative array containing the releases and ther itm1 values
+#
+read_itms() {
+	local key
+	local value
+	local rel
+	local itm1
+
+	# Read the YAML file and populate the array
+	#
+	while IFS=': ' read -r key value; do
+
+		if [[ $key == *"rel"* ]]; then
+			rel="${value//\"/}"
+
+		elif [[ $key == *"itm1"* ]]; then
+			itm1="ITM1:${value//\"/}"
+			releases[$rel]=$itm1
+		fi
+
+	done < <(grep -E '(rel|itm1):' "$relfile" | sed 's/-\s//' | sed 's/^[[:space:]]*//')
+}
+
+dump_releases() {
+	local key
+
+	for key in "${!releases[@]}"; do
+		echo " $key: ${releases[$key]}"
+	done
+}
+
+get_psfw() {
+	local key;
+	local gprel
+	local -i fw
+
+	for key in "${!releases[@]}"; do
+		fw=${#key}
+		(( fw > psfw )) && psfw=$((fw + 10))
+	done;
+}
+
+set_release() {
+	local relary=()
+	local -i idx=0
+	local rel
+	local sel
+	local -i siz
+	local lnum
+
+	idx=1
+	for key in "${!releases[@]}"; do
+		relary+=("$(printf "%3d. RHEL-%s\n" $idx "$key")")
+		((idx++))
+	done
+
+	printf "%s\n" "${relary[@]}"
+	siz=${#relary}
+
+	while :; do
+		echo -en "Enter the number corresponding to the release you want: "
+		read -r sel
+		(( ($sel >= 1) && ($sel <= $siz) )) && break
+		echo "$sel is not a valid selection."
+	done
+
+	rel="${relary[(($sel-1))]}"
+	echo "You selected: $(cut -d'.' -f2- <<< $rel)"
+
+	rel="$(cut -d'-' -f2- <<< "$rel")"
+	lnum=$(cut -d':' -f1 < <(grep -n -m1 'current_release=' "$myfullpath"))
+	sed -i "${lnum}s|^current_release=.*$|current_release=\"${rel}\"|" "$myfullpath"
+	current_release="$rel"
+}
+
+print_releases() {
+	local key
+	local val
+	local tmpfil
+	local curdate=
+	local curkeys=
+	local line
+	local date
+
+	tmpfil=$(mktemp)
+	get_psfw
+
+	for key in "${!releases[@]}"; do
+		echo "$key ${releases[$key]}"
+	done | sort -t: -k2,2 > "$tmpfil"
+
+	while read -r line; do
+		key="${line%% *}"	# extract the key
+		val="${line#* }"	# Extract the value (date)
+		date="${val#*:}"	# Get the date part after the colon
+
+		if [[ "$date" == "$curdate" ]]; then
+			curkeys+="/$key" # Append to curkeys if date matches
+		else
+			if [[ -n "$curdate" ]]; then
+				printf "%-*s ITM1:%s\n" $psfw "$curkeys" "$curdate"
+			fi
+
+			curdate="$date"
+			curkeys="$key"
+		fi
+	done < "$tmpfil"
+
+	if [[ -n "$curdate" ]]; then
+		printf "%-*s ITM1:%s\n" $psfw "$curkeys" "$curdate"
+	fi
+
+	rm -f "$tmpfil"
+}
+
+usage()
+{
+    echo "itm.sh [itm] [-a|--all] [-n|--next] [-p|--prev] [-r|--rel] [-s|--show] [-h|--help]"
+    echo "  itm         : specific itm (1-36) or all if not specified"
+    echo "  -a|--all    : show all 36 itms (instead of 26)"
+    echo "  -n|--next   : show next release"
+    echo "  -p|--prev   : show prev release"
+    echo "  -s|--show   : show all releases supported by this script"
+    echo "  -r|--rel	: add a new release and ITM1 start date"
+    echo "  -h|--help   : show this menu"
+}
+
+print_itm()
+{
+    index=$1
+    id="ITM${index}"
+
+    case "$index" in
+	1)
+	    trailer="Start - Planning"
+	    ;;
+	10)
+	    trailer="End - Planning"
+	    ;;
+	12)
+	    trailer="Test 1 (start)"
+	    ;;
+	20)
+	    trailer="Test 2 (start)"
+	    ;;
+	26)
+	    trailer="BETA"
+	    ;;
+	32)
+	    trailer="Release Candidate"
+	    ;;
+	34)
+	    trailer="Zero Day"
+	    ;;
+	36)
+	    trailer="GA"
+	    ;;
+	*)
+	    trailer=""
+	    ;;
+    esac
+
+    printf "${bold}%-5s %s %s${normal}\n" $id $end "$trailer"
+}
+
+set_start_date()
+{
+    itmstart=$(date -d "$end - 6 days" "+%Y-%m-%d")
+}
+
+decrement_dates()
+{
+    end=$(date -d "$end - $1 days" "+%Y-%m-%d")
+    set_start_date
+}
+
+increment_dates()
+{
+    end=$(date -d "$end + $1 days" "+%Y-%m-%d")
+    set_start_date
+}
+
+set_bold()
+{
+    tstart=$(date -d "$itmstart days" "+%s")
+    tend=$(date -d "$end days" "+%s")
+
+    if [ "$today" -ge "$tstart" ] && [ "$today" -le "$tend" ]; then
+	bold="$(tput bold)* "
+    else
+	bold="$normal  "
+    fi
+}
+
+display_all_itms()
+{
+    [ "$all" = "true" ] && last=36 || last=26
+    for ((i=1; i<=$last; ++i)); do
+	set_bold 7
+	print_itm $i
+	increment_dates 7
+    done
+}
+
+display_itm()
+{
+    end=$(echo $1 | cut -d : -f 2)
+    set_start_date
+
+    if [ "$itm" = "all" ]; then
+	display_all_itms $1
+    else
+	adjust=$(((itm-1)*7))
+	increment_dates $adjust
+	print_itm $itm
+    fi
+}
+
+# Read the release/ITM1 pairs out of the yaml file.
+read_itms
+
+today=$(date "+%Y-%m-%d")
+today=$(date -d "$today days" "+%s")
+normal=$(tput sgr0)
+bold="$normal  "
+
+itm=all
+all=false
+while [[ $# > 0 ]]; do
+    key="$1"
+    case $key in
+	# next release
+	-a|--all)
+	    all=true;
+	    ;;
+	-h|--help)
+	    usage && exit
+	    ;;
+	-n|--next)
+	    echo "WARNING: Estimated start date"
+	    rel="9.6/10.0GA"
+	    itmstart=
+	    ;;
+	-p|--prev)
+	    rel="8.10/9.4"
+	    all=true
+	    itmstart=
+	    ;;
+	-s|--show)
+	    print_releases
+	    exit 0
+	    ;;
+	-r|--rel)
+	    set_release
+	    ;;
+	*)
+	    [ $itm != "all" ] && usage && exit
+	    itm=$key
+	    ;;
+    esac
+    shift # past argument or value
+done
+
+if [ "$itm" != "all" ]; then
+    if [[ $itm -lt 1 ]] || [[ $itm -gt 36 ]]; then
+	echo "ITM${itm} is invalid (range 1:36)"
+	exit
+    fi
+fi
+
+rel="$current_release"
+itmstart="${releases[$rel]}"
+
+printf "RELEASE: $rel\n"
+display_itm $itmstart
+
