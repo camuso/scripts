@@ -1,0 +1,364 @@
+#!/bin/bash
+#
+# compare-configs
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+[ -n "$MYLIB" ] || {
+	declare MYLIB=
+	MYLIB="${MYDIR}/lib"
+}
+
+[ "$ui_loaded" ] || source "${MYLIB}/ui.source"
+
+declare -a substr=()
+declare -a argv=()
+declare -i argc=2
+
+declare b_all=false	# all config entries in both files, y,m, or n
+declare b_kmod=false	# only loadable modules
+declare b_stat=false	# only statically linked modules
+declare b_disa=false	# only disabled parameters
+declare b_any=true	# any configured parameters, y or  m
+declare b_diff=true	# only parameters that are not common to either file
+declare b_onlyfA=false	# configs in fileA that are not in fileB
+declare b_onlyfB=false  # configs in fileB that are not in fileA
+declare b_parmseq=false	# params set identially in both files
+declare b_parmsne=false	# params set differently in both files
+declare b_fmake=false	# force creation of the working files
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0") [options]  file-1 file-2
+
+Arguments
+Compares each item in the config file-1 with the identical item in
+config file-2.
+
+Creates a clean version of the config files with .cln as an extension, and
+creates a sorted version of the config files with a .srt extension in the
+directory of file-1.
+
+These files are parsed according to the switches below.
+
+Arguments
+---------
+   file-1 : first config file
+   file-2 : second config file
+
+Options with leading -
+----------------------
+   a : all config entries in both files, y,m, or n
+   m : only loadable modules
+   s : only statically linked modules
+   u : only disabled parameters
+   c : any configured parameters, y or  m.
+   d : parameters that are not common to either file
+   n1 : params in file-1 that are not in file-2
+   n2 : params in file-2 that are not in file-1
+   ci : params set identically in each file
+   cd : params set differently in eash file
+   ss : substrings of interest, each preceeded by -ss
+   fm : force make of clean and sorted fies, even if they exist
+
+   The -d switch can be used with any of the others, but is implied
+   by the -a switch.
+   The -a switch ignores all other switches, since it dumps everything.
+\0
+EOF
+)"
+
+#** usage: print info and instructions to screen
+#
+# Global
+# 	usagestr
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+#** exitme
+#
+# Global
+#   ui exit codes - see lib/ui.source
+#   ui_err_msg array
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional string to precede cli message
+#*
+exitme() {
+	local -i code=$1
+	local str="$2"
+
+	((code == ui_exit_ok)) && exit "$code"
+	ui_print_climsg "$code" "$str"
+	usage
+	exit "$code"
+}
+
+#** check_arg
+#
+# Global
+#   argv - array containing command line arguments
+#*
+check_arg() {
+        local arg="$1"
+
+        # If 1st char is a hyphen, then invalid switch
+        [ "${arg:0:1}" == "-" ] && return 1
+
+        # Otherwise, add the arg to the argary
+        argv+=("$arg")
+        return 0
+}
+
+#** enforce_exclusivity
+#
+# Assure that only one of the listed global flags is true.
+#
+# NOTE: The name of the variable, not its value, must be passed.
+#       Therefore, no leading $ in the argument to this function.
+#
+# Globals
+#    b_kmod
+#    b_stat
+#    b_disa
+#    b_any
+#*
+enforce_exclusivity() {
+	local enabled_var="$1"
+	for var in b_kmod b_stat b_disa b_any; do
+		if [[ "$var" != "$enabled_var" ]]; then
+			"$var"=false
+		fi
+	done
+}
+
+#** parseopts
+#
+# Global
+#   substr
+#   argv
+#   argc
+#*
+parseopts() {
+	argc=0
+	argv=()
+
+	while (($# > 0)); do
+	    case "$1" in
+		-a ) b_all=true
+		     # Does not need exclusivity test: all can be true.
+		     ;;
+		-m ) b_kmod=true
+		     enforce_exclusivity b_kmod
+		     ;;
+		-s ) b_stat=true
+		     enforce_exclusivity b_stat
+		     ;;
+		-u ) b_any=true
+		     enforce_exclusivity b_any
+		     ;;
+		-c ) b_disa=true
+		     enforce_exclusivity b_disa
+		     ;;
+		-d ) b_diff=true
+		     ;;
+	        -n1 ) b_onlyfA=true
+		      ;;
+		-n2 ) b_onlyfB=true
+		      ;;
+		-ci ) b_parmseq=true
+		      ;;
+		-cd ) b_parmsne=true
+		      ;;
+		-ss ) shift
+		      substr+=("$1")
+		      ;;
+		-h | --help )
+		     echo -e "$usagestr"
+		     exit 0
+		     ;;
+		* )  argv+=("$1")
+		     let ++argc
+		     ;;
+	    esac
+	    shift
+	done
+}
+
+#** find_unique - find config items in f1 that are not in f2
+#
+# Arguments
+#   1 - file having configs to look for in f2
+#   2 - file to search for configs that match those in f1
+#       The ones that can't be matched are output as unique to f1.
+#*
+find_unique() {
+	local f1="$1"
+	local f2="$2"
+	local line=
+	local -a lary=()
+
+	while read line; do
+		ui_strtok "$line" " =" lary
+		grep -w  "${lary[0]}" "$f2" || echo "$line"
+	done < "$f1"
+}
+
+#** find_same - find config items that are set alike in f1 and f2
+#
+#   1 - config file having config items you want to check in f2
+#   2 - config file having config items in f1 you want to find
+#*
+find_same() {
+	local f1="$1"
+	local f2="$2"
+	local line1
+	local line2
+
+	while read line1; do
+		line2=$(grep "$line1" "$f2") && printf "%-53s %s\n"  "$line1" "$line2"
+	done < "$f1"
+}
+
+#** find_diff - config items that are NOT set alike in f1 and f2
+#
+#   1 - config file-1
+#   2 - config file-2
+#*
+find_diff() {
+	local f1="$1"
+	local f2="$2"
+	local -a lary1=()
+	local -a lary2=()
+	local line1
+	local line2
+
+	while read line1; do
+		ui_strtok "$line1" " =" lary1
+		line2=$(grep -w "${lary1[0]}" "$f2") || continue
+		ui_strtok "$line2" " =" lary2
+		[[ "${lary1[0]}" == "${lary2[0]}" ]] || continue
+		[[ "$line1" == "$line2" ]] || printf "%-53s %s\n" "$line1" "$line2"
+	done < "$f1"
+}
+
+#** find_subst() - parse an array of substrings looking for them in each file
+#
+# Globals
+#  substr - substring array
+#
+# Arguments
+#  1 - sorted config file-1
+#  2 - sorted config file-2
+#
+find_substr() {
+	local f1="$1"
+	local f2="$2"
+
+	if [ -n "$substr" ]; then
+		infile=$(mktemp)
+		grep "$substr" "$f1" > "$infile"
+	else
+		infile="$f1"
+	fi
+	[ -n "$substr" ] && rm -f "$infile"
+}
+
+#** main
+#*
+main() {
+	local fileA=
+	local fileB=
+	local substr=
+	local count
+	local mypid
+	local dir
+	local argmsg="Please provide the names of two files."
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	ui_set_colors
+
+	parseopts "$@"
+
+	(($argc == 2 )) || exitme $ui_err_missing_arg "$argmsg"
+
+	fileA="${argv[0]}"
+	fileB="${argv[1]}"
+	dir="$(dirname "$(realpath $fileA)")"
+
+	# If the files don't exist, or if there is a forced make, then
+	# Strip all leading '# ' from the files
+	# Remove lines that do not begin with CONFIG_
+	# Sort the files for easier parsing by eye.
+	if ([ ! -f "$fileA.cln" ] || $b_fmake); then
+		sed 's/^# //' "$fileA" > "$fileA".cln
+		sed -i '/^CONFIG_/!d' "$fileA".cln
+		 sort "$fileA".cln > "$fileA".srt
+	fi
+	if ([ ! -f "$fileB.cln" ] || $b_fmake); then
+		sed 's/^# //' "$fileB" > "$fileB".cln
+		sed -i '/^CONFIG_/!d' "$fileB".cln
+		sort "$fileB".cln > "$fileB".srt
+	fi
+	echo
+
+	if $b_onlyfA; then
+	echo -e "${MNU}Configs in $STA$fileA$MNU that are not in $STA$fileB$OFF"
+	find_unique "$fileA.srt" "$fileB.srt" > "$fileA.unique" & mypid=$!
+	ui_waitonproc_tty $mypid .05 "${INF}Please wait while we create$STA $fileA.unique$OFF"
+	count=$(wc -l < "$fileA.unique")
+	echo -e "$STA$fileA.unique$MNU has $STA$count$MNU lines$OFF"
+	echo
+	fi
+
+	if $b_onlyfB; then
+	echo -e "${MNU}Configs in $STA$fileB$MNU that are not in $STA$fileA$OFF"
+	find_unique "$fileB.srt" "$fileA.srt" > "$fileB.unique" & mypid=$!
+	ui_waitonproc_tty $mypid .05 "${INF}Please wait while we create $STA$fileB.unique$OFF"
+	count=$(wc -l < "$fileB.unique")
+	echo -e "$STA$fileA.unique$MNU has$STA $count$MNU lines$OFF"
+	echo
+	fi
+
+	if $b_parmseq; then
+	echo -e "${MNU}Configs in$STA $fileA$MNU that are identical to those in$STA $fileB$OFF"
+	find_same "$fileA.srt" "$fileB.srt" > "$dir/config.same" & mypid=$!
+	ui_waitonproc_tty $mypid .05 "${INF}Please wait while we create$STA $dir/config.same$OFF"
+	count=$(wc -l < $dir/config.same)
+	echo -e "$STA$fileA$MNU and $STA$fileB$MNU have $STA$count$MNU identical entries$OFF"
+	echo
+	fi
+
+	if $b_parmsne; then
+	echo -e "${MNU}Configs in $STA$fileA$MNU that are different from those in$STA $fileB$OFF"
+	find_diff "$fileA.srt" "$fileB.srt" > "$dir/config.diff" & mypid=$!
+	ui_waitonproc_tty $mypid .05 "${INF}Please wait while we create$STA $dir/config.diff$OFF"
+	count=$(wc -l < $dir/config.diff)
+	echo -e "$STA$fileA$MNU and $STA$fileB$MNU have $STA$count$MNU differing entries$OFF"
+	echo
+	fi
+
+	exitme $ui_exit_ok
+}
+
+main "$@"
