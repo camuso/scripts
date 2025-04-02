@@ -2,9 +2,23 @@
 #
 # mkrepos
 
+[ -n "$MYDIR" ] || {
+        declare MYDIR=
+        MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+[ -n "$MYLIB" ] || {
+        declare MYLIB=
+        MYLIB="${MYDIR}/lib"
+}
+
+[ "$ui_loaded" ] || source "${MYLIB}/ui.source"
+
+declare -i termbkgnd=
+
 declare repolist=
 declare b_spec=false
-declare usagestr=$(
+declare usagestr="$(
 cat <<EOF
 
 $(basename $0)
@@ -28,7 +42,7 @@ Arguments:
 	/work/upstream/kernel
 	/work/c9s/kernel
 EOF
-)
+)"
 
 declare distro=
 declare majversion=
@@ -38,6 +52,15 @@ usage() {
 	exit 1
 }
 
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+        echo -e "\n${CAU}Ctrl-c detected\n${INF}Cleaning up and exiting.$OFF"
+        exit $CTLC_EXIT
+}
 
 mkrepo() {
 	local mr_distro="$1"
@@ -61,23 +84,23 @@ mkrepo() {
 		repodir="/work/ark"
 		repo="git@gitlab.com:cki-project/kernel-ark.git"
 	else
-		echo "$mr_distro is not supported by this script."
+		echo -e "$CAU$mr_distro is not supported by this script.$OFF"
 		return
 	fi
 
 	[ -d "$repodir" ] || mkdir -p "$repodir"
-	cd "$repodir" || { echo "cannot cd into $repodir!"; exit 1; }
+	cd "$repodir" || { echo -e "${CAU}Cannot cd into $STA$repodir$OFF"; exit 1; }
 
 	if [ -f kernel/.git/config ] ; then
-		echo "$PWD/kernel repo $repodir/$reponam already exists."
+		echo -e "$CAU$PWD/kernel repo $STA$repodir/$reponam$CAU already exists.$OFF"
 		return
 	else
-		echo "Cloning $repo into $PWD/kernel..."
+		echo -e "${CAU}Cloning $repo into $repodir/kernel...$OFF"
 		git clone "$repo" kernel
-		cd kernel || { echo "cannot cd into $PWD/$repodir!"; exit 1; }
+		cd kernel || { echo -e "${CAU}cannot cd into $STA$PWD/$repodir$OFF"; exit 1; }
 		git fetch
 		git pull
-		git remote add tcamuso git@gitlab.com:tcamuso/rhel-7.git
+		git remote add tcamuso git@gitlab.com:tcamuso/"$distro-${majver}.git"
 		echo "$PWD" >> "$repolist"
 	fi
 }
@@ -87,6 +110,10 @@ create_upstream() {
 	[ -d /work/upstream ] || mkdir -p /work/upstream
 	cd /work/upstream
 	[ -f kernel/.git/config ] || {
+		if [ -f "kernel/.git/config" ]; then
+			echo -e "\n{CAU}Upstream kernel already present.$OFF\n"
+			return
+		fi
 		git clone \
 		git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
 		kernel
@@ -115,13 +142,13 @@ create_downstream() {
 	mkrepo "rhel" "7"
 	mkrepo "rhel" "8"
 	mkrepo "rhel" "9"
-	mkrepo "centos" "9"
-	mkrepo "centos" "10"
+	mkrepo "centos-stream" "9"
+	mkrepo "centos-stream" "10"
 	mkrepo "kernel-ark"
 }
 
 get_distro() {
-	[ -f /etc/os-release ] || { echo "/etc/os-release does not exist!"; exit 1; }
+	[ -f /etc/os-release ] || { echo -e "${CAU}/etc/os-release does not exist!$OFF"; exit 1; }
 	foo=$(grep -w 'ID' /etc/os-release | cut -d"=" -f2)
 
 	# Strip off the double quote marks
@@ -144,16 +171,31 @@ get_distro() {
 
 		echo "majversion: $majversion"
 	elif [[ "$distro" != "fedora" ]]; then
-		echo "$distro is not a distro supported by this script."
+		echo -e "$CAU$distro is not a distro supported by this script.$OFF"
 		exit 1
 	fi
 }
 
+#** init
+#
+# Global
+#*
+init() {
+        ui_setbg termbkgnd
+}
+
+#** main
+#*
 main() {
         # The following line will single step through this script.
         # Use the # to comment it out.
         #trap 'read -p "$(printf "%$((${#BASH_SOURCE[0]}+8))s" "")" \
 	#	line && eval "$line" || exit $?' DEBUG
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	init
 
 	local pr_cfg_dir="$HOME/.config/patchreview"
 
@@ -162,7 +204,7 @@ main() {
 	[ "$1" == "spec" ] && b_spec=true || b_spec=false
 
 	[ -d /work ] || {
-		echo "There is no /work directory."
+		echo -e "${WRN}There is no /work directory.$OFF"
 		exit 1
 	}
 
@@ -203,7 +245,8 @@ main() {
 
 	$b_spec && mkrepo "$distro" "$majversion" || create_downstream
 
-	crontab << EOF
+	[ -d "$HOME"/.cache ] || mkdir "$HOME"/.cache
+	crontab - << EOF
 0 7 * * * date > /work/crontab-repotask; /home/tcamuso/bin/repotask >> /work/crontab-repotask
 EOF
 }
