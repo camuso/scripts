@@ -44,5 +44,5 @@ done
 shift $optcount
 [ $# -eq 1 ] || usage 1
 
-echo "patch --fuzz=3 $dry -p1 < "$1""
-patch --fuzz=3 $dry -p1 < "$1"
+echo "patch --fuzz=2 $dry -p1 < "$1""
+patch --fuzz=2 $dry -p1 < "$1"
