@@ -1,0 +1,122 @@
+#!/bin/bash
+#
+# mkxtest
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(which "$(basename "$0")")")"
+}
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")
+\0
+EOF
+)"
+
+#** usage: print info and instructions to screen
+#
+# Global
+# 	usagestr
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+#** exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+get_x11devel() {
+
+	# If we have libX11-devel, we can return with good status.
+	rpm -q libX11-devel && return 0
+
+	# No libX11-devel present, so we will have to install.
+	# Before we can try to dnf install libX11-devel, we need to know
+	# if user has superuser privileges.
+	sudo -n true || {
+		echo -e "
+$USER does not have privileges to install libx11-devel
+"
+		return 1
+	}
+
+	# If the user has sudoer privileges, let's install libX11-devel.
+	sudo dnf install -y libX11-devel || {
+		echo -e "\nCould not dnf install libX11-devel.\n"
+		return 1
+	}
+
+	return 0
+}
+
+
+#** main
+#*
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	# Define a temporary directory for compilation
+	XTEST_C="$MYDIR/xtest.c"
+	XTEST_BIN="$MYDIR/xtest"
+
+	rpm -q libX11-devel > /dev/null 2>&1 || get_x11devel
+
+	# If we don't already have the xtest binary, then build it.
+	[ -x "$XTEST_BIN" ] || {
+
+		# Write the C code to a file
+cat << 'EOF' > "$XTEST_C"
+#include <X11/Xlib.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void) {
+    Display *dpy = XOpenDisplay(NULL);
+    if (dpy) {
+        XCloseDisplay(dpy);
+        return 0;  // X is available
+    }
+    return 1;  // No X server
+}
+EOF
+		gcc "$XTEST_C" -o "$XTEST_BIN" -lX11 >/dev/null
+	}
+
+	# Check if the binary exists and is executable, then run it.
+	if [ -x "$XTEST_BIN" ] && "$XTEST_BIN"; then
+	    echo "X server is available."
+	else
+	    echo "No X server found."
+	fi
+
+	exitme 0
+}
+
+main "$@"
