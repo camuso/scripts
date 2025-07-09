@@ -1,0 +1,188 @@
+#!/bin/bash
+#
+# mkworkdir
+
+MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYLIB="$MYDIR"/lib
+# source "$MYLIB"/ui.source
+
+declare usagestr=$(
+cat <<EOF
+
+$(basename $0) 
+
+Description:
+	Remove and recreate home directory with smaller size and create
+	a /work logical volume with a size large enough to do actual work.
+
+Arguments:
+	help : print this text to the screen.
+
+\0
+EOF
+)
+
+usage() {
+	echo -e "$usagestr"
+	exit 1
+}
+
+declare warning=$(
+cat <<EOF
+
+ Be sure you have backed-up or moved everything in your /home directory,
+ because it will be destroyed.
+
+ Press ctrl-c NOW if you need to do that first.
+ Press any other key to continue.
+\0
+EOF
+)
+
+declare homemnt= 	# extracted from fstab
+declare workmnt=	# same as homemnt but with work in place of home
+declare homedir=	# extracted from homemnt
+declare workdir=	# same as homedir but with work in place of home
+declare worksiz=	# size of work directory input by user
+declare newhomesiz=	# user input for new size of homedir
+
+declare -i aok=0
+declare -i novg=1
+declare -i novfree=2
+
+declare -a errmsg=(
+""
+"Cannot find VG in vgs fields."
+"Cannot find VFree in vgs fields."
+)
+
+errexit() {
+	local code "$1"
+
+	echo -e "$msg"
+	exit $code
+}
+
+strindex() {
+    local x="${1%%$2*}";
+    [[ $x = "$1" ]] && echo -1 || echo ${#x}
+}
+
+aryindex() {
+    local -n ar=$1
+    local fld="$2"
+    local -n ix=$3
+
+    for ((ix = 0; ix < ${#ar[@]}; ix++))
+    do
+        [ "${ar[ix]}" == "$fld" ] && break;
+    done
+
+    ((ix < ${#ar[@]})) && return 0 || return 1
+}
+
+main() {
+	local yn=
+	local lvsfldary # array of field names in lvs output
+	local lvhome	# line with home dir info in lvs ouput
+	local vgnameidx	# index to volume group name in lvs output
+	local vghome	# volume group that contains the /home directory
+	local lvsizeidx # index to the LSize field in lvs output
+	local homesiz	# size of the home directory extracted from lvs
+
+	[[ "$1" == *"h"* ]] && usage
+
+	echo -e "$warning"
+	read
+
+	# Find which logical volume is the home directory
+	#
+	homemnt="$(grep home /etc/fstab)"
+	[ $? -eq 0 ] || {
+		echo "Can't find \'home\' in /etc/fstab"
+		exit 1
+	}
+
+	# Create temporary workmnt by replacing 'home' with 'work'
+	# in the home string grepped from /etc/fstab
+	#
+	workmnt="${homemnt//home/work}"
+	homedir="$(echo $homemnt | awk -F " " '{print $2}')"
+	workdir="${homedir//home/work}"
+
+	# Get the volume group that contains the home directory and get the
+	# current size of the home directory (home logical volume).
+	# 1. Get the lvs listing field names
+	# 2. Get the index to the VG field in the lvs list
+	# 3. Find the logical volume for the home directory in the lvs list
+	# 4. Get the Volume Group name from the VG field of home logical vol
+	# 5. Get the home logical volume size from the LSize field
+	# 6. Truncate the decimal and remove non-numeric chars from homesiz
+	#
+	read -ra lvsfldary <<< $(lvs | head -1) 	# 1st line has field names
+	read -ra lvhome <<< $(lvs --unit g | grep home) # /home fields
+	aryindex lvsfldary "VG" vgnameidx
+	aryindex lvsfldary "LSize" lvsizeidx
+	vghome="${lvhome[vgnameidx]}"		# volume group for /home
+	homesiz="${lvhome[lvsizeidx]%.*}"	# Lsize of /home
+	homesiz="${homesiz//[!0-9]}"		# :
+
+	# echo the parameters before continuing.
+	#
+	echo "/home Volume Group Name : $vghome"
+	echo "-----------------------"
+	echo "The /home directory will be resized to make room for /work"
+	echo "homedir: $homedir"
+	echo "homemnt: $homemnt"
+	echo
+	echo "The /work directory will be created and added to /etc/fstab."
+	echo "workdir: $workdir"
+	echo "workmnt: $workmnt"
+	read -p "Press ctrl-c to exit or any other key to continue ..."
+	echo "Current homedir size: $homesiz GB"
+
+	while :; do
+		read -p "Enter new homedir size in GB: " newhomesiz
+		echo "The new homedir will be $newhomesiz GB"
+		((newhomesiz < $homesiz)) || {
+			echo "New homedir size must be less than $homesiz"
+			continue
+		}
+		worksiz=$((homesiz - newhomesiz))
+		echo "The workdir size will be $worksiz GB"
+		read -n1 -p "Is this what you want (y/n) : " yn
+		[ "$yn" == "y" ] && break
+	done
+	echo
+
+	umount -v -l "$homedir"
+	lvremove -v "$homedir"
+	lvcreate -v -L "${newhomesiz}"G -n home "$vghome"
+	lvcreate -v -L "${worksiz}"G -n work "$vghome"
+
+	homedir=$(find /dev/mapper/ | grep home)
+	workdir=$(find /dev/mapper/ | grep work)
+
+	mkfs.xfs "$homedir"
+	mkfs.xfs "$workdir"
+	[ -d /home ] || mkdir /home
+	[ -d /work ] || mkdir /work
+
+	grep $workdir /etc/fstab || {
+		cp -v /etc/fstab /etc/fstab.orig
+		echo "$workmnt" >> /etc/fstab
+	}
+
+	mount -v "$homedir"
+	mount -v "$workdir"
+
+	lvextend -l +100%FREE "$workdir"
+	xfs_growfs "$workdir"
+	restorecon -R /work
+	restorecon -R /home
+}
+
+main $@
+
+exit 0
+
