@@ -29,6 +29,7 @@ Description: Create the upstream and downstream kernel repo(s)
    /work/7/kernel
    /work/8/kernel
    /work/9/kernel
+   /work/10/kernel
    /work/c9s/kernel
    /work/c10s/kernel
    /work/ark/kernel
@@ -142,6 +143,7 @@ create_downstream() {
 	mkrepo "rhel" "7"
 	mkrepo "rhel" "8"
 	mkrepo "rhel" "9"
+	mkrepo "rhel" "10"
 	mkrepo "centos-stream" "9"
 	mkrepo "centos-stream" "10"
 	mkrepo "kernel-ark"
