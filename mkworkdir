@@ -2,16 +2,19 @@
 #
 # mkworkdir
 
-MYDIR="$(dirname "$(which "$(basename "$0")")")"
-MYLIB="$MYDIR"/lib
-# source "$MYLIB"/ui.source
+set -euo pipefail
+IFS=$'\n\t'
+
+MYDIR="$(dirname "$(readlink -f "$0")")"
+MYLIB="$MYDIR/lib"
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0) 
+$(basename $0)
 
 Description:
+        NOTE: For xfs filesystems only!
 	Remove and recreate home directory with smaller size and create
 	a /work logical volume with a size large enough to do actual work.
 
@@ -39,12 +42,12 @@ cat <<EOF
 EOF
 )
 
-declare homemnt= 	# extracted from fstab
-declare workmnt=	# same as homemnt but with work in place of home
-declare homedir=	# extracted from homemnt
-declare workdir=	# same as homedir but with work in place of home
-declare worksiz=	# size of work directory input by user
-declare newhomesiz=	# user input for new size of homedir
+declare homemap= 	# extracted from fstab
+declare workmap=	# same as homemap but with work in place of home
+declare homedir=	# fixed as "/home"
+declare workdir=	# fixed as "/work"
+declare worksiz=	# size of work directory, half of homdir size
+declare newhomesiz=	# new size of homedir is half of original size
 
 declare -i aok=0
 declare -i novg=1
@@ -75,87 +78,78 @@ exitme() {
 update_fstab() {
 	local dir="$1"
 	local map="$2"
-	local fstr
 	local uid
 	local fline
 
-	uid="$(blkid "$map" | tr -d \" | awk -F" " '{print $2}')"
-	fstr="$uid $dir                   xfs     defaults        0 0"
-	fline="$(grep -n "[[:space:]]$dir[[:space:]]" /etc/fstab | cut -d: -f1)"
+	uid="$(blkid -s UUID -o value "$map")"
+	fline="$(grep -n -E "[[:space:]]$dir[[:space:]]" /etc/fstab | cut -d: -f1)"
 
 	# If the line already exists in the fstab, delete it, because
 	# we're going to replace it.
 	[ -n "$fline" ] && sed -i.bak "$fline"d /etc/fstab
 
-	echo "$fstr" >> /etc/fstab
+	printf 'UUID=%s %s xfs defaults 0 0\n' "$uid" "$dir" >> /etc/fstab
 }
 
 main() {
-        # The following line will single step through this script.
-        # Use the # to comment it out.
-        # trap 'read -p "$(printf "%$((${#BASH_SOURCE[0]}+8))s" "")" \
-	#	line && eval "$line" || exit $?' DEBUG
+	[[ "${1:-}" == *h* ]] && usage
+	(( EUID == 0 )) || exitme 1 "Must be root to run this script"
 
 	local homesiz	# size of the home directory extracted from lvs
 	# /dev/mapper names
 	local homemap	# e.g. /dev/mapper/rhel_dell--per440--01-home
 	local workmap	# e.g. /dev/mapper/rhel_dell--per440--01-work
-	# uuid extracted from blkid
-	local homeid	# uuid of /dev/mapper/rhel_dell--per440--01-home
-	local workid	# uuid of /dev/mapper/rhel_dell--per440--01-work
 	# fstab entries
 	local homefs	# fstab entry for /home
 	local workfs	# fstab entry for /work
 	local line
-
-	[[ "$1" == *"h"* ]] && usage
-
-	# If not the root, exit with an error code.
-	(( $(id -u) == 0 )) || exitme 1 "Must be root user to run this script"
+	local uuid_ref
+	local uuid
+	local vgname
 
 	# Find which logical volume is the home directory
-	#
-	homemnt=$(awk '$2=="/home" { print }' /etc/fstab)
+	uuid_ref="$(awk '$2=="/home" && $1 ~ /^UUID=/ { print $1 }' /etc/fstab)" \
+		|| exitme 1 "Can't find \'home\' in /etc/fstab"
+	uuid="${uuid_ref#UUID=}"
+	homemap="$(blkid -U "$uuid")"
+	workmap="${homemap/home/work}"
 
-	[ $? -eq 0 ] || {
-		exitme 1 "Can't find \'home\' in /etc/fstab"
-	}
+	# verify /dev/mapper/...-home is XFS, else abort
+	fsdev_type=$(blkid -s TYPE -o value "$homemap")
+	if [[ "$fsdev_type" != "xfs" ]]; then
+	  exitme 1 "$homemap is not XFS (found: $fsdev_type). Aborting."
+	fi
 
-	# Create temporary workmnt by replacing 'home' with 'work'
-	# in the home string grepped from /etc/fstab
-	#
-	workmnt="${homemnt//home/work}"
-
-	homedir=$(awk '$2=="/home" { print $2 }' /etc/fstab)
+	homedir="/home"
 	workdir="/work"
 
-	# 1. Get the device backing /home from fstab
-	homemap="$(awk '$2=="/home" { print $1 }' /etc/fstab)"
+	# Derive the VG name by invoking lvs for the $homemap.
+	# Remove leading white space with awk.
+	vgname="$(lvs --noheadings -o vg_name "$homemap" | awk '{$1=$1; print}')"
 
-	# 2. Derive the VG name by stripping “-home” off the mapper basename
-	vgname="$(basename "$homemap")"
-	vgname="${vgname%-home}"
+	# Check for existing work LV
+	if lvdisplay "$vgname/work" &>/dev/null; then
+		exitme 1 "'work' LV already exists in $vgname"
+	fi
 
-	homemap="/dev/mapper/${vgname}-home"
-	workmap="/dev/mapper/${vgname}-work"
-
-	# 3. Pull the /home LV size (in GB, integer)
+	# Pull the /home LV size in GB as an integer
+	# Use awk to convert to integer and remove leading white space.
 	homesiz="$(
-	  lvs --noheadings --units g \
-	      -o lv_size "${vgname}/home" \
+	  lvs --noheadings --units g -o lv_size "${vgname}/home" \
 	    | awk '{ print int($1) }'
 	)"
 
-	# 4. Compute new sizes
+	# Compute new sizes
 	newhomesiz=$(( homesiz / 2 ))
 	worksiz=$(( homesiz - newhomesiz ))
 
-	# 5. Debug output
-	echo "VG name:      $vgname"
-	echo "Current size: ${homesiz}G"
-	echo "New /home:    ${newhomesiz}G"
-	echo "/work:        ${worksiz}G"
-
+	# Debug output
+cat <<EOF
+VG name:      $vgname
+Current size: ${homesiz}G
+New /home:    ${newhomesiz}G
+/work size:   ${worksiz}G
+EOF
 	umount -v -l "$homedir"
 	lvremove -v /dev/"$vgname"/home
 	lvcreate -v -L "${newhomesiz}"G -n home "$vgname"
@@ -163,22 +157,18 @@ main() {
 
 	mkfs.xfs "$homemap"
 	mkfs.xfs "$workmap"
-	[ -d /home ] || mkdir /home
-	[ -d /work ] || mkdir /work
+	mkdir -p "$homedir" "$workdir"
 
-	update_fstab "/home" "$homemap"
-	update_fstab "/work" "$workmap"
+	update_fstab "$homedir" "$homemap"
+	update_fstab "$workdir" "$workmap"
 
 	systemctl daemon-reload
-	mount /home
-	mount /work
 	mount -a
 
 	restorecon -R /work
 	restorecon -R /home
 }
 
-main $@
+main "$@"
 
 exit 0
-
