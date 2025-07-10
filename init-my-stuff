@@ -431,10 +431,9 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 	[ -d /work ] || {
 		filesys=$(awk '{print $2}' < <(df -hT | grep -w '/'))
 		echo "filesys:$filesys:"
-trap : DEBUG
+# trap : DEBUG
 		case "$filesys" in
-			"xfs" ) # yes | $HOME/bin/mkworkdir-noq
-				mkdir /work
+			"xfs" ) yes | $HOME/bin/mkworkdir
 				;;
 			"btrfs" ) btrfs subvolume create /work
 				;;
