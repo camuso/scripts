@@ -53,7 +53,7 @@ log_command() {
 	# eval "$command" 2>&1 | tee -a "$logfile"
 }
 
-trap 'log_command' DEBUG
+# trap 'log_command' DEBUG
 ###############################################################################
 
 rptch() {
