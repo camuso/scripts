@@ -83,7 +83,7 @@ echo " distro: $distro"
 version="$(grep -m1 VERSION_ID /etc/os-release | awk -F '=' '{print $2}' | tr -d '"')"
 echo "version: $version"
 
-if ([ "$distro" == "rhel" ] || [ "$distro" == "centos" ]]); then
+if ([[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]); then
 	majvers="$(echo "$version" | awk -F '.' '{print $1}')"
 	echo "majvers: $majvers"
 fi
