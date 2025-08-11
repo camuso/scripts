@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+#
+# install-cyclictest
+
+set -euo pipefail
+
+# Usage: ./install_cyclictest.sh [target_dir] [bin_dir]
+TARGET_DIR="${1:-$HOME/rt-tests}"
+BIN_DIR="${2:-/usr/local/bin}"
+CYCLICTEST_REPO="https://git.kernel.org/pub/scm/utils/rt-tests/rt-tests.git"
+
+mkdir -p "$TARGET_DIR" "$BIN_DIR"
+
+trap 'echo "[✗] Script failed at line $LINENO"; exit 1' ERR
+
+echo "[+] Installing required packages..."
+sudo dnf install -y make gcc numactl-devel git || {
+    echo "[!] Failed to install basic build deps"
+    exit 1
+}
+
+# Handle existing clone
+if [[ -d "$TARGET_DIR/.git" ]]; then
+    echo "[+] Reusing existing rt-tests clone at $TARGET_DIR"
+    cd "$TARGET_DIR"
+    git pull --rebase
+else
+    echo "[+] Cloning rt-tests..."
+    rm -rf "$TARGET_DIR"
+    git clone "$CYCLICTEST_REPO" "$TARGET_DIR"
+    cd "$TARGET_DIR"
+fi
+
+echo "[+] Checking for libcpupower..."
+if ! pkg-config --exists libcpupower; then
+    echo "[!] libcpupower not found  patching Makefile to skip deepest-idle-state support..."
+    sed -i '/^ifeq.*libcpupower/,/^endif$/d' Makefile
+fi
+
+echo "[+] Building cyclictest..."
+make clean && make all
+
+echo "[+] Deploying binary..."
+sudo cp cyclictest "$BIN_DIR"
+
+echo "[✓] cyclictest installed at $BIN_DIR/cyclictest"
