@@ -9,7 +9,7 @@ declare relfile="$mydir"/releases.yaml
 
 declare -i psfw=0	# print field width
 declare current_release
-current_release="10.0"
+current_release="10.2"
 
 # Releases associated array
 # Maps the release to an ITM1 date.
@@ -143,7 +143,7 @@ usage()
     echo "  -n|--next   : show next release"
     echo "  -p|--prev   : show prev release"
     echo "  -s|--show   : show all releases supported by this script"
-    echo "  -r|--rel	: add a new release and ITM1 start date"
+    echo "  -r|--rel    : select release to display from numbered list"
     echo "  -h|--help   : show this menu"
 }
 
