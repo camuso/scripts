@@ -9,7 +9,7 @@ declare MYDATA=
 declare background=
 declare usagestr=
 
-MYDIR="$(dirname "$(which "$(basename "$0")")")"
+MYDIR="$(dirname "$(readlink -f "$0")")"
 MYLIB="$MYDIR"/lib
 MYDATA=$(realpath ./.data)
 [ -d "$MYDATA" ] || mkdir -p "$MYDATA"
