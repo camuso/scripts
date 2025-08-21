@@ -1,0 +1,46 @@
+#!/bin/bash
+# grub-menu Enumerate all GRUB menu entries and tag their origin.
+
+GRUB_CFG="/boot/grub2/grub.cfg"
+[ -r "$GRUB_CFG" ] || GRUB_CFG="/boot/grub/grub.cfg"
+
+mapfile -t cfg_entries < <(awk -F"'" '/^menuentry / {print $2}' "$GRUB_CFG")
+mapfile -t grubby_entries < <(
+    sudo grubby --info=ALL 2>/dev/null |
+    awk -F= '/^title=/ {gsub(/"/,"",$2); print $2}'
+)
+
+kernelver_re='[0-9]+\.[0-9]+\.[0-9]+-[0-9]+(\.[0-9]+)*\.el[0-9]+'
+
+is_grubby_managed() {
+    local e="$1"
+    for g in "${grubby_entries[@]}"; do
+        if [[ "$e" == "$g" ]]; then return 0; fi
+        if [[ "$e" =~ $kernelver_re ]] && [[ "$g" =~ ${BASH_REMATCH[0]} ]]; then return 0; fi
+    done
+    return 1
+}
+
+echo "=== All menuentries from $GRUB_CFG ==="
+matches=0
+for e in "${cfg_entries[@]}"; do
+    if is_grubby_managed "$e"; then
+        printf "[grubby] %s\n" "$e"
+        ((matches++))
+    else
+        printf "[extra]  %s\n" "$e"
+    fi
+done
+
+echo
+echo "=== All grubby-managed entries ==="
+for g in "${grubby_entries[@]}"; do
+    printf "  %s\n" "$g"
+done
+
+echo
+echo "=== Summary ==="
+printf "Total in grub.cfg:       %d\n" "${#cfg_entries[@]}"
+printf "Managed by grubby:       %d\n" "${#grubby_entries[@]}"
+printf "Matched in grub.cfg:     %d\n" "$matches"
+printf "Unmatched in grub.cfg:   %d\n" "$(( ${#cfg_entries[@]} - matches ))"
