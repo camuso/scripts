@@ -146,11 +146,15 @@ echo
 # Can't go any further without which rsync, wget, curl, and git
 # ------------------------------------------------------------------------
 #
-$installagent install -y which
-which rsync || sudo $installagent install -y rsync
-which wget || sudo $installagent install -y wget
-which curl || sudo $installagent install -y curl
-which git || sudo $installagent install -y git
+# create a method for installing needed executables.
+assure() {
+	command -v "$1" >/dev/null 2>&1 || $installagent install -y "$1"
+}
+assure which
+assure rsync
+assure wget
+assure curl
+assure git
 
 cd		# make sure we're home
 
@@ -173,21 +177,30 @@ else
 	echo "No lab.toml file!"
 fi
 
-# If we don't have an ssh key, generate it.
-#
-[ -f $HOME/.ssh/id_rsa ] || \
-	ssh-keygen -N "" -f $HOME/.ssh/id_rsa
-
 # copy the ssh key to gitlab
 #
-if [ -n "$gitlabtok" ]; then
-	curl --header "PRIVATE-TOKEN: $gitlabtok" \
-		--request POST \
-		--form "title=Automated Key" \
-		--form "key=$(cat ~/.ssh/id_rsa.pub)" \
-		https://gitlab.com/api/v4/user/keys \
-		|| echo "You must enter your keys manually."
+# --- Upload SSH key to GitLab ---
+if [[ -n "$gitlabtok" ]]; then
+    # Detect available public key
+    if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+        KEYFILE=~/.ssh/id_ed25519.pub
+    elif [[ -f ~/.ssh/id_rsa.pub ]]; then
+        KEYFILE=~/.ssh/id_rsa.pub
+    else
+        echo "❌ No SSH public key found. Skipping GitLab upload."
+        return 1
+    fi
+
+    echo "⬆️  Uploading SSH key to GitLab..."
+    curl --silent --show-error --fail \
+        --header "PRIVATE-TOKEN: $gitlabtok" \
+        --request POST \
+        --form "title=$(hostname)-$(date +%Y%m%d)" \
+        --form "key=$(<"$KEYFILE")" \
+        https://gitlab.com/api/v4/user/keys \
+        || echo "❌ GitLab key upload failed. You may need to enter it manually."
 fi
+
 echo
 
 echo "*******************************"
@@ -275,12 +288,23 @@ echo
 #   majvers - rhel and centos only
 #
 get_rcmtools() {
-	local rcmlink="https://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel"
+	# local rcmlink="https://download.devel.redhat.com/rel-eng/RCMTOOLS/rcm-tools-rhel"
+	local rcmlink="https://download.devel.redhat.com/rel-eng/RCMTOOLS"
 
 	echo "**********************"
 	echo "* Getting tools repos *"
 	echo "**********************"
 	echo
+
+	cd /etc/yum.repos.d
+
+	case "$distro" in
+	  "rhel"   ) curl -o rcmtools-rhel-"$majvers".repo \
+		     "$rcmlink"/rcm-tools-rhel-"$majvers"-baseos.repo
+			;;
+	  "fedora" ) curl -o rcmtools-fedora.repo \
+		     "$rcmlink"/rcm-tools-fedora.repo
+        esac
 
 	if [ "$distro" == "rhel" ]; then
 		cd /etc/yum.repos.d
