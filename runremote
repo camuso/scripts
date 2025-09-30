@@ -1,24 +1,41 @@
 #!/bin/bash
-# runremote (revised, not dependent upon /dev/stdin)
-# usage: runremote.sh <remoteuser> <remotehost> <localscript> arg1 arg2 ...
+# runremote: stream a local script to a remote host and run it with optional
+# env injection
+#
+# Automatically injects any GITHUB_* environment variables.
+#
+# Escapes all arguments and passes them to the remote script.
+#
+# Streams the script via bash -s with no quoting mess.
 
 user=$1
 host=$2
-realscript=$3
+script=$3
 shift 3
 
-# escape the arguments
+# Collect remaining args
 declare -a args
+for arg in "$@"; do
+  args+=("$(printf '%q' "$arg")")
+done
+
+# Inject env vars directly from exported shell vars
+declare -a env_lines
+while IFS='=' read -r name value; do
+  [[ "$name" =~ ^GITHUB_ ]] && env_lines+=("$name=$(printf '%q' "$value")")
+done < <(env)
 
 sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
-count=0
-for arg in "$@"; do
-  args[count]=$(printf '%q' "$arg")
-  count=$((count+1))
-done
-
 {
-  printf '%s\n' "set -- ${args[*]}"
-  cat "$realscript"
-} | $sshcmd $user@$host "bash -s"
+  # Inject env vars
+  for line in "${env_lines[@]}"; do
+    printf '%s\n' "$line"
+  done
+
+  # Inject positional args
+  printf 'set -- %s\n' "${args[*]}"
+
+  # Stream the script
+  cat "$script"
+} | $sshcmd "$user@$host" "bash -s"
