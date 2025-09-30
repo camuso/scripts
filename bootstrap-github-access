@@ -1,0 +1,60 @@
+#!/bin/bash
+# bootstrap-github-access.sh
+# Uploads remote system's SSH key to GitHub using GITHUB_TOKEN
+
+set -euo pipefail
+
+[[ -n "${GITHUB_TOKEN:-}" ]] && echo "✅ GITHUB_TOKEN is set" \
+                             || echo "❌ GITHUB_TOKEN is missing"
+
+API="https://api.github.com/user/keys"
+TITLE="$(hostname)-$(date +%Y%m%d)"
+KEYFILE=""
+
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+  echo "❌ GITHUB_TOKEN not set. Aborting."
+  exit 1
+fi
+
+# --- Detect or generate SSH key ---
+if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+  KEYFILE=~/.ssh/id_ed25519.pub
+elif [[ -f ~/.ssh/id_rsa.pub ]]; then
+  KEYFILE=~/.ssh/id_rsa.pub
+else
+  echo "⚠️ No SSH public key found. Generating one..."
+  mkdir -p ~/.ssh
+  chmod 700 ~/.ssh
+  ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "$(whoami)@$(hostname)"
+  KEYFILE=~/.ssh/id_ed25519.pub
+fi
+
+PUBKEY=$(<"$KEYFILE")
+LOCAL_FP=$(ssh-keygen -lf "$KEYFILE" | awk '{print $2}')
+EXISTING=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API")
+
+if echo "$EXISTING" | jq -r '.[].key' \
+   | ssh-keygen -lf /dev/stdin 2>/dev/null \
+   | awk '{print $2}' | grep -q "$LOCAL_FP"; then
+  echo "✅ Key already exists on GitHub (fingerprint $LOCAL_FP)."
+else
+  echo "⬆️  Uploading SSH key to GitHub..."
+  RESP=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+    -H "Authorization: token $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    -d "{\"title\":\"${TITLE}\",\"key\":\"${PUBKEY}\"}" \
+    "$API")
+
+  if [[ "$RESP" == "201" ]]; then
+    echo "✅ Key uploaded successfully."
+  else
+    echo "❌ Upload failed (HTTP $RESP). See /tmp/resp.json."
+    cat /tmp/resp.json
+    exit 1
+  fi
+fi
+
+git config --global url."git@github.com:".insteadOf "https://github.com/"
+ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+unset GITHUB_TOKEN
+
