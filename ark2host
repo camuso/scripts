@@ -3,7 +3,8 @@
 #
 # Copy archives to a remote host and unpack them.
 #
-# Uses copykey to copy the local host's ssh key to the remote host.
+# Uses local copykey script to copy the local host's ssh key to the
+# remote host.
 #
 # Uses 'runremote' script to run local script 'init-my-stuff' on
 # the remote system.
@@ -91,6 +92,9 @@ fi
 # copy the localhost's ssh key to the remote host
 copykey "$user" "$host"
 
+# Must install rsync on the remote system before doing anything else.
+ssh "$user@$host" "sudo dnf install -y rsync"
+
 # Copy the lab.toml file
 if [ -f ~/.config/lab/lab.toml ]; then
 	rsync -Pat --rsync-path='mkdir -p .config/lab/ && rsync' \
@@ -99,12 +103,22 @@ else
 	echo "Can't find .config/lab/lab.toml"
 fi
 
-echo "connecting with $remote..."
+script="$HOME/bin/bootstrap-github-access"
+if [[ ! -f "$script" ]]; then
+  echo "❌ Script not found: $script"
+  exit 1
+fi
 
+echo "🔐 Uploading remote SSH key to GitHub..."
+runremote "$user" "$host" "$script"
+
+echo "connecting with $remote..."
 if $installer; then
-	runremote $user $host ~/bin/init-my-stuff -i $pushpriv $nolinuxrepo $user
+	runremote $user $host \
+		"$HOME/bin/init-my-stuff" -i $pushpriv $nolinuxrepo $user
 else
-	runremote $user $host ~/bin/init-my-stuff $pushpriv $nolinuxrepo $user $host $newuser
+	runremote $user $host \
+		"$HOME/bin/init-my-stuff" $pushpriv $nolinuxrepo $user $host $newuser
 fi
 
 echo
