@@ -17,7 +17,7 @@
 declare -i termbkgnd=
 
 declare repolist=
-declare b_spec=false
+declare b_host=false
 declare usagestr="$(
 cat <<EOF
 
@@ -35,13 +35,22 @@ Description: Create the upstream and downstream kernel repo(s)
    /work/ark/kernel
 
 Arguments:
-  spec - literally the string "spec" to clone only the downstream kernel repo for the
-         major version of this system.
+  host - literally the string "host" to clone only the downstream kernel
+         repo for the major version of the host system.
+
+	 For rhel distros, both the centos and rhel repos are cloned.
+
 	 For example...
-		$ mkrepos spec
-	...will only make the following repos on a system provisioned with centos-9.
+
+		$ mkrepos host
+
+	...will only clone the following repos,
+
+	rhel-9 or centos-9
 	/work/upstream/kernel
 	/work/c9s/kernel
+	/wokr/9/kernel
+\0
 EOF
 )"
 
@@ -178,6 +187,55 @@ get_distro() {
 	fi
 }
 
+upload_gitlab_ssh_key() {
+  local token=
+  local api_url="https://gitlab.com/api/v4"
+  local title="Auto-uploaded SSH key from $(hostname)"
+  local key_file=""
+  local key_content=""
+  local fingerprint=""
+
+  token=$(awk -F'"' '/token/ {print $2}' ~/.config/lab/lab.toml)
+
+  # Prefer ED25519, fallback to RSA
+  for candidate in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub; do
+    if [[ -f "$candidate" ]]; then
+      key_file="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$key_file" ]]; then
+    echo "❌ No SSH public key found (id_ed25519.pub or id_rsa.pub)"
+    return 1
+  fi
+
+  key_content=$(<"$key_file")
+  fingerprint=$(ssh-keygen -lf "$key_file" | awk '{print $2}')
+
+  # Fetch existing keys
+  local existing_keys
+  existing_keys=$(curl --silent --header "PRIVATE-TOKEN: $token" "$api_url/user/keys")
+
+  if echo "$existing_keys" | grep -q "$fingerprint"; then
+    echo "✅ Key already exists in GitLab (fingerprint: $fingerprint)"
+    return 0
+  fi
+
+  # Upload to GitLab
+  curl --silent --show-error --fail -X POST "$api_url/user/keys" \
+    --header "PRIVATE-TOKEN: $token" \
+    --header "Content-Type: application/json" \
+    --data "{\"title\": \"$title\", \"key\": \"$key_content\"}"
+
+  if (( $? == 0 )); then
+	  echo "${STA}sshkey uploaded$OFF"
+  else
+	  echo "${WRN}sshkey upload to gitlab failed$OFF"
+	  exit
+  fi
+}
+
 #** init
 #
 # Global
@@ -194,6 +252,8 @@ main() {
         #trap 'read -p "$(printf "%$((${#BASH_SOURCE[0]}+8))s" "")" \
 	#	line && eval "$line" || exit $?' DEBUG
 
+	[[ "$1" == "-h" ]] || [[ "$1" =~ "help" ]] && usage
+
         # Trap for control-c
         trap control_c SIGINT
 
@@ -203,49 +263,31 @@ main() {
 
 	repolist="${pr_cfg_dir}/repolist"
 
-	[ "$1" == "spec" ] && b_spec=true || b_spec=false
+	[ "$1" == "host" ] && b_host=true || b_host=false
 
 	[ -d /work ] || {
 		echo -e "${WRN}There is no /work directory.$OFF"
 		exit 1
 	}
 
+	upload_gitlab_ssh_key
+
 	cd /work
 
 	[ -d "$pr_cfg_dir" ] || mkdir -p "$pr_cfg_dir"
 
-	[ -f "$repolist" ] || > "$repolist"
-: '
-	[ -d /work/netperf ] || {
-		git clone https://github.com/HewlettPackard/netperf.git
-		cd netperf
-		./autogen.sh
-		./configure
-		make
-		make install
-	}
-
-	[ -d /work/progress ] || {
-		git clone https://github.com/Xfennec/progress.git
-		cd progress
-		make
-		make install
-		cd -
-	}
-'
-	if [ -f "$repolist" ]; then
-		while read line; do
-			echo "$line"
-			[ -d "$line" ] || mkdir -p $line
-		done < "$repolist"
-	fi
-
+	> "$repolist"
 	ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts
-
 	get_distro
 	create_upstream
 
-	$b_spec && mkrepo "$distro" "$majversion" || create_downstream
+	if $b_host; then
+		mkrepo "$distro" "$majversion"
+		[[ "$distro" == "rhel" ]] && ((majversion > 8)) && \
+			mkrepo "centos-stream" "$majversion"
+	else
+		create_downstream
+	fi
 
 	[ -d "$HOME"/.cache ] || mkdir "$HOME"/.cache
 	crontab - << EOF
