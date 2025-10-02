@@ -1,0 +1,70 @@
+#!/bin/bash
+
+LOGFILE="rdt_test_$(date +%F_%T).log"
+CORES="0,1"
+COS_MASK="0x0f"
+BENCHMARK="cyclictest -p 99 -l 100000"
+USE_MSR=false
+USE_OS=false
+
+# Log function
+log() {
+    echo "$(date +%T) | $1" | tee -a "$LOGFILE"
+}
+
+# Detect interface
+detect_interface() {
+    if mountpoint -q /sys/fs/resctrl; then
+        USE_OS=true
+        log "Detected OS interface (Resctrl)"
+    elif lsmod | grep -q msr && [[ -r /dev/cpu/0/msr ]]; then
+        USE_MSR=true
+        log "Detected MSR interface"
+    else
+        log ":x: No valid RDT interface detected"
+        exit 1
+    fi
+}
+
+# Configure COS (class-of-service)
+setup_cos() {
+    if $USE_OS; then
+        log "Configuring COS via Resctrl (OS interface)"
+        pqos -e "llc:1=${COS_MASK}"
+        pqos -a "llc:1=${CORES}"
+    elif $USE_MSR; then
+        log "Configuring COS via MSR interface"
+        pqos -I -e "llc:1=${COS_MASK}"
+        pqos -I -a "llc:1=${CORES}"
+    fi
+}
+
+# Run benchmark
+run_benchmark() {
+    log "Running benchmark: $BENCHMARK on cores: $CORES"
+    taskset -c ${CORES} $BENCHMARK | tee -a "$LOGFILE"
+}
+
+# Monitor resources
+monitor_rdt() {
+    log "Starting RDT monitoring (LLC, memory bandwidth)"
+    pqos -m "llc:${CORES};mbl:${CORES};mbr:${CORES}" | tee -a "$LOGFILE"
+}
+
+# Cleanup
+cleanup() {
+    log "Resetting pqos configuration"
+    pqos -R
+}
+
+main() {
+    log "== RDT Test Harness Start =="
+    detect_interface
+    setup_cos
+    run_benchmark
+    monitor_rdt
+    cleanup
+    log "== RDT Test Harness Complete =="
+}
+
+main
