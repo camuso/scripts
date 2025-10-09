@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# intel-cmt-cat capability harness (amended)
+# - Detects capabilities via pqos -d
+# - Reports which are present/missing
+# - Dumps schemata and pqos -d output
+# - Runs monitoring/allocation tests only if supported
+# - Safer monitoring syntax and schemata parsing
+
+MON_CORES="${MON_CORES:-0-1}"     # cores to monitor/bind
+LLC_MASK="${LLC_MASK:-0xf0}"      # example L3 CAT mask
+MBA_PERCENT="${MBA_PERCENT:-80}"  # example MBA percentage
+
+require_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing $1"; exit 1; }; }
+require_cmd pqos; require_cmd dd; require_cmd grep; require_cmd awk; require_cmd sed; require_cmd mount
+
+log() { printf '%s\n' "$*"; }
+hr() { printf -- '---\n'; }
+
+# Ensure resctrl is mounted
+if ! mount | grep -qE 'on /sys/fs/resctrl type resctrl'; then
+  log "Mounting resctrl..."
+  sudo mount -t resctrl resctrl /sys/fs/resctrl || true
+fi
+
+# Reset OS interface
+log "Resetting pqos (OS interface)..."
+sudo pqos -R --iface=os || true
+
+# Ground truth: schemata
+SCHEMATA="/sys/fs/resctrl/schemata"
+L3_SCHEMATA="no"; MB_SCHEMATA="no"
+if [ -f "$SCHEMATA" ]; then
+  SCONTENT="$(cat "$SCHEMATA" || true)"
+  echo "$SCONTENT" | grep -q 'L3:' && L3_SCHEMATA="yes"
+  echo "$SCONTENT" | grep -q 'MB:' && MB_SCHEMATA="yes"
+else
+  SCONTENT=""
+fi
+
+# pqos -d (OS)
+PD="$(sudo pqos -d --iface=os 2>/dev/null || true)"
+
+# Helpers to parse pqos -d sections
+section_present() { echo "$PD" | grep -q "$1"; }
+extract_cdp_state() { echo "$PD" | awk '/L3 CAT/{f=1} f && /CDP:/{print $2; exit}'; }
+extract_num_cos_cat() { echo "$PD" | awk '/L3 CAT/{f=1} f && /Num COS:/{print $3; exit}'; }
+extract_mba_ctrl() { echo "$PD" | awk '/Memory Bandwidth Allocation/{f=1} f && /CTRL:/{print $2; exit}'; }
+extract_mba_num_cos() { echo "$PD" | awk '/Memory Bandwidth Allocation/{f=1} f && /Num COS:/{print $3; exit}'; }
+
+# Detect monitoring capabilities
+HAS_CMT="no"; HAS_MBM="no"; HAS_PMU="no"
+section_present "Cache Monitoring Technology (CMT)" && HAS_CMT="yes"
+section_present "Memory Bandwidth Monitoring (MBM)" && HAS_MBM="yes"
+section_present "PMU events:" && HAS_PMU="yes"
+
+# Detect allocation capabilities
+HAS_L3CAT="no"; HAS_MBA="no"
+section_present "Cache Allocation Technology (CAT)" && HAS_L3CAT="yes"
+section_present "Memory Bandwidth Allocation (MBA)" && HAS_MBA="yes"
+
+CDP_STATE="$(extract_cdp_state)"; [ -z "$CDP_STATE" ] && CDP_STATE="unknown"
+CAT_NUM_COS="$(extract_num_cos_cat)"; [ -z "$CAT_NUM_COS" ] && CAT_NUM_COS="0"
+MBA_NUM_COS="$(extract_mba_num_cos)"; [ -z "$MBA_NUM_COS" ] && MBA_NUM_COS="0"
+MBA_CTRL="$(extract_mba_ctrl)"; [ -z "$MBA_CTRL" ] && MBA_CTRL="unknown"
+
+hr
+log "Capability summary (OS/resctrl):"
+log "  Monitoring (RDT): CMT=$HAS_CMT, MBM=$HAS_MBM"
+log "  Monitoring (PMU fallback): $HAS_PMU"
+log "  L3 CAT: $HAS_L3CAT (schemata L3: $L3_SCHEMATA), CDP: $CDP_STATE, Num COS: $CAT_NUM_COS"
+log "  MBA: $HAS_MBA (schemata MB: $MB_SCHEMATA), Num COS: $MBA_NUM_COS, CTRL: $MBA_CTRL"
+
+hr
+log "Kernel schemata (/sys/fs/resctrl/schemata):"
+[ -n "$SCONTENT" ] && echo "$SCONTENT" || log "No schemata file found."
+
+hr
+log "Raw pqos -d output (OS mode):"
+echo "$PD"
+
+# Monitoring test
+if [ "$HAS_CMT" = "yes" ] || [ "$HAS_MBM" = "yes" ]; then
+  hr
+  log ">>> Running RDT monitoring test (LLC/MBM) on cores ${MON_CORES}..."
+  sudo pqos -m "all:${MON_CORES}" -o /tmp/pqos-mon-os.csv -I &
+  MON_PID=$!
+  sleep 1
+  dd if=/dev/zero of=/dev/null bs=1M count=256 status=none
+  if kill -0 "$MON_PID" 2>/dev/null; then
+    kill "$MON_PID" || true
+  fi
+  if [ -f /tmp/pqos-mon-os.csv ]; then
+    log "Monitoring results saved to /tmp/pqos-mon-os.csv"
+    tail -n 5 /tmp/pqos-mon-os.csv || true
+  else
+    log "Monitoring failed: no CSV produced."
+  fi
+elif [ "$HAS_PMU" = "yes" ]; then
+  hr
+  log ">>> PMU-only monitoring available; skipping pqos -m (not RDT MBM/CMT counters)."
+else
+  hr
+  log "No monitoring capability available."
+fi
+
+# L3 CAT test
+if [ "$HAS_L3CAT" = "yes" ] && [ "$L3_SCHEMATA" = "yes" ]; then
+  hr
+  log ">>> Testing L3 CAT allocation (mask ${LLC_MASK}) on cores ${MON_CORES}..."
+  sudo pqos -e "llc:1=${LLC_MASK}" --iface=os || log "Failed to program L3 CAT"
+  sudo pqos -a "core:1=${MON_CORES}" --iface=os || true
+  log "Applied COS1 with mask ${LLC_MASK} to cores ${MON_CORES}"
+else
+  hr
+  log "L3 CAT not available or not exposed in schemata; skipping allocation test."
+fi
+
+# MBA test
+if [ "$HAS_MBA" = "yes" ] && [ "$MB_SCHEMATA" = "yes" ] && [ "$MBA_CTRL" = "supported" ]; then
+  hr
+  log ">>> Testing MBA allocation (${MBA_PERCENT}%) on cores ${MON_CORES}..."
+  sudo pqos -e "mba:1=${MBA_PERCENT}" --iface=os || log "Failed to program MBA"
+  sudo pqos -a "core:1=${MON_CORES}" --iface=os || true
+  log "Applied MBA ${MBA_PERCENT}% to cores ${MON_CORES}"
+elif [ "$HAS_MBA" = "yes" ]; then
+  hr
+  log "MBA enumerated but control unsupported or MB not in schemata; skipping throttling test."
+fi
+
+# JSON summary
+JSON=$(printf '{"monitoring":{"cmt":"%s","mbm":"%s","pmu":"%s"},"l3cat":{"present":"%s","schemata":"%s","cdp":"%s","num_cos":"%s"},"mba":{"present":"%s","schemata":"%s","num_cos":"%s","ctrl":"%s"}}' \
+  "$HAS_CMT" "$HAS_MBM" "$HAS_PMU" "$HAS_L3CAT" "$L3_SCHEMATA" "$CDP_STATE" "$CAT_NUM_COS" \
+  "$HAS_MBA" "$MB_SCHEMATA" "$MBA_NUM_COS" "$MBA_CTRL")
+
+hr
+log "JSON summary:"
+echo "$JSON"
+
+hr
+log "Tests complete."
