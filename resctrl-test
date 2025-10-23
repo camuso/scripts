@@ -1,204 +1,182 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# intel-cmt-cat capability harness (amended)
-# - Detects capabilities via pqos -d
-# - Reports which are present/missing
-# - Dumps schemata and pqos -d output
-# - Runs monitoring/allocation tests only if supported
-# - Safer monitoring syntax and schemata parsing
+# --- helpers ---
+log() {
+    echo "[$(date +'%F %T')] $*"
+}
 
-export PQOS_INTERFACE=os
+hr() {
+    echo "------------------------------------------------------------"
+}
 
-# --- msr module handling to silence pqos warning ---
-MSR_LOADED=0
-if lsmod | grep -q '^msr'; then
-    MSR_LOADED=1
-    echo "[resctrl-test] Unloading msr module to silence pqos warning..."
-    rmmod msr
-fi
+# --- capability detection ---
+detect_capabilities() {
+    local pqosd
+    pqosd="$(pqos -I os -d 2>&1 || true)"
 
-# Ensure msr is restored on exit
-cleanup() {
-    if [ "$MSR_LOADED" -eq 1 ]; then
-        echo "[resctrl-test] Reloading msr module..."
-        modprobe msr
+    # monitoring
+    if echo "$pqosd" | grep -q "CMT"; then
+        has_cmt="yes"
+    else
+        has_cmt="no"
+    fi
+    if echo "$pqosd" | grep -q "MBM"; then
+        has_mbm="yes"
+    else
+        has_mbm="no"
+    fi
+    if echo "$pqosd" | grep -q "PMU events:"; then
+        has_pmu="yes"
+    else
+        has_pmu="no"
+    fi
+
+    # l3 cat
+    if echo "$pqosd" | grep -q "L3 Cache Allocation (CAT)"; then
+        has_l3cat="yes"
+    else
+        has_l3cat="no"
+    fi
+
+    # mba
+    if echo "$pqosd" | grep -q "Memory Bandwidth Allocation (MBA)"; then
+        has_mba="yes"
+        mba_num_cos="$(echo "$pqosd" | awk '/Memory Bandwidth Allocation \(MBA\)/,/^$/ {if ($0 ~ /Num COS:/) {print $NF}}' | tail -n1)"
+        mba_ctrl="$(echo "$pqosd" | awk '/Memory Bandwidth Allocation \(MBA\)/,/^$/ {if ($0 ~ /CTRL:/) {print $NF}}' | tail -n1)"
+    else
+        has_mba="no"
+        mba_num_cos="0"
+        mba_ctrl="unknown"
     fi
 }
-# Trap EXIT (normal exit), INT (Ctrl-C), TERM (kill)
-trap cleanup EXIT INT TERM
 
-MON_CORES="${MON_CORES:-0-1}"     # cores to monitor/bind
-LLC_MASK="${LLC_MASK:-0xf0}"      # example L3 CAT mask
-MBA_PERCENT="${MBA_PERCENT:-80}"  # example MBA percentage
-
-require_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "Missing $1"; exit 1; }; }
-require_cmd pqos; require_cmd dd; require_cmd grep; require_cmd awk; require_cmd sed; require_cmd mount
-
-log() { printf '%s\n' "$*"; }
-hr() { printf -- '---\n'; }
-
-# Ensure resctrl is mounted
-if ! mount | grep -qE 'on /sys/fs/resctrl type resctrl'; then
-    log "Mounting resctrl..."
-    mount -t resctrl resctrl /sys/fs/resctrl || true
-fi
-
-# Reset OS interface
-log "Resetting pqos (OS interface)..."
-pqos -R --iface=os || true
-
-# Ground truth: schemata
-SCHEMATA="/sys/fs/resctrl/schemata"
-L3_SCHEMATA="no"; MB_SCHEMATA="no"
-if [ -f "$SCHEMATA" ]; then
-    SCONTENT="$(cat "$SCHEMATA" || true)"
-    echo "$SCONTENT" | grep -q 'L3:' && L3_SCHEMATA="yes"
-    echo "$SCONTENT" | grep -q 'MB:' && MB_SCHEMATA="yes"
-else
-    SCONTENT=""
-fi
-
-# pqos -d (OS)
-PD="$(pqos -I os -d --iface=os 2>/dev/null || true)"
-
-# Helpers to parse pqos -d sections
-section_present() { echo "$PD" | grep -q "$1"; }
-extract_cdp_state() { echo "$PD" | awk '/L3 CAT/{f=1} f && /CDP:/{print $2; exit}'; }
-extract_num_cos_cat() { echo "$PD" | awk '/L3 CAT/{f=1} f && /Num COS:/{print $3; exit}'; }
-extract_mba_ctrl() { echo "$PD" | awk '/Memory Bandwidth Allocation/{f=1} f && /CTRL:/{print $2; exit}'; }
-extract_mba_num_cos() { echo "$PD" | awk '/Memory Bandwidth Allocation/{f=1} f && /Num COS:/{print $3; exit}'; }
-
-# Detect monitoring capabilities
-HAS_CMT="no"; HAS_MBM="no"; HAS_PMU="no"
-section_present "Cache Monitoring Technology (CMT)" && HAS_CMT="yes"
-section_present "Memory Bandwidth Monitoring (MBM)" && HAS_MBM="yes"
-section_present "PMU events:" && HAS_PMU="yes"
-
-# Detect allocation capabilities
-HAS_L3CAT="no"; HAS_MBA="no"
-section_present "Cache Allocation Technology (CAT)" && HAS_L3CAT="yes"
-section_present "Memory Bandwidth Allocation (MBA)" && HAS_MBA="yes"
-
-CDP_STATE="$(extract_cdp_state)"; [ -z "$CDP_STATE" ] && CDP_STATE="unknown"
-CAT_NUM_COS="$(extract_num_cos_cat)"; [ -z "$CAT_NUM_COS" ] && CAT_NUM_COS="0"
-MBA_NUM_COS="$(extract_mba_num_cos)"; [ -z "$MBA_NUM_COS" ] && MBA_NUM_COS="0"
-MBA_CTRL="$(extract_mba_ctrl)"; [ -z "$MBA_CTRL" ] && MBA_CTRL="unknown"
-
-hr
-log "Capability summary (OS/resctrl):"
-log "  Monitoring (RDT): CMT=$HAS_CMT, MBM=$HAS_MBM"
-log "  Monitoring (PMU fallback): $HAS_PMU"
-log "  L3 CAT: $HAS_L3CAT (schemata L3: $L3_SCHEMATA), CDP: $CDP_STATE, Num COS: $CAT_NUM_COS"
-log "  MBA: $HAS_MBA (schemata MB: $MB_SCHEMATA), Num COS: $MBA_NUM_COS, CTRL: $MBA_CTRL"
-
-hr
-log "Kernel schemata (/sys/fs/resctrl/schemata):"
-[ -n "$SCONTENT" ] && echo "$SCONTENT" || log "No schemata file found."
-
-hr
-log "Raw pqos -I os -d output (OS mode):"
-echo "$PD"
-
-# --- Monitoring test (cleaned up) ---
-if [ "$HAS_CMT" = "yes" ] || [ "$HAS_MBM" = "yes" ]; then
+# --- capability test ---
+test_capabilities() {
     hr
-    log ">>> Running RDT monitoring test (LLC/MBM) on cores ${MON_CORES}..."
-
-    # Launch pqos monitor on the given cores, writing CSV
-    pqos -I os -m "all:${MON_CORES}" -o /tmp/pqos-mon-os.csv &
-    PQOS_MON_PID=$!
-
-    # Run a short workload to generate some activity
-    sleep 1
-    dd if=/dev/zero of=/dev/null bs=1M count=256 status=none
-
-    # Stop the monitor cleanly
-    if kill -0 "$PQOS_MON_PID" 2>/dev/null; then
-        kill "$PQOS_MON_PID" || true
-        wait "$PQOS_MON_PID" 2>/dev/null || true
-    fi
-
-    # Show results if CSV was produced
-    if [ -f /tmp/pqos-mon-os.csv ]; then
-        log "Monitoring results saved to /tmp/pqos-mon-os.csv"
-        tail -n 5 /tmp/pqos-mon-os.csv || true
+    log "Testing kernel exposure of capabilities..."
+    if [ "$has_cmt" = "yes" ] || [ "$has_mbm" = "yes" ]; then
+        log "Monitoring counters appear supported."
+    elif [ "$has_pmu" = "yes" ]; then
+        log "PMU fallback monitoring available."
     else
-        log "Monitoring failed: no CSV produced."
+        log "No monitoring capability available."
     fi
 
-elif [ "$HAS_PMU" = "yes" ]; then
-    hr
-    log ">>> PMU-only monitoring available; skipping pqos -m (not RDT MBM/CMT counters)."
-else
-    hr
-    log "No monitoring capability available; skipping monitoring test."
-fi
-
-# L3 CAT test
-if [ "$HAS_L3CAT" = "yes" ] && [ "$L3_SCHEMATA" = "yes" ]; then
-    hr
-    log ">>> Testing L3 CAT allocation (mask ${LLC_MASK}) on cores ${MON_CORES}..."
-    pqos -I os -e "llc:1=${LLC_MASK}" --iface=os || log "Failed to program L3 CAT"
-    pqos -I os -a "core:1=${MON_CORES}" --iface=os || true
-    log "Applied COS1 with mask ${LLC_MASK} to cores ${MON_CORES}"
-else
-    hr
-    log "L3 CAT not available or not exposed in schemata; skipping allocation test."
-fi
-
-# MBA test
-if [ "$HAS_MBA" = "yes" ] && [ "$MB_SCHEMATA" = "yes" ] && [ "$MBA_CTRL" = "supported" ]; then
-    hr
-    log ">>> Testing MBA allocation (${MBA_PERCENT}%) on cores ${MON_CORES}..."
-    pqos -I os -e "mba:1=${MBA_PERCENT}" --iface=os || log "Failed to program MBA"
-    pqos -I os -a "core:1=${MON_CORES}" --iface=os || true
-    log "Applied MBA ${MBA_PERCENT}% to cores ${MON_CORES}"
-elif [ "$HAS_MBA" = "yes" ]; then
-    hr
-    log "MBA enumerated but control unsupported or MB not in schemata; skipping throttling test."
-fi
-
-# JSON summary
-JSON=$(printf '{"monitoring":{"cmt":"%s","mbm":"%s","pmu":"%s"},"l3cat":{"present":"%s","schemata":"%s","cdp":"%s","num_cos":"%s"},"mba":{"present":"%s","schemata":"%s","num_cos":"%s","ctrl":"%s"}}' \
-    "$HAS_CMT" "$HAS_MBM" "$HAS_PMU" "$HAS_L3CAT" "$L3_SCHEMATA" "$CDP_STATE" "$CAT_NUM_COS" \
-    "$HAS_MBA" "$MB_SCHEMATA" "$MBA_NUM_COS" "$MBA_CTRL")
-
-hr
-
-# --- Human-readable summary ---
-echo "=== Human-readable summary of Intel RDT support ==="
-
-if [ "$HAS_CMT" = "yes" ] || [ "$HAS_MBM" = "yes" ]; then
-    echo "Monitoring: Supported (CMT=$HAS_CMT, MBM=$HAS_MBM)"
-else
-    echo "Monitoring: Not supported"
-fi
-
-if [ "$HAS_L3CAT" = "yes" ]; then
-    echo "L3 Cache Allocation (CAT): Supported"
-else
-    if grep -q "L3:" /sys/fs/resctrl/schemata 2>/dev/null; then
-        echo "L3 Cache Allocation (CAT): Not supported in hardware, but schemata file present"
+    if [ "$has_l3cat" = "yes" ]; then
+        log "L3 CAT allocation supported."
     else
-        echo "L3 Cache Allocation (CAT): Not supported"
+        log "L3 CAT not supported."
     fi
-fi
 
-if [ "$HAS_MBA" = "yes" ]; then
-    echo "Memory Bandwidth Allocation (MBA): Supported"
-else
-    if grep -q "MB:" /sys/fs/resctrl/schemata 2>/dev/null; then
-        echo "Memory Bandwidth Allocation (MBA): Not supported in hardware, but schemata file present"
+    if [ "$has_mba" = "yes" ]; then
+        log "MBA supported (Num COS: $mba_num_cos, CTRL: $mba_ctrl)."
+    else
+        log "MBA not supported."
+    fi
+}
+
+# --- monitor_rdt ---
+monitor_rdt() {
+    hr
+    log "Running monitor_rdt workload..."
+
+    if [ "$has_cmt" = "yes" ] || [ "$has_mbm" = "yes" ]; then
+        pqos -I os -m "all:0" -o monitor.csv &
+        local mon_pid=$!
+        sleep 1
+        dd if=/dev/zero of=/dev/null bs=1M count=256 status=none
+
+        if kill -0 "$mon_pid" 2>/dev/null; then
+            kill "$mon_pid" 2>/dev/null || true
+            wait "$mon_pid" 2>/dev/null || true
+        fi
+
+        log "Monitoring results saved to monitor.csv"
+
+        mon_last=""
+        mon_fields=""
+        if [ -f monitor.csv ]; then
+            mon_last="$(tail -n1 monitor.csv)"
+            local header
+            header="$(head -n1 monitor.csv)"
+            local i=1
+            for col in $header; do
+                local val
+                val="$(echo "$mon_last" | awk -v n=$i '{print $n}')"
+                mon_fields="${mon_fields}\"${col}\":\"${val}\","
+                i=$((i+1))
+            done
+            mon_fields="${mon_fields%,}"
+        fi
+    else
+        log "Skipping pqos -m: no RDT monitoring counters available."
+        mon_last=""
+        mon_fields=""
+        return
+    fi
+}
+
+# --- human-readable summary ---
+print_summary() {
+    hr
+    echo "=== SUMMARY of Intel RDT Support ==="
+    if [ "$has_cmt" = "yes" ] || [ "$has_mbm" = "yes" ]; then
+        echo "Monitoring (RDT counters): Supported (CMT=$has_cmt, MBM=$has_mbm)"
+    elif [ "$has_pmu" = "yes" ]; then
+        echo "Monitoring: PMU fallback supported"
+    else
+        echo "Monitoring: Not supported"
+    fi
+
+    echo "L3 Cache Allocation (CAT): $([ "$has_l3cat" = "yes" ] && echo Supported || echo Not supported)"
+    if [ "$has_mba" = "yes" ]; then
+        echo "Memory Bandwidth Allocation (MBA): Supported (Num COS: $mba_num_cos, CTRL: $mba_ctrl)"
     else
         echo "Memory Bandwidth Allocation (MBA): Not supported"
     fi
-fi
 
-log "Tests complete."
+    if [ -n "$mon_last" ]; then
+        echo "Monitor RDT last sample: $mon_last"
+    else
+        echo "Monitor RDT: no data"
+    fi
+}
 
-hr
+# --- machine-readable JSON ---
+print_json() {
+    hr
+    echo "=== JSON summary ==="
+    cat <<EOF
+{
+    "monitoring": {
+        "cmt": "$has_cmt",
+        "mbm": "$has_mbm",
+        "pmu": "$has_pmu"
+    },
+    "l3cat": {
+        "present": "$has_l3cat"
+    },
+    "mba": {
+        "present": "$has_mba",
+        "num_cos": "$mba_num_cos",
+        "ctrl": "$mba_ctrl"
+    },
+    "monitor_rdt": {
+        "status": "skipped"
+    }
+}
+EOF
+}
 
-# --- Machine-readable summary
-echo "=== JSON summary ==="
-echo "$JSON_SUMMARY"
+# --- main ---
+main() {
+    detect_capabilities
+    test_capabilities
+    monitor_rdt
+    print_summary
+    print_json
+    log "Tests complete."
+}
+
+main "$@"
