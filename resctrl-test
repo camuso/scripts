@@ -1,158 +1,151 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# --- helpers ---
-log() {
-    echo "[$(date +'%F %T')] $*"
-}
+# === Global variables ===
+declare MONITOR_HUMAN=""
+declare MONITOR_JSON=""
+declare has_cmt="no"
+declare has_mbm="no"
+declare has_l3cat="no"
+declare has_mba="no"
+declare mba_num_cos=""
+declare mba_ctrl=""
+
+# User options (defaults)
+declare opt_samples=1
+declare opt_interval=2
+
+# === Utility functions ===
 
 hr() {
-    echo "------------------------------------------------------------"
+    printf '%*s\n' "${COLUMNS:-80}" '' | tr ' ' -
 }
 
-# --- capability detection ---
+log() {
+    local msg="$1"
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg"
+}
+
+usage() {
+    cat <<EOF
+Usage: $0 [OPTIONS]
+
+Options:
+  --samples N       Number of most recent samples to report (default: 1)
+  --interval SEC    Sample interval in seconds (default: 2)
+  -h, -help,
+  --help, help      Show this help message and exit
+
+Description:
+  This script tests Intel RDT (Resource Director Technology) capabilities
+  exposed by the kernel and collects monitoring data using 'pqos'.
+  It reports the last N samples in both human-readable and JSON formats.
+EOF
+}
+
+# === Capability detection ===
 detect_capabilities() {
-    local pqosd
-    pqosd="$(pqos -I os -d 2>&1 || true)"
+    local pqos_out
+    pqos_out=$(pqos -s 2>/dev/null || true)
 
-    # monitoring
-    if echo "$pqosd" | grep -q "CMT"; then
+    # Reset globals
+    has_cmt="no"
+    has_mbm="no"
+    has_l3cat="no"
+    has_mba="no"
+    mba_num_cos=""
+    mba_ctrl=""
+
+    # Monitoring capabilities
+    if echo "$pqos_out" | grep -q "CMT"; then
         has_cmt="yes"
-    else
-        has_cmt="no"
     fi
-    if echo "$pqosd" | grep -q "MBM"; then
+    if echo "$pqos_out" | grep -q "MBM"; then
         has_mbm="yes"
-    else
-        has_mbm="no"
-    fi
-    if echo "$pqosd" | grep -q "PMU events:"; then
-        has_pmu="yes"
-    else
-        has_pmu="no"
     fi
 
-    # l3 cat
-    if echo "$pqosd" | grep -q "L3 Cache Allocation (CAT)"; then
+    # L3 CAT
+    if echo "$pqos_out" | grep -q "L3CA"; then
         has_l3cat="yes"
-    else
-        has_l3cat="no"
     fi
 
-    # mba
-    if echo "$pqosd" | grep -q "Memory Bandwidth Allocation (MBA)"; then
+    # MBA
+    if echo "$pqos_out" | grep -q "MBA"; then
         has_mba="yes"
-        mba_num_cos="$(echo "$pqosd" | awk '/Memory Bandwidth Allocation \(MBA\)/,/^$/ {if ($0 ~ /Num COS:/) {print $NF}}' | tail -n1)"
-        mba_ctrl="$(echo "$pqosd" | awk '/Memory Bandwidth Allocation \(MBA\)/,/^$/ {if ($0 ~ /CTRL:/) {print $NF}}' | tail -n1)"
-    else
-        has_mba="no"
-        mba_num_cos="0"
-        mba_ctrl="unknown"
+        # Extract number of COS if present
+        mba_num_cos=$(echo "$pqos_out" | awk '/MBA COS/ {print $3; exit}')
+        # Extract CTRL support if present
+        if echo "$pqos_out" | grep -q "CTRL"; then
+            mba_ctrl="supported"
+        else
+            mba_ctrl="unsupported"
+        fi
     fi
 }
 
-# --- capability test ---
-test_capabilities() {
-    hr
-    log "Testing kernel exposure of capabilities..."
-    if [ "$has_cmt" = "yes" ] || [ "$has_mbm" = "yes" ]; then
-        log "Monitoring counters appear supported."
-    elif [ "$has_pmu" = "yes" ]; then
-        log "PMU fallback monitoring available."
-    else
-        log "No monitoring capability available."
-    fi
-
-    if [ "$has_l3cat" = "yes" ]; then
-        log "L3 CAT allocation supported."
-    else
-        log "L3 CAT not supported."
-    fi
-
-    if [ "$has_mba" = "yes" ]; then
-        log "MBA supported (Num COS: $mba_num_cos, CTRL: $mba_ctrl)."
-    else
-        log "MBA not supported."
-    fi
-}
-
-# --- monitor_rdt ---
+# === Monitor workload ===
 monitor_rdt() {
     hr
     log "Running monitor_rdt workload..."
 
-    if [ "$has_cmt" = "yes" ] || [ "$has_mbm" = "yes" ]; then
-        pqos -I os -m "all:0" -o monitor.csv &
-        local mon_pid=$!
-        sleep 1
-        dd if=/dev/zero of=/dev/null bs=1M count=256 status=none
+    local human_lines=""
+    local mon_fields=""
+    local start_time end_time elapsed
+    local last_time_line block time_val
+    local -a values
 
-        if kill -0 "$mon_pid" 2>/dev/null; then
-            kill "$mon_pid" 2>/dev/null || true
-            wait "$mon_pid" 2>/dev/null || true
-        fi
+    start_time=$(date +%s)
 
-        log "Monitoring results saved to monitor.csv"
+    pqos -I os -m "all:0" -i "$opt_interval" -t "$opt_interval" -o monitor.log
 
-        mon_last=""
+    end_time=$(date +%s)
+    elapsed=$((end_time - start_time))
+
+    if [ -f monitor.log ]; then
+        local lines
+        lines=$(grep -n '^TIME' monitor.log | tail -n "$opt_samples" | cut -d: -f1)
+
+        human_lines=""
         mon_fields=""
-        if [ -f monitor.csv ]; then
-            mon_last="$(tail -n1 monitor.csv)"
-            local header
-            header="$(head -n1 monitor.csv)"
-            local i=1
-            for col in $header; do
-                local val
-                val="$(echo "$mon_last" | awk -v n=$i '{print $n}')"
-                mon_fields="${mon_fields}\"${col}\":\"${val}\","
-                i=$((i+1))
-            done
-            mon_fields="${mon_fields%,}"
-        fi
-    else
-        log "Skipping pqos -m: no RDT monitoring counters available."
-        mon_last=""
-        mon_fields=""
-        return
+
+        for ln in $lines; do
+            block=$(sed -n "${ln},\$p" monitor.log | awk 'NR==1{print; next} /^TIME/{exit} {print}')
+            time_val=$(echo "$block" | head -n1 | cut -d' ' -f2-)
+
+            human_lines+="TIME = ${time_val}\nELAPSED = ${elapsed}s\n"
+            mon_fields+="{\"TIME\":\"${time_val}\", \"ELAPSED\":\"${elapsed}s\", \"cores\":["
+
+            while read -r line; do
+                [ -z "$line" ] && continue
+                if echo "$line" | grep -q 'CORE'; then
+                    continue
+                fi
+                read -ra values <<< "$line"
+                human_lines+="  CORE = ${values[0]}, IPC = ${values[1]}, MISSES = ${values[2]}, LLC_KB = ${values[3]}\n"
+                mon_fields+="{\"CORE\":\"${values[0]}\",\"IPC\":\"${values[1]}\",\"MISSES\":\"${values[2]}\",\"LLC_KB\":\"${values[3]}\"},"
+            done <<< "$(echo "$block" | tail -n +3)"
+
+            mon_fields="${mon_fields%,}]},"
+        done
+
+        mon_fields="[${mon_fields%,}]"
     fi
+
+    MONITOR_HUMAN="$human_lines"
+    MONITOR_JSON="$mon_fields"
 }
 
-# --- human-readable summary ---
-print_summary() {
-    hr
-    echo "=== SUMMARY of Intel RDT Support ==="
-    if [ "$has_cmt" = "yes" ] || [ "$has_mbm" = "yes" ]; then
-        echo "Monitoring (RDT counters): Supported (CMT=$has_cmt, MBM=$has_mbm)"
-    elif [ "$has_pmu" = "yes" ]; then
-        echo "Monitoring: PMU fallback supported"
-    else
-        echo "Monitoring: Not supported"
-    fi
-
-    echo "L3 Cache Allocation (CAT): $([ "$has_l3cat" = "yes" ] && echo Supported || echo Not supported)"
-    if [ "$has_mba" = "yes" ]; then
-        echo "Memory Bandwidth Allocation (MBA): Supported (Num COS: $mba_num_cos, CTRL: $mba_ctrl)"
-    else
-        echo "Memory Bandwidth Allocation (MBA): Not supported"
-    fi
-
-    if [ -n "$mon_last" ]; then
-        echo "Monitor RDT last sample: $mon_last"
-    else
-        echo "Monitor RDT: no data"
-    fi
-}
-
-# --- machine-readable JSON ---
+# === Print JSON summary ===
 print_json() {
     hr
     echo "=== JSON summary ==="
     cat <<EOF
 {
+    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
     "monitoring": {
         "cmt": "$has_cmt",
         "mbm": "$has_mbm",
-        "pmu": "$has_pmu"
+        "pmu": "n/a"
     },
     "l3cat": {
         "present": "$has_l3cat"
@@ -162,21 +155,50 @@ print_json() {
         "num_cos": "$mba_num_cos",
         "ctrl": "$mba_ctrl"
     },
-    "monitor_rdt": {
-        "status": "skipped"
-    }
+    "monitor_rdt": $MONITOR_JSON
 }
 EOF
 }
 
-# --- main ---
+# === Main ===
 main() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --samples)
+                opt_samples="$2"
+                shift 2
+                ;;
+            --interval)
+                opt_interval="$2"
+                shift 2
+                ;;
+            -h|-help|--help|help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
+    hr
+    log "Testing kernel exposure of capabilities..."
     detect_capabilities
-    test_capabilities
+
+    log "Monitoring counters appear supported."
+    log "L3 CAT: $has_l3cat"
+    log "MBA: $has_mba (Num COS: $mba_num_cos, CTRL: $mba_ctrl)"
+
     monitor_rdt
-    print_summary
+
+    echo "Monitor RDT last sample(s):"
+    printf "%b" "$MONITOR_HUMAN"
+
     print_json
-    log "Tests complete."
 }
 
+# Entry point
 main "$@"
