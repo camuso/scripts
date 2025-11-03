@@ -1,0 +1,70 @@
+#!/bin/bash
+#
+# bootstat
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(readlink -f "$0")")"
+}
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")
+\0
+EOF
+)"
+
+#** usage: print info and instructions to screen
+#
+# Global
+# 	usagestr
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+#** exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+#** main
+#*
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	last_boot=$(who -b | awk '{print $3,$4}')
+	if find /var/crash -type f -name vmcore -newermt "$last_boot" | grep -q .; then
+	    echo "⚠️ Crash detected since last boot."
+	else
+	    echo "✅ Clean boot."
+	fi
+
+	exitme 0
+}
+
+main "$@"
