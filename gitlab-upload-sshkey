@@ -2,36 +2,49 @@
 # Upload or update SSH key in GitLab, using hostname as title
 
 # --- Configuration ---
-GITLAB_TOKEN="${GITLAB_TOKEN:?Set GITLAB_TOKEN env var}"
-KEY_FILE="${1:-$HOME/.ssh/id_rsa.pub}"   # default to RSA pubkey
-TITLE="$(hostname)"                      # use hostname as title
-GITLAB_API="https://gitlab.com/api/v4"
+gitlab_token="${GITLAB_TOKEN:?Set GITLAB_TOKEN env var}"
+title="$(hostname)"
+gitlab_api="https://gitlab.com/api/v4"
+
+# --- Determine key file ---
+if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
+	key_file="$HOME/.ssh/id_ed25519.pub"
+elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
+	key_file="$HOME/.ssh/id_rsa.pub"
+else
+	echo "No SSH public key found. Generating a new Ed25519 key..."
+	ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N "" || {
+		echo "Failed to generate Ed25519 key" >&2
+		exit 1
+	}
+	key_file="$HOME/.ssh/id_ed25519.pub"
+fi
 
 # --- Read key ---
-if [[ ! -f "$KEY_FILE" ]]; then
-  echo "Key file not found: $KEY_FILE" >&2
-  exit 1
+if [[ ! -f "$key_file" ]]; then
+	echo "Key file not found: $key_file" >&2
+	exit 1
 fi
-PUBKEY=$(<"$KEY_FILE")
+pubkey=$(<"$key_file")
 
 # --- Fetch existing keys ---
-KEYS_JSON=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-  "$GITLAB_API/user/keys")
+keys_json=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
+	"$gitlab_api/user/keys")
 
 # --- Check if this key already exists ---
-KEY_ID=$(echo "$KEYS_JSON" | jq -r --arg PUBKEY "$PUBKEY" \
-  '.[] | select(.key==$PUBKEY) | .id')
+key_id=$(echo "$keys_json" | jq -r --arg PUBKEY "$pubkey" \
+	'.[] | select(.key==$PUBKEY) | .id')
 
-if [[ -n "$KEY_ID" && "$KEY_ID" != "null" ]]; then
-  echo "Key already exists (id=$KEY_ID). Updating title to: $TITLE"
-  curl -s --request PUT --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    --header "Content-Type: application/json" \
-    --data "{\"title\":\"$TITLE\",\"key\":\"$PUBKEY\"}" \
-    "$GITLAB_API/user/keys/$KEY_ID" | jq .
+if [[ -n "$key_id" && "$key_id" != "null" ]]; then
+	echo "Key already exists (id=$key_id). Updating title to: $title"
+	curl -s --request PUT --header "PRIVATE-TOKEN: $gitlab_token" \
+		--header "Content-Type: application/json" \
+		--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
+		"$gitlab_api/user/keys/$key_id" | jq .
 else
-  echo "Uploading new key with title: $TITLE"
-  curl -s --request POST --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
-    --header "Content-Type: application/json" \
-    --data "{\"title\":\"$TITLE\",\"key\":\"$PUBKEY\"}" \
-    "$GITLAB_API/user/keys" | jq .
+	echo "Uploading new key with title: $title"
+	curl -s --request POST --header "PRIVATE-TOKEN: $gitlab_token" \
+		--header "Content-Type: application/json" \
+		--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
+		"$gitlab_api/user/keys" | jq .
 fi
