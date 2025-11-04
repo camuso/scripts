@@ -1,0 +1,573 @@
+#!/usr/bin/env bash
+# funcgraph: Generate function call graphs across a codebase
+# Usage: funcgraph [options] [directory]
+
+set -euo pipefail
+
+# Source UI functions for progress indicators
+if [[ -f "$(dirname "$0")/lib/ui.source" ]]; then
+	set +u  # Temporarily disable unbound variable check for sourcing
+	source "$(dirname "$0")/lib/ui.source"
+	set -u  # Re-enable unbound variable check
+elif [[ -f "./lib/ui.source" ]]; then
+	set +u
+	source "./lib/ui.source"
+	set -u
+fi
+
+# Default values
+format="text"
+lang="auto"
+exclude_patterns=""
+search_dir="."
+target_function=""
+
+usage() {
+	cat << EOF
+Usage: $(basename "$0") [options] [directory|function_name]
+
+Generates a function call graph showing which functions call which others.
+If no arguments provided, analyzes all functions in the current directory.
+If a directory is specified, analyzes all functions in that directory.
+If a function name is specified, searches for calls to that function in the current directory.
+
+OPTIONS:
+  --format=FORMAT    Output format: text, json, dot (default: text)
+  --exclude=PATTERNS Comma-separated patterns to exclude (e.g., "test,spec")
+  --lang=LANGUAGE    Language: auto, bash, js, go, py, c (default: auto)
+  -h, --help         Show this help message
+
+SUPPORTED LANGUAGES:
+  • Bash/Shell: function name() or function name()
+  • C/C++: type name(...) { or type name(...) followed by { on next line
+  • JavaScript: function name(...) or name = function(...)
+  • Go: func name(...)
+  • Python: def name(...)
+  • Rust: fn name(...)
+
+OUTPUT FORMATS:
+  text:  caller → callee (one per line)
+  json:  {"caller": ["callee1", "callee2"]}
+  dot:   Graphviz DOT format for visualization
+
+EXAMPLES:
+  $(basename "$0") /path/to/code
+  $(basename "$0") --format=json --lang=bash .
+  $(basename "$0") --exclude="test,spec" --format=dot src/
+EOF
+	exit 0
+}
+
+# Parse command line arguments
+parse_args() {
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+			--format=*)
+				format="${1#*=}"
+				shift
+				;;
+			--exclude=*)
+				exclude_patterns="${1#*=}"
+				shift
+				;;
+			--lang=*)
+				lang="${1#*=}"
+				shift
+				;;
+			-h|--help)
+				usage
+				;;
+			-*)
+				echo "Error: Unknown option $1" >&2
+				exit 1
+				;;
+			*)
+				# If it looks like a directory path, use it as search directory
+				if [[ -d "$1" ]] || [[ "$1" == "." ]] || [[ "$1" == ".." ]] || [[ "$1" == /* ]]; then
+					search_dir="$1"
+				else
+					# Otherwise, treat it as a target function name
+					target_function="$1"
+				fi
+				shift
+				;;
+		esac
+	done
+}
+
+# Get file extensions for language detection
+get_file_extensions() {
+	case $lang in
+		bash) echo "\.(sh|bash|source)$" ;;
+		js) echo "\.(js|mjs)$" ;;
+		go) echo "\.go$" ;;
+		py) echo "\.py$" ;;
+		c) echo "\.(c|h|cpp|hpp|cc|hh)$" ;;
+		auto) echo "\.(sh|bash|source|js|mjs|go|py|c|h|cpp|hpp|cc|hh)$" ;;
+		*) echo "\.(sh|bash|source|js|mjs|go|py|c|h|cpp|hpp|cc|hh)$" ;;
+	esac
+}
+
+# Get function definition patterns
+get_def_patterns() {
+	local lang="$1"
+	case $lang in
+		bash)
+			echo "^[[:space:]]*(function[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\(\\).*"
+			;;
+		js)
+			echo "^[[:space:]]*(function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*function).*"
+			;;
+		go)
+			echo "^[[:space:]]*func[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*"
+			;;
+		py)
+			echo "^[[:space:]]*def[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*"
+			;;
+		c)
+			echo "^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\(.*\\).*"
+			;;
+		*)
+			echo "^[[:space:]]*(function[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\(\\).*"
+			;;
+	esac
+}
+
+# Get function call patterns
+get_call_patterns() {
+	local lang="$1"
+	case $lang in
+		bash)
+			echo "([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*[\\\(\\{]"
+			;;
+		js)
+			echo "([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\("
+			;;
+		go)
+			echo "([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\("
+			;;
+		py)
+			echo "([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\("
+			;;
+		c)
+			echo "([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\("
+			;;
+		*)
+			echo "([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\\("
+			;;
+	esac
+}
+
+# Check if file should be excluded
+should_exclude_file() {
+	local file="$1"
+	if [[ -n "$exclude_patterns" ]]; then
+		IFS=',' read -ra patterns <<< "$exclude_patterns"
+		for pattern in "${patterns[@]}"; do
+			if [[ "$file" == *"$pattern"* ]]; then
+				return 0
+			fi
+		done
+	fi
+	return 1
+}
+
+# Extract function definitions from a file
+extract_definitions() {
+	local file="$1"
+	local lang="$2"
+	local ext_pattern=$(get_file_extensions)
+	
+	# Skip if file doesn't match language extension
+	if ! echo "$file" | grep -qE "$ext_pattern"; then
+		return
+	fi
+	
+	# Skip if file should be excluded
+	if should_exclude_file "$file"; then
+		return
+	fi
+	
+	local def_pattern=$(get_def_patterns "$lang")
+	
+	# Extract function definitions
+	while IFS=: read -r line_num line_text; do
+		# Extract function name based on language
+		local func_name=""
+		case $lang in
+			bash)
+				if echo "$line_text" | grep -qE "^[[:space:]]*function[[:space:]]+"; then
+					func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p')
+				else
+					func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\(\)[[:space:]]*\{.*/\1/p')
+				fi
+				;;
+			js)
+				if echo "$line_text" | grep -qE "^[[:space:]]*function[[:space:]]+"; then
+					func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*function[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p')
+				else
+					func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*function.*/\1/p')
+				fi
+				;;
+			go)
+				func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*func[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p')
+				;;
+			py)
+				func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*def[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p')
+				;;
+			c)
+				func_name=$(echo "$line_text" | sed -nE 's/^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\(.*\).*/\1/p')
+				;;
+		esac
+		
+		if [[ -n "$func_name" ]]; then
+			echo "$file:$line_num:$func_name"
+		fi
+	done < <(grep -nE "$def_pattern" "$file" 2>/dev/null)
+}
+
+# Extract function calls from a file
+extract_calls() {
+	local file="$1"
+	local lang="$2"
+	local ext_pattern=$(get_file_extensions)
+	
+	# Skip if file doesn't match language extension
+	if ! echo "$file" | grep -qE "$ext_pattern"; then
+		return
+	fi
+	
+	# Skip if file should be excluded
+	if should_exclude_file "$file"; then
+		return
+	fi
+	
+	local call_pattern=$(get_call_patterns "$lang")
+	
+	# Extract function calls
+	while IFS=: read -r line_num line_text; do
+		# Extract function name
+		local func_name=$(echo "$line_text" | sed -nE "s/.*$call_pattern.*/\1/p")
+		
+		if [[ -n "$func_name" ]]; then
+			echo "$file:$line_num:$func_name"
+		fi
+	done < <(grep -nE "$call_pattern" "$file" 2>/dev/null)
+}
+
+# Build call graph
+build_call_graph() {
+	local target_func="$1"
+	local temp_dir=$(mktemp -d)
+	local defs_file="$temp_dir/definitions"
+	local calls_file="$temp_dir/calls"
+	
+	# Process all files
+	declare -i file_count=0
+	for file in $(find "$search_dir" -type f \( -name "*.sh" -o -name "*.bash" -o -name "*.source" -o -name "*.js" -o -name "*.mjs" -o -name "*.go" -o -name "*.py" -o -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.cc" -o -name "*.hh" \) 2>/dev/null); do
+		file_count=$((file_count + 1))
+		if [[ -f "$file" ]]; then
+			extract_definitions "$file" "$lang" >> "$defs_file"
+			extract_calls "$file" "$lang" >> "$calls_file"
+		fi
+	done
+	
+	# Build the call graph using a simpler approach
+	if [[ -n "$target_func" ]]; then
+		# Show where the function is defined
+		local def_line=$(grep ":$target_func$" "$defs_file" | head -1 || true)
+		if [[ -n "$def_line" ]]; then
+			IFS=: read -r def_file def_line_num _ <<< "$def_line"
+			echo "Defined in: $def_file:$def_line_num"
+			echo ""
+		fi
+		
+		# Build complete call graph and find chains
+		# First, extract all function calls to build the graph
+		local all_calls=$(mktemp)
+		
+		# Show progress while building call graph
+		(
+		# Use awk to process all files at once, loading definitions once
+		find "$search_dir" -type f \( -name "*.sh" -o -name "*.bash" -o -name "*.source" \) 2>/dev/null | awk -F: -v def_file="$defs_file" '
+		BEGIN {
+			# Load all function definitions once
+			while ((getline line < def_file) > 0) {
+				split(line, parts, ":")
+				file = parts[1]
+				line_num = parts[2] + 0
+				func_name = parts[3]
+				# Store by file with line numbers
+				if (!(file in file_defs)) {
+					file_defs[file] = ""
+				}
+				file_defs[file] = file_defs[file] (file_defs[file] == "" ? "" : "\n") line_num ":" func_name
+				# Also store all function names for quick lookup
+				all_funcs[func_name] = 1
+			}
+			close(def_file)
+			
+			# Bash keywords to skip
+			keywords["if"] = 1
+			keywords["then"] = 1
+			keywords["else"] = 1
+			keywords["elif"] = 1
+			keywords["fi"] = 1
+			keywords["case"] = 1
+			keywords["esac"] = 1
+			keywords["for"] = 1
+			keywords["while"] = 1
+			keywords["until"] = 1
+			keywords["do"] = 1
+			keywords["done"] = 1
+			keywords["local"] = 1
+			keywords["declare"] = 1
+			keywords["export"] = 1
+			keywords["read"] = 1
+			keywords["echo"] = 1
+			keywords["printf"] = 1
+			keywords["return"] = 1
+			keywords["exit"] = 1
+			keywords["test"] = 1
+			keywords["["] = 1
+			keywords["[["] = 1
+		}
+		{
+			# Process each file path
+			file = $0
+			current_line = 0
+			
+			# Process each line of the file
+			while ((getline line < file) > 0) {
+				current_line++
+				
+				# Skip comments and definitions
+				if (match(line, /^[[:space:]]*#/) || match(line, /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/)) {
+					continue
+				}
+				
+				# Extract function calls - only match actual function names
+				# Try to find function calls in the line
+				# Pattern 1: function_name( - function call with parentheses
+				# Pattern 2: function_name followed by space and argument-like token
+				called_func = ""
+				
+				# First try with parentheses
+				if (match(line, /([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*[\(]/, arr)) {
+					candidate = arr[1]
+					# Only accept if it's a defined function and not a keyword
+					if ((candidate in all_funcs) && !(candidate in keywords)) {
+						called_func = candidate
+					}
+				}
+				
+				# If not found, try without parentheses
+				if (called_func == "") {
+					# Match: function_name followed by space and something argument-like
+					# Look for: function_name $var, function_name "string", function_name identifier
+					if (match(line, /(^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+(\$[A-Za-z_]|"[^"]*"|[A-Za-z_])/, arr)) {
+						candidate = arr[2]
+						# Only accept if it's a defined function and not a keyword
+						if ((candidate in all_funcs) && !(candidate in keywords)) {
+							called_func = candidate
+						}
+					}
+				}
+				
+				if (called_func != "") {
+					# Find caller function
+					caller_func = ""
+					caller_line = 0
+					
+					# Check all definitions in this file
+					if (file in file_defs) {
+						split(file_defs[file], def_lines, "\n")
+						for (i in def_lines) {
+							if (def_lines[i] == "") continue
+							split(def_lines[i], parts, ":")
+							def_line = parts[1] + 0
+							def_name = parts[2]
+							if (def_line < current_line && def_line > caller_line) {
+								caller_line = def_line
+								caller_func = def_name
+							}
+						}
+					}
+					
+					if (caller_func != "" && caller_func != called_func) {
+						print caller_func " -> " called_func
+					}
+				}
+			}
+			close(file)
+		}' | sort -u > "$all_calls"
+		) &
+		local build_pid=$!
+		
+		# Show progress dots while building call graph
+		if command -v ui_waitonproc_tty >/dev/null 2>&1; then
+			ui_waitonproc_tty "$build_pid" 0.1 "Building call graph..."
+		else
+			wait "$build_pid"
+		fi
+		
+		# Debug: check what we captured
+		echo "DEBUG: Call graph file size: $(wc -l < "$all_calls")" >&2
+		echo "DEBUG: Sample calls to query_acknack:" >&2
+		grep "query_acknack" "$all_calls" | head -5 >&2 || echo "  (none found)" >&2
+		echo "DEBUG: Sample calls to update_history:" >&2
+		grep "update_history" "$all_calls" | head -5 >&2 || echo "  (none found)" >&2
+		echo "DEBUG: Sample calls to cmd_mr:" >&2
+		grep "cmd_mr" "$all_calls" | head -5 >&2 || echo "  (none found)" >&2
+		
+		# Now find chains leading to target_func
+		echo "Call chains:"
+		if [[ -s "$all_calls" ]]; then
+			awk -v target_func="$target_func" '
+			{
+				split($0, parts, " -> ")
+				caller = parts[1]
+				callee = parts[2]
+				# Build reverse lookup: what calls each function
+				if (!(callee in callers)) {
+					callers[callee] = ""
+				}
+				callers[callee] = callers[callee] (callers[callee] == "" ? "" : "|") caller
+			}
+			END {
+				# Show direct callers and build chains up to 3 levels
+				# Level 1: direct callers
+				if (target_func in callers) {
+					split(callers[target_func], level1, "|")
+					for (i in level1) {
+						caller1 = level1[i]
+						if (caller1 == "" || caller1 == target_func) continue
+						
+						# Show direct call
+						print "  " caller1 " -> " target_func
+						
+						# Level 2: callers of level 1 callers
+						if (caller1 in callers) {
+							split(callers[caller1], level2, "|")
+							for (j in level2) {
+								caller2 = level2[j]
+								if (caller2 == "" || caller2 == caller1 || caller2 == target_func) continue
+								print "  " caller2 " -> " caller1 " -> " target_func
+								
+								# Level 3: callers of level 2 callers
+								if (caller2 in callers) {
+									split(callers[caller2], level3, "|")
+									for (k in level3) {
+										caller3 = level3[k]
+										if (caller3 == "" || caller3 == caller2 || caller3 == caller1 || caller3 == target_func) continue
+										print "  " caller3 " -> " caller2 " -> " caller1 " -> " target_func
+									}
+								}
+							}
+						}
+					}
+				}
+			}' "$all_calls" | sort -u
+		fi
+		
+		rm -f "$all_calls"
+	else
+		# Original awk approach for all functions
+		awk -F: '
+		BEGIN {
+			# Read definitions
+			while ((getline line < "'"$defs_file"'") > 0) {
+				split(line, parts, ":")
+				file = parts[1]
+				line_num = parts[2]
+				func_name = parts[3]
+				definitions[func_name] = file ":" line_num
+			}
+			close("'"$defs_file"'")
+		}
+		
+		# Process calls
+		{
+			file = $1
+			line_num = $2
+			func_name = $3
+			
+			# Skip if this is a definition
+			if (func_name in definitions) {
+				next
+			}
+			
+			# Use file as caller context (simplified approach)
+			caller = file
+			print caller " -> " func_name
+		}' "$calls_file"
+	fi
+	
+	# Cleanup
+	rm -rf "$temp_dir"
+}
+
+# Output functions
+output_text() {
+	build_call_graph "$target_function"
+}
+
+output_json() {
+	build_call_graph "$target_function" | awk '
+	BEGIN {
+		print "{"
+		first = 1
+	}
+	{
+		split($0, parts, " -> ")
+		caller = parts[1]
+		callee = parts[2]
+		
+		if (caller in callers) {
+			callers[caller] = callers[caller] ", \"" callee "\""
+		} else {
+			callers[caller] = "\"" callee "\""
+		}
+	}
+	END {
+		for (caller in callers) {
+			if (!first) print ","
+			printf "  \"%s\": [%s]", caller, callers[caller]
+			first = 0
+		}
+		print ""
+		print "}"
+	}'
+}
+
+output_dot() {
+	echo "digraph funcgraph {"
+	build_call_graph "$target_function" | while IFS=' -> ' read -r caller callee; do
+		echo "  \"$caller\" -> \"$callee\";"
+	done
+	echo "}"
+}
+
+# Main function
+main() {
+	parse_args "$@"
+	
+	case $format in
+		text)
+			output_text
+			;;
+		json)
+			output_json
+			;;
+		dot)
+			output_dot
+			;;
+		*)
+			echo "Error: Unknown format '$format'" >&2
+			exit 1
+			;;
+	esac
+}
+
+# Run main function
+main "$@"
