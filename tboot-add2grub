@@ -1,10 +1,11 @@
 #!/bin/bash
-# tboot-add2grub
+# tboot-add2grub.sh
 
 # ========== Script Globals ==========
 boot_dir="/boot"
 grub_custom="/etc/grub.d/40_custom"
 grub_cfg="/boot/grub2/grub.cfg"
+submenu_label="tboot 1.11.9"
 
 # ========== Usage Function ==========
 usage() {
@@ -14,11 +15,12 @@ usage() {
 
 	This script adds a GRUB menuentry for the latest tboot-compatible kernel found in /boot.
 	It detects the latest vmlinuz-*tboot* kernel, extracts the matching initramfs,
-	detects the root UUID, and appends a GRUB stanza to /etc/grub.d/40_custom.
+	detects the root UUID, and appends a GRUB stanza to /etc/grub.d/40_custom inside
+	a submenu labeled '${submenu_label}'.
 
-	Then it regenerates the GRUB config at /boot/grub2/grub.cfg.
+	Then it regenerates the GRUB config at ${grub_cfg}.
 
-	No arguments are required. Run as root.
+	Run as root. No arguments required.
 
 	EOF
 }
@@ -33,6 +35,26 @@ exitme() {
 # ========== Ctrl-C Trap ==========
 trap 'exitme "Interrupted by user (Ctrl-C)";' INT
 
+# ========== Append Entry to Submenu ==========
+append_to_submenu() {
+	local entry="$1"
+	local submenu_exists
+
+	submenu_exists=$(grep -F "submenu '${submenu_label}'" "$grub_custom")
+
+	if [[ -n "$submenu_exists" ]]; then
+		# Insert inside existing submenu block
+		sed -i "/submenu '${submenu_label}' {/a\\
+${entry}
+" "$grub_custom" || exitme "Failed to insert entry into existing submenu"
+	else
+		# Create new submenu block
+		echo "submenu '${submenu_label}' {" >> "$grub_custom"
+		echo "$entry" >> "$grub_custom"
+		echo "}" >> "$grub_custom"
+	fi
+}
+
 # ========== Main Function ==========
 main() {
 	local kernel
@@ -40,37 +62,31 @@ main() {
 	local root_uuid
 	local entry
 
-	# Get latest tboot kernel
 	kernel=$(ls -1 "${boot_dir}"/vmlinuz-*tboot* 2>/dev/null | sort -V | tail -n1 | xargs -n1 basename)
 	[[ -z "$kernel" ]] && exitme "No tboot-compatible kernel found in ${boot_dir}"
 
-	# Derive matching initramfs
 	initramfs=$(echo "$kernel" | sed 's/^vmlinuz-/initramfs-/').img
 	[[ ! -f "${boot_dir}/${initramfs}" ]] && exitme "Missing initramfs: ${initramfs}"
 
-	# Get root UUID
 	root_uuid=$(findmnt -no UUID /)
 	[[ -z "$root_uuid" ]] && exitme "Unable to detect root UUID"
 
-	# Build menuentry
 	entry="
-menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${kernel#vmlinuz-}' {
-	insmod part_gpt
-	insmod ext2
-	search --no-floppy --fs-uuid --set=root ${root_uuid}
-	multiboot /boot/tboot.gz logging=serial,memory
-	module /boot/${kernel} root=UUID=${root_uuid} ro quiet splash
-	module /boot/${initramfs}
-}
+	menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${kernel#vmlinuz-}' {
+		insmod part_gpt
+		insmod ext2
+		search --no-floppy --fs-uuid --set=root ${root_uuid}
+		multiboot /boot/tboot.gz logging=serial,memory
+		module /boot/${kernel} root=UUID=${root_uuid} ro quiet splash
+		module /boot/${initramfs}
+	}
 "
 
-	# Append to 40_custom
-	echo "$entry" >> "$grub_custom" || exitme "Failed to write to ${grub_custom}"
+	append_to_submenu "$entry"
 
-	# Rebuild GRUB
 	grub2-mkconfig -o "$grub_cfg" || exitme "Failed to regenerate GRUB config"
 
-	echo "✅ GRUB entry added for kernel: $kernel"
+	echo "✅ GRUB entry added for kernel: $kernel inside submenu '${submenu_label}'"
 }
 
 # ========== Entrypoint ==========
