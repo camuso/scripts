@@ -18,6 +18,8 @@ usage() {
 	detects the root UUID, and appends a GRUB stanza to /etc/grub.d/40_custom inside
 	a submenu labeled '${submenu_label}'.
 
+	It auto-detects UEFI vs Legacy BIOS and uses the correct GRUB syntax.
+
 	Then it regenerates the GRUB config at ${grub_cfg}.
 
 	Run as root. No arguments required.
@@ -61,6 +63,9 @@ main() {
 	local initramfs
 	local root_uuid
 	local entry
+	local boot_mode
+	local cmd_multiboot
+	local cmd_module
 
 	kernel=$(ls -1 "${boot_dir}"/vmlinuz-*tboot* 2>/dev/null | sort -V | tail -n1 | xargs -n1 basename)
 	[[ -z "$kernel" ]] && exitme "No tboot-compatible kernel found in ${boot_dir}"
@@ -71,14 +76,24 @@ main() {
 	root_uuid=$(findmnt -no UUID /)
 	[[ -z "$root_uuid" ]] && exitme "Unable to detect root UUID"
 
+	boot_mode=$([ -d /sys/firmware/efi ] && echo "UEFI" || echo "Legacy")
+
+	if [[ "$boot_mode" == "UEFI" ]]; then
+		cmd_multiboot="linuxefi"
+		cmd_module="moduleefi"
+	else
+		cmd_multiboot="multiboot"
+		cmd_module="module"
+	fi
+
 	entry="
 	menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${kernel#vmlinuz-}' {
 		insmod part_gpt
 		insmod ext2
 		search --no-floppy --fs-uuid --set=root ${root_uuid}
-		multiboot /boot/tboot.gz logging=serial,memory
-		module /boot/${kernel} root=UUID=${root_uuid} ro quiet splash
-		module /boot/${initramfs}
+		${cmd_multiboot} /boot/tboot.gz logging=serial,memory
+		${cmd_module} /boot/${kernel} root=UUID=${root_uuid} ro quiet splash
+		${cmd_module} /boot/${initramfs}
 	}
 "
 
@@ -86,7 +101,7 @@ main() {
 
 	grub2-mkconfig -o "$grub_cfg" || exitme "Failed to regenerate GRUB config"
 
-	echo "✅ GRUB entry added for kernel: $kernel inside submenu '${submenu_label}'"
+	echo "✅ GRUB entry added for kernel: $kernel inside submenu '${submenu_label}' using ${boot_mode} syntax"
 }
 
 # ========== Entrypoint ==========
