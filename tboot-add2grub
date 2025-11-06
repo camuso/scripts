@@ -1,0 +1,77 @@
+#!/bin/bash
+# tboot-add2grub
+
+# ========== Script Globals ==========
+boot_dir="/boot"
+grub_custom="/etc/grub.d/40_custom"
+grub_cfg="/boot/grub2/grub.cfg"
+
+# ========== Usage Function ==========
+usage() {
+	cat <<-EOF
+
+	Usage: $(basename "$0")
+
+	This script adds a GRUB menuentry for the latest tboot-compatible kernel found in /boot.
+	It detects the latest vmlinuz-*tboot* kernel, extracts the matching initramfs,
+	detects the root UUID, and appends a GRUB stanza to /etc/grub.d/40_custom.
+
+	Then it regenerates the GRUB config at /boot/grub2/grub.cfg.
+
+	No arguments are required. Run as root.
+
+	EOF
+}
+
+# ========== Exit Function ==========
+exitme() {
+	local msg="$1"
+	echo "Exiting: $msg"
+	exit 1
+}
+
+# ========== Ctrl-C Trap ==========
+trap 'exitme "Interrupted by user (Ctrl-C)";' INT
+
+# ========== Main Function ==========
+main() {
+	local kernel
+	local initramfs
+	local root_uuid
+	local entry
+
+	# Get latest tboot kernel
+	kernel=$(ls -1 "${boot_dir}"/vmlinuz-*tboot* 2>/dev/null | sort -V | tail -n1 | xargs -n1 basename)
+	[[ -z "$kernel" ]] && exitme "No tboot-compatible kernel found in ${boot_dir}"
+
+	# Derive matching initramfs
+	initramfs=$(echo "$kernel" | sed 's/^vmlinuz-/initramfs-/').img
+	[[ ! -f "${boot_dir}/${initramfs}" ]] && exitme "Missing initramfs: ${initramfs}"
+
+	# Get root UUID
+	root_uuid=$(findmnt -no UUID /)
+	[[ -z "$root_uuid" ]] && exitme "Unable to detect root UUID"
+
+	# Build menuentry
+	entry="
+menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${kernel#vmlinuz-}' {
+	insmod part_gpt
+	insmod ext2
+	search --no-floppy --fs-uuid --set=root ${root_uuid}
+	multiboot /boot/tboot.gz logging=serial,memory
+	module /boot/${kernel} root=UUID=${root_uuid} ro quiet splash
+	module /boot/${initramfs}
+}
+"
+
+	# Append to 40_custom
+	echo "$entry" >> "$grub_custom" || exitme "Failed to write to ${grub_custom}"
+
+	# Rebuild GRUB
+	grub2-mkconfig -o "$grub_cfg" || exitme "Failed to regenerate GRUB config"
+
+	echo "✅ GRUB entry added for kernel: $kernel"
+}
+
+# ========== Entrypoint ==========
+main "$@"
