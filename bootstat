@@ -51,17 +51,105 @@ exitme() {
 	exit "$code"
 }
 
+#** check_kernel_logs: Check kernel logs for stack traces, Oops, Panic
+#*
+check_kernel_logs() {
+	local last_boot="$1"
+	local found_traces=false
+
+	# Check dmesg for stack traces since last boot
+	if command -v dmesg >/dev/null 2>&1; then
+		if dmesg | grep -iE "(Call Trace|Oops|Kernel panic|BUG:|WARNING:|stack backtrace)" >/dev/null 2>&1; then
+			found_traces=true
+		fi
+	fi
+
+	# Check journalctl for kernel messages with stack traces
+	if command -v journalctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+		if journalctl -k --since "$last_boot" --until "now" 2>/dev/null | \
+		   grep -iE "(Call Trace|Oops|Kernel panic|BUG:|WARNING:|stack backtrace)" >/dev/null 2>&1; then
+			found_traces=true
+		fi
+	fi
+
+	# Check traditional log files (if they were modified since last boot)
+	for logfile in /var/log/kern.log /var/log/messages /var/log/syslog; do
+		if [[ -f "$logfile" ]] && [[ -r "$logfile" ]]; then
+			# Check if file was modified after last boot using find
+			if find "$logfile" -newermt "$last_boot" 2>/dev/null | grep -q .; then
+				if grep -iE "(Call Trace|Oops|Kernel panic|BUG:|WARNING:|stack backtrace)" "$logfile" >/dev/null 2>&1; then
+					found_traces=true
+					break
+				fi
+			fi
+		fi
+	done
+
+	if [[ "$found_traces" == "true" ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+#** check_shutdown_errors: Check for errors during shutdown
+#*
+check_shutdown_errors() {
+	local last_boot="$1"
+	local found_errors=false
+
+	# Check systemd journal for shutdown-related errors and stack traces
+	if command -v journalctl >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1; then
+		# Look for stack traces, segfaults, or panics during shutdown period
+		# The shutdown period is between last boot and systemd's shutdown timestamp
+		if journalctl --since "$last_boot" --until "now" 2>/dev/null | \
+		   grep -iE "(Call Trace|stack trace|segfault|panic|Oops|BUG:).*(shutdown|halt|reboot|poweroff|stopping)" >/dev/null 2>&1; then
+			found_errors=true
+		fi
+
+		# Also check for general errors during shutdown sequence
+		if journalctl --since "$last_boot" --until "now" --priority err 2>/dev/null | \
+		   grep -iE "(shutdown|halt|reboot|poweroff|stopping)" >/dev/null 2>&1; then
+			found_errors=true
+		fi
+	fi
+
+	if [[ "$found_errors" == "true" ]]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
 #** main
 #*
 main() {
         # Trap for control-c
         trap control_c SIGINT
 
-	last_boot=$(who -b | awk '{print $3,$4}')
-	if find /var/crash -type f -name vmcore -newermt "$last_boot" | grep -q .; then
-	    echo "⚠️ Crash detected since last boot."
-	else
-	    echo "✅ Clean boot."
+	local last_boot=$(who -b | awk '{print $3,$4}')
+	local issues_found=false
+
+	# Check for crash dumps
+	if find /var/crash -type f -name vmcore -newermt "$last_boot" 2>/dev/null | grep -q .; then
+	    echo "[!] Crash detected since last boot."
+	    issues_found=true
+	fi
+
+	# Check for kernel stack traces
+	if check_kernel_logs "$last_boot"; then
+		echo "[!] Kernel stack traces detected since last boot."
+		issues_found=true
+	fi
+
+	# Check for shutdown errors
+	if check_shutdown_errors "$last_boot"; then
+		echo "[!] Shutdown errors detected."
+		issues_found=true
+	fi
+
+	if [[ "$issues_found" == "false" ]]; then
+		echo "[OK] Clean boot."
 	fi
 
 	exitme 0
