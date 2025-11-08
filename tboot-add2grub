@@ -1,108 +1,414 @@
 #!/bin/bash
-# tboot-add2grub.sh
+# tboot-single: configure a single tboot entry for the latest kernel on RHEL
+# Works for UEFI and legacy GRUB on RHEL; uses /boot/grub2/custom.cfg runtime include where supported.
 
-# ========== Script Globals ==========
-boot_dir="/boot"
-grub_custom="/etc/grub.d/40_custom"
-grub_cfg="/boot/grub2/grub.cfg"
-submenu_label="tboot 1.11.9"
+set -euo pipefail
 
-# ========== Usage Function ==========
-usage() {
-	cat <<-EOF
+# ===== Globals =====
+declare boot_dir="/boot"
+declare grub_cfg=""		   # Resolved path to grub.cfg or grub.conf
+declare grub_dir=""		   # Resolved directory of grub configs
+declare custom_cfg=""		   # Resolved path to custom.cfg (grub2)
+declare is_grub2=0		   # 1 if grub2, 0 if legacy
+declare is_uefi=0		   # 1 if UEFI, 0 if BIOS
+declare label="tboot 1.11.9 (extra)"
+declare tboot_gz="/tboot.gz"	   # expected location under /boot if copied to root of FS
+declare uuid_root=""		   # Root filesystem UUID (used for module lines)
+declare fs_uuid_boot=""		   # UUID of /boot for search
+declare latest_kernel=""	   # latest tboot kernel filename (basename)
+declare latest_kernel_version=""   # latest kernel version string
+declare managed_by=""		   # "custom.cfg" or "grub.cfg" depending on path used
+declare script_name="${0##*/}"
 
-	Usage: $(basename "$0")
-
-	This script adds a GRUB menuentry for the latest tboot-compatible kernel found in /boot.
-	It detects the latest vmlinuz-*tboot* kernel, extracts the matching initramfs,
-	detects the root UUID, and appends a GRUB stanza to /etc/grub.d/40_custom inside
-	a submenu labeled '${submenu_label}'.
-
-	It auto-detects UEFI vs Legacy BIOS and uses the correct GRUB syntax.
-
-	Then it regenerates the GRUB config at ${grub_cfg}.
-
-	Run as root. No arguments required.
-
-	EOF
-}
-
-# ========== Exit Function ==========
+# ===== Exit handler and trap =====
 exitme() {
-	local msg="$1"
-	echo "Exiting: $msg"
-	exit 1
+	local code="$1"
+	shift
+	echo "[EXIT] $*"
+	exit "$code"
 }
 
-# ========== Ctrl-C Trap ==========
-trap 'exitme "Interrupted by user (Ctrl-C)";' INT
+trap 'exitme 130 "Interrupted by Ctrl-C"' INT
 
-# ========== Append Entry to Submenu ==========
-append_to_submenu() {
-	local entry="$1"
-	local submenu_exists
+# ===== Usage =====
+usage() {
+	cat <<'EOF'
+tboot-single: configure a single tboot entry for the latest kernel on RHEL
 
-	submenu_exists=$(grep -F "submenu '${submenu_label}'" "$grub_custom")
+Functional description:
+  - Detects RHEL boot configuration (UEFI/BIOS, GRUB2/legacy).
+  - Ensures the runtime include (41_custom sourcing custom.cfg) is present on GRUB2 systems.
+  - Writes exactly one tboot menuentry for the latest tboot kernel version found under /boot.
+  - Provides a %post-style recovery to rewrite grub.cfg via here-doc if it was clobbered.
+  - Supports verification, cleaning redundant entries, and an audit of all tboot entries and who manages them.
 
-	if [[ -n "$submenu_exists" ]]; then
-		# Insert inside existing submenu block
-		sed -i "/submenu '${submenu_label}' {/a\\
-${entry}
-" "$grub_custom" || exitme "Failed to insert entry into existing submenu"
+Options:
+  --clean	Remove redundant/older tboot entries, keeping only the latest one configured.
+  --verify	Verify that the configured tboot entry references valid files and appears in the managed path.
+  --audit	Print all detected tboot entries and report who manages them (custom.cfg or grub.cfg/legacy).
+  --help	Show this help text.
+
+Conventions:
+  - Global variables declared at the top with 'declare'.
+  - Function-local variables declared with 'local' at the top of each function.
+  - exitme() handles graceful exits; Ctrl-C triggers exitme with code 130.
+EOF
+}
+
+# ===== Environment detection =====
+detect_platform() {
+	local efivars="/sys/firmware/efi"
+	local rhel_release=""
+	local guess_grub_cfg=""
+
+	if [[ -d "$efivars" ]]; then
+	is_uefi=1
 	else
-		# Create new submenu block
-		echo "submenu '${submenu_label}' {" >> "$grub_custom"
-		echo "$entry" >> "$grub_custom"
-		echo "}" >> "$grub_custom"
+	is_uefi=0
+	fi
+
+	# Prefer GRUB2 layout if present
+	if [[ -f /boot/grub2/grub.cfg ]]; then
+	is_grub2=1
+	grub_cfg="/boot/grub2/grub.cfg"
+	grub_dir="/boot/grub2"
+	custom_cfg="/boot/grub2/custom.cfg"
+	managed_by="custom.cfg"
+	elif [[ -f /boot/grub/grub.conf ]]; then
+	is_grub2=0
+	grub_cfg="/boot/grub/grub.conf"
+	grub_dir="/boot/grub"
+	custom_cfg="" # not used in legacy
+	managed_by="grub.conf"
+	elif [[ -f /boot/grub/menu.lst ]]; then
+	is_grub2=0
+	grub_cfg="/boot/grub/menu.lst"
+	grub_dir="/boot/grub"
+	custom_cfg=""
+	managed_by="menu.lst"
+	else
+	# Fallback guess: RHEL with GRUB2 but grub.cfg missing (needs recovery)
+	is_grub2=1
+	grub_cfg="/boot/grub2/grub.cfg"
+	grub_dir="/boot/grub2"
+	custom_cfg="/boot/grub2/custom.cfg"
+	managed_by="custom.cfg"
+	fi
+
+	# UUIDs
+	# Boot FS UUID for GRUB search (use the filesystem at /boot; may be same as / if not separate)
+	if blkid -s UUID "$boot_dir" &>/dev/null; then
+	fs_uuid_boot="$(blkid -s UUID -o value "$boot_dir" || true)"
+	else
+	# derive from device hosting /boot mount
+	local boot_dev
+	boot_dev="$(findmnt -no SOURCE /boot 2>/dev/null || true)"
+	[[ -n "$boot_dev" ]] && fs_uuid_boot="$(blkid -s UUID -o value "$boot_dev" || true)"
+	fi
+
+	# Root UUID
+	local root_dev
+	root_dev="$(findmnt -no SOURCE / 2>/dev/null || true)"
+	[[ -n "$root_dev" ]] && uuid_root="$(blkid -s UUID -o value "$root_dev" || true)"
+}
+
+# ===== %post-like recovery for grub.cfg (here-doc rewrite) =====
+recover_grub_cfg_if_missing() {
+	local need_recover=0
+
+	if [[ "$is_grub2" -eq 1 && ! -f "$grub_cfg" ]]; then
+	need_recover=1
+	fi
+
+	if [[ "$need_recover" -eq 1 ]]; then
+	echo "[WARN] $grub_cfg missing; rewriting via safe here-doc."
+	mkdir -p "$grub_dir"
+	cat > "$grub_cfg" <<'EOF'
+#
+# Minimal grub.cfg bootstrap  tboot-single %post-style recovery
+#
+
+# Search and source runtime custom.cfg if present (provided by 41_custom)
+if [ -f  ${config_directory}/custom.cfg ]; then
+  source ${config_directory}/custom.cfg
+elif [ -z "${config_directory}" -a -f  $prefix/custom.cfg ]; then
+  source $prefix/custom.cfg
+fi
+EOF
+	echo "[OK] Reconstructed minimal $grub_cfg"
 	fi
 }
 
-# ========== Main Function ==========
-main() {
-	local kernel
-	local initramfs
-	local root_uuid
+# ===== Ensure GRUB2 runtime include exists (41_custom) =====
+ensure_runtime_include() {
+	if [[ "$is_grub2" -eq 1 ]]; then
+	local s41="/etc/grub.d/41_custom"
+	if [[ ! -f "$s41" ]]; then
+		cat > "$s41" <<'EOF'
+#!/usr/bin/sh
+cat <<EOF
+if [ -f  ${config_directory}/custom.cfg ]; then
+  source ${config_directory}/custom.cfg
+elif [ -z "${config_directory}" - a -f	$prefix/custom.cfg ]; then
+  source $prefix/custom.cfg
+fi
+EOF
+EOF
+		chmod +x "$s41"
+		restorecon -v "$s41" 2>/dev/null || true
+		echo "[OK] Installed 41_custom runtime include script."
+	fi
+
+	# Ensure grub.cfg contains the source stanza; if grub2-mkconfig hasn’t been run yet, we may rely on recovery_grub_cfg_if_missing
+	if [[ -f "$grub_cfg" ]] && ! grep -Fq "source \${config_directory}/custom.cfg" "$grub_cfg" && \
+							   ! grep -Fq "source \$prefix/custom.cfg" "$grub_cfg"; then
+		echo "[WARN] Runtime include stanza not found in $grub_cfg; will run grub2-mkconfig to emit it."
+	fi
+	fi
+}
+
+# ===== Find latest tboot kernel in /boot =====
+find_latest_tboot_kernel() {
+	local k
+	k="$(ls -1 "$boot_dir"/vmlinuz-*tboot* 2>/dev/null | sort -V | tail -n1 || true)"
+	if [[ -z "$k" ]]; then
+	exitme 1 "No tboot kernels found under $boot_dir"
+	fi
+	latest_kernel="$(basename "$k")"
+	latest_kernel_version="${latest_kernel#vmlinuz-}"
+}
+
+# ===== Build single tboot entry (GRUB2 custom.cfg or legacy) =====
+write_single_entry_grub2() {
 	local entry
-	local boot_mode
-	local cmd_multiboot
-	local cmd_module
+	local initramfs="initramfs-${latest_kernel_version}.img"
+	local fstype uuid_boot uuid_root grub_root_hint cmdline
 
-	kernel=$(ls -1 "${boot_dir}"/vmlinuz-*tboot* 2>/dev/null | sort -V | tail -n1 | xargs -n1 basename)
-	[[ -z "$kernel" ]] && exitme "No tboot-compatible kernel found in ${boot_dir}"
+	# Discover filesystem type of /boot
+	fstype=$(findmnt -no FSTYPE /boot || echo ext2)
 
-	initramfs=$(echo "$kernel" | sed 's/^vmlinuz-/initramfs-/').img
-	[[ ! -f "${boot_dir}/${initramfs}" ]] && exitme "Missing initramfs: ${initramfs}"
+	# Discover UUIDs
+	uuid_boot=$(blkid -s UUID -o value "$(findmnt -no SOURCE /boot)" || true)
+	uuid_root=$(blkid -s UUID -o value "$(findmnt -no SOURCE /)" || true)
 
-	root_uuid=$(findmnt -no UUID /)
-	[[ -z "$root_uuid" ]] && exitme "Unable to detect root UUID"
+	# Discover GRUB root hint string (e.g. hd0,gpt2)
+	grub_root_hint=$(grub2-probe --target=hint_string /boot 2>/dev/null || echo "hd0,gpt1")
 
-	boot_mode=$([ -d /sys/firmware/efi ] && echo "UEFI" || echo "Legacy")
+	# Capture current kernel command line for module parameters
+	cmdline=$(cat /proc/cmdline)
 
-	if [[ "$boot_mode" == "UEFI" ]]; then
-		cmd_multiboot="linuxefi"
-		cmd_module="moduleefi"
-	else
-		cmd_multiboot="multiboot"
-		cmd_module="module"
-	fi
-
-	entry="
-	menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${kernel#vmlinuz-}' {
+	# Assemble entry text
+	entry=$(cat <<EOF
+submenu '${label}' {
+	menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${latest_kernel_version}' {
+		insmod multiboot2
 		insmod part_gpt
-		insmod ext2
-		search --no-floppy --fs-uuid --set=root ${root_uuid}
-		${cmd_multiboot} /boot/tboot.gz logging=serial,memory
-		${cmd_module} /boot/${kernel} root=UUID=${root_uuid} ro quiet splash
-		${cmd_module} /boot/${initramfs}
+		insmod ${fstype}
+		set root='${grub_root_hint}'
+		if [ x\$feature_platform_search_hint = xy ]; then
+		  search --no-floppy --fs-uuid --set=root --hint-bios=${grub_root_hint} --hint-efi=${grub_root_hint} --hint-baremetal=${grub_root_hint} ${uuid_boot}
+		else
+		  search --no-floppy --fs-uuid --set=root ${uuid_boot}
+		fi
+		multiboot2 ${tboot_gz} logging=serial,memory
+		module2 /${latest_kernel} root=UUID=${uuid_root} ${cmdline}
+		module2 /${initramfs}
 	}
-"
+}
+EOF
+)
 
-	append_to_submenu "$entry"
-
-	grub2-mkconfig -o "$grub_cfg" || exitme "Failed to regenerate GRUB config"
-
-	echo "✅ GRUB entry added for kernel: $kernel inside submenu '${submenu_label}' using ${boot_mode} syntax"
+	# Ensure custom.cfg exists and is clean of old blocks
+	[[ -f "$custom_cfg" ]] || echo "# Custom GRUB entries follow:" > "$custom_cfg"
+	sed -i "/^submenu '${label}' {/,/^}/d" "$custom_cfg"
+	printf "%s\n" "$entry" >> "$custom_cfg"
+	chmod 0644 "$custom_cfg"
+	restorecon -v "$custom_cfg" 2>/dev/null || true
+	echo "[OK] Wrote single tboot entry to $custom_cfg"
 }
 
-# ========== Entrypoint ==========
+write_single_entry_legacy() {
+	local entry
+	local initramfs="initramfs-${latest_kernel_version}.img"
+	local fstype uuid_boot uuid_root grub_root_device cmdline
+
+	# Discover filesystem type of /boot
+	fstype=$(findmnt -no FSTYPE /boot || echo ext2)
+
+	# Discover UUIDs
+	uuid_boot=$(blkid -s UUID -o value "$(findmnt -no SOURCE /boot)" || true)
+	uuid_root=$(blkid -s UUID -o value "$(findmnt -no SOURCE /)" || true)
+
+	# Discover GRUB root device string (e.g. (hd0,0))
+	grub_root_device=$(grub-probe --target=drive /boot 2>/dev/null || echo "(hd0,0)")
+
+	# Capture current kernel command line
+	cmdline=$(cat /proc/cmdline)
+
+	# Assemble entry text
+	entry=$(cat <<EOF
+title ${label}
+	insmod part_gpt
+	insmod ${fstype}
+	root ${grub_root_device}
+	search --no-floppy --fs-uuid --set=root ${uuid_boot}
+	multiboot ${tboot_gz} logging=serial,memory
+	module /${latest_kernel} root=UUID=${uuid_root} ${cmdline}
+	module /${initramfs}
+EOF
+)
+
+	# Remove older duplicate titles for tboot label
+	sed -i "/^title ${label}/,/^title /{ /^title ${label}/!d }" "$grub_cfg" || true
+	printf "\n%s\n" "$entry" >> "$grub_cfg"
+	echo "[OK] Appended legacy tboot entry to $grub_cfg"
+}
+
+# ===== Clean redundant entries =====
+clean_redundant() {
+	if [[ "$is_grub2" -eq 1 ]]; then
+	if [[ -f "$custom_cfg" ]]; then
+		sed -i "/^submenu '${label}' {/,/^}/d" "$custom_cfg"
+		echo "[OK] Removed redundant/older tboot submenu(s) from $custom_cfg"
+	fi
+	# Also remove any stray tboot blocks directly embedded in grub.cfg
+	sed -i "/^submenu '${label}' {/,/^}/d" "$grub_cfg" || true
+	else
+	# Remove all titles matching label; main will rewrite the latest one if needed
+	sed -i "/^title ${label}/,/^title /{ /^title ${label}/!d }" "$grub_cfg" || true
+	echo "[OK] Removed redundant/older tboot titles from $grub_cfg"
+	fi
+}
+
+# ===== Verify entry validity =====
+verify_entry() {
+	local ok=1
+	local initramfs="initramfs-${latest_kernel_version}.img"
+
+	# Check files exist
+	if [[ ! -f "${boot_dir}/${latest_kernel}" ]]; then
+	echo "[ERROR] Missing ${boot_dir}/${latest_kernel}"
+	ok=0
+	fi
+	if [[ ! -f "${boot_dir}/${initramfs}" ]]; then
+	echo "[ERROR] Missing ${boot_dir}/${initramfs}"
+	ok=0
+	fi
+	if [[ ! -f "${boot_dir}/${tboot_gz#/}" ]]; then
+	echo "[ERROR] Missing ${boot_dir}/${tboot_gz#/}"
+	ok=0
+	fi
+
+	# Check presence in managed path
+	if [[ "$is_grub2" -eq 1 ]]; then
+	if ! grep -Fq "Linux ${latest_kernel_version}" "$custom_cfg" 2>/dev/null; then
+		echo "[ERROR] Entry for ${latest_kernel_version} not found in $custom_cfg"
+		ok=0
+	fi
+	# Confirm grub.cfg includes runtime include
+	if ! grep -Fq "source \${config_directory}/custom.cfg" "$grub_cfg" && \
+	   ! grep -Fq "source \$prefix/custom.cfg" "$grub_cfg"; then
+		echo "[WARN] Runtime include stanza not present in $grub_cfg; custom.cfg may not be loaded at boot."
+	fi
+	else
+	if ! grep -Fq "title ${label}" "$grub_cfg"; then
+		echo "[ERROR] Legacy entry '${label}' not found in $grub_cfg"
+		ok=0
+	fi
+	fi
+
+	if [[ "$ok" -eq 1 ]]; then
+	echo "[OK] Verification succeeded for ${latest_kernel_version} (${managed_by})"
+	return 0
+	else
+	return 1
+	fi
+}
+
+# ===== Audit tboot entries and manager =====
+audit_entries() {
+	local found=0
+
+	echo "[AUDIT] Boot mode: $([[ "$is_uefi" -eq 1 ]] && echo UEFI || echo BIOS); GRUB: $([[ "$is_grub2" -eq 1 ]] && echo GRUB2 || echo Legacy)"
+	if [[ "$is_grub2" -eq 1 ]]; then
+	echo "[AUDIT] Manager: custom.cfg (runtime include via 41_custom)"
+	if [[ -f "$custom_cfg" ]]; then
+		echo "[AUDIT] Entries in $custom_cfg:"
+		grep -E "submenu|menuentry|module /vmlinuz|module /initramfs" "$custom_cfg" || true
+		found=1
+	fi
+	echo "[AUDIT] Direct tboot entries in $grub_cfg (should be none):"
+	grep -E "^submenu '${label}'" "$grub_cfg" || true
+	else
+	echo "[AUDIT] Manager: $grub_cfg (legacy)"
+	echo "[AUDIT] Entries:"
+	awk '/^title /,/^title /' "$grub_cfg" | grep -A3 "^title ${label}" || true
+	found=1
+	fi
+
+	if [[ "$found" -eq 0 ]]; then
+	echo "[AUDIT] No tboot entries detected."
+	fi
+}
+
+# ===== Run grub2-mkconfig when GRUB2 =====
+regen_grub_cfg_if_grub2() {
+	if [[ "$is_grub2" -eq 1 ]]; then
+	echo "[INFO] Regenerating $grub_cfg via grub2-mkconfig"
+	grub2-mkconfig -o "$grub_cfg"
+	echo "[OK] Regenerated $grub_cfg"
+	fi
+}
+
+# ===== Main workflow =====
+main() {
+	local do_clean=0
+	local do_verify=0
+	local do_audit=0
+
+	# Parse args
+	for arg in "$@"; do
+	case "$arg" in
+		--clean)  do_clean=1 ;;
+		--verify) do_verify=1 ;;
+		--audit)  do_audit=1 ;;
+		--help|-h) usage; exit 0 ;;
+		*) exitme 1 "Unknown option: $arg" ;;
+	esac
+	done
+
+	detect_platform
+	recover_grub_cfg_if_missing
+	ensure_runtime_include
+	find_latest_tboot_kernel
+
+	# Clean if requested
+	if [[ "$do_clean" -eq 1 ]]; then
+	clean_redundant
+	fi
+
+	# Write the single entry (abandon multiple)
+	if [[ "$is_grub2" -eq 1 ]]; then
+	write_single_entry_grub2
+	else
+	write_single_entry_legacy
+	fi
+
+	regen_grub_cfg_if_grub2
+
+	# Verify if requested
+	if [[ "$do_verify" -eq 1 ]]; then
+	if ! verify_entry; then
+		exitme 1 "Verification failed"
+	fi
+	fi
+
+	# Audit if requested
+	if [[ "$do_audit" -eq 1 ]]; then
+	audit_entries
+	fi
+
+	echo "[OK] ${script_name} completed."
+}
+
 main "$@"
