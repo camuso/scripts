@@ -15,8 +15,9 @@ declare label="tboot 1.11.9 (extra)"
 declare tboot_gz="/tboot.gz"	   # expected location under /boot if copied to root of FS
 declare uuid_root=""		   # Root filesystem UUID (used for module lines)
 declare fs_uuid_boot=""		   # UUID of /boot for search
-declare latest_kernel=""	   # latest tboot kernel filename (basename)
-declare latest_kernel_version=""   # latest kernel version string
+declare latest_kernel=""	   # latest kernel filename (basename) - for backward compatibility
+declare latest_kernel_version=""   # latest kernel version string - for backward compatibility
+declare -a tboot_kernels=()	   # array of all kernels to create tboot entries for
 declare managed_by=""		   # "custom.cfg" or "grub.cfg" depending on path used
 declare script_name="${0##*/}"
 
@@ -146,13 +147,13 @@ ensure_runtime_include() {
 	if [[ ! -f "$s41" ]]; then
 		cat > "$s41" <<'EOF'
 #!/usr/bin/sh
-cat <<EOF
+cat <<'INNER_EOF'
 if [ -f  ${config_directory}/custom.cfg ]; then
   source ${config_directory}/custom.cfg
-elif [ -z "${config_directory}" - a -f	$prefix/custom.cfg ]; then
+elif [ -z "${config_directory}" -a -f $prefix/custom.cfg ]; then
   source $prefix/custom.cfg
 fi
-EOF
+INNER_EOF
 EOF
 		chmod +x "$s41"
 		restorecon -v "$s41" 2>/dev/null || true
@@ -167,22 +168,29 @@ EOF
 	fi
 }
 
-# ===== Find latest tboot kernel in /boot =====
-find_latest_tboot_kernel() {
-	local k
-	k="$(ls -1 "$boot_dir"/vmlinuz-*tboot* 2>/dev/null | sort -V | tail -n1 || true)"
-	if [[ -z "$k" ]]; then
-	exitme 1 "No tboot kernels found under $boot_dir"
+# ===== Find kernels for tboot entries =====
+# tboot can load any regular kernel via multiboot2/module2
+# Find ALL kernels (both tboot-specific and regular) - tboot can load any of them
+find_kernels_for_tboot() {
+	local kernels=()
+	# Find ALL kernels (both tboot-specific and regular), excluding rescue kernels
+	# tboot can load any kernel, so we create entries for all of them
+	mapfile -t kernels < <(ls -1 "$boot_dir"/vmlinuz-* 2>/dev/null | grep -v rescue | sort -V || true)
+	if [[ ${#kernels[@]} -eq 0 ]]; then
+		exitme 1 "No kernels found under $boot_dir"
 	fi
-	latest_kernel="$(basename "$k")"
+	# Store all kernels
+	declare -g tboot_kernels=("${kernels[@]}")
+	# For backward compatibility, also set latest_kernel
+	latest_kernel="$(basename "${kernels[-1]}")"
 	latest_kernel_version="${latest_kernel#vmlinuz-}"
 }
 
-# ===== Build single tboot entry (GRUB2 custom.cfg or legacy) =====
+# ===== Build tboot entries for all kernels (GRUB2) =====
 write_single_entry_grub2() {
-	local entry
-	local initramfs="initramfs-${latest_kernel_version}.img"
 	local fstype uuid_boot uuid_root grub_root_hint cmdline
+	local kernel_path kernel_name kernel_version initramfs
+	local menuentries=""
 
 	# Discover filesystem type of /boot
 	fstype=$(findmnt -no FSTYPE /boot || echo ext2)
@@ -195,12 +203,18 @@ write_single_entry_grub2() {
 	grub_root_hint=$(grub2-probe --target=hint_string /boot 2>/dev/null || echo "hd0,gpt1")
 
 	# Capture current kernel command line for module parameters
-	cmdline=$(cat /proc/cmdline)
+	# Remove any existing root= parameter to avoid conflicts, we'll add our own
+	# Split by spaces, filter out root= parameters, then rejoin
+	cmdline=$(cat /proc/cmdline | tr ' ' '\n' | grep -v '^root=' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/[[:space:]]\+/ /g')
 
-	# Assemble entry text
-	entry=$(cat <<EOF
-submenu '${label}' {
-	menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${latest_kernel_version}' {
+	# Create menuentry for each kernel
+	for kernel_path in "${tboot_kernels[@]}"; do
+		kernel_name="$(basename "$kernel_path")"
+		kernel_version="${kernel_name#vmlinuz-}"
+		initramfs="initramfs-${kernel_version}.img"
+		
+		# Build menuentry for this kernel
+		menuentries="${menuentries}	menuentry 'Red Hat Enterprise Linux GNU/Linux, with tboot 1.11.9 and Linux ${kernel_version}' {
 		insmod multiboot2
 		insmod part_gpt
 		insmod ${fstype}
@@ -211,20 +225,28 @@ submenu '${label}' {
 		  search --no-floppy --fs-uuid --set=root ${uuid_boot}
 		fi
 		multiboot2 ${tboot_gz} logging=serial,memory
-		module2 /${latest_kernel} root=UUID=${uuid_root} ${cmdline}
+		module2 /${kernel_name} root=UUID=${uuid_root} ${cmdline}
 		module2 /${initramfs}
 	}
-}
+"
+	done
+
+	# Assemble complete submenu entry
+	local entry
+	entry=$(cat <<EOF
+submenu '${label}' {
+${menuentries}}
 EOF
 )
 
-	# Ensure custom.cfg exists and is clean of old blocks
-	[[ -f "$custom_cfg" ]] || echo "# Custom GRUB entries follow:" > "$custom_cfg"
-	sed -i "/^submenu '${label}' {/,/^}/d" "$custom_cfg"
-	printf "%s\n" "$entry" >> "$custom_cfg"
-	chmod 0644 "$custom_cfg"
-	restorecon -v "$custom_cfg" 2>/dev/null || true
-	echo "[OK] Wrote single tboot entry to $custom_cfg"
+	# Write directly to grub.cfg AFTER grub2-mkconfig runs
+	# This ensures the multiboot2 format is preserved and not converted by grub2-mkconfig
+	# First, remove any existing tboot entries from grub.cfg
+	sed -i "/^submenu ['\"]tboot 1.11.9/,/^}/d" "$grub_cfg" || true
+	# Append our entry at the end of grub.cfg
+	# This preserves the exact multiboot2/module2 format
+	printf "\n%s\n" "$entry" >> "$grub_cfg"
+	echo "[OK] Wrote tboot entries for ${#tboot_kernels[@]} kernel(s) directly to $grub_cfg"
 }
 
 write_single_entry_legacy() {
@@ -243,7 +265,9 @@ write_single_entry_legacy() {
 	grub_root_device=$(grub-probe --target=drive /boot 2>/dev/null || echo "(hd0,0)")
 
 	# Capture current kernel command line
-	cmdline=$(cat /proc/cmdline)
+	# Remove any existing root= parameter to avoid conflicts, we'll add our own
+	# Split by spaces, filter out root= parameters, then rejoin
+	cmdline=$(cat /proc/cmdline | tr ' ' '\n' | grep -v '^root=' | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/[[:space:]]\+/ /g')
 
 	# Assemble entry text
 	entry=$(cat <<EOF
@@ -272,7 +296,10 @@ clean_redundant() {
 		echo "[OK] Removed redundant/older tboot submenu(s) from $custom_cfg"
 	fi
 	# Also remove any stray tboot blocks directly embedded in grub.cfg
-	sed -i "/^submenu '${label}' {/,/^}/d" "$grub_cfg" || true
+	# Remove both single-quoted and double-quoted versions
+	sed -i "/^submenu ['\"]tboot 1.11.9/,/^}/d" "$grub_cfg" || true
+	# Also remove any tboot entries that grub2-mkconfig might generate
+	sed -i "/menuentry.*tboot.*Linux/,/^}/d" "$grub_cfg" || true
 	else
 	# Remove all titles matching label; main will rewrite the latest one if needed
 	sed -i "/^title ${label}/,/^title /{ /^title ${label}/!d }" "$grub_cfg" || true
@@ -380,7 +407,7 @@ main() {
 	detect_platform
 	recover_grub_cfg_if_missing
 	ensure_runtime_include
-	find_latest_tboot_kernel
+	find_kernels_for_tboot
 
 	# Clean if requested
 	if [[ "$do_clean" -eq 1 ]]; then
@@ -389,12 +416,13 @@ main() {
 
 	# Write the single entry (abandon multiple)
 	if [[ "$is_grub2" -eq 1 ]]; then
+	# First, run grub2-mkconfig to generate the base config
+	regen_grub_cfg_if_grub2
+	# Then write our entry directly to grub.cfg (not custom.cfg) to preserve multiboot2 format
 	write_single_entry_grub2
 	else
 	write_single_entry_legacy
 	fi
-
-	regen_grub_cfg_if_grub2
 
 	# Verify if requested
 	if [[ "$do_verify" -eq 1 ]]; then
