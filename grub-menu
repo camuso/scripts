@@ -4,7 +4,8 @@
 GRUB_CFG="/boot/grub2/grub.cfg"
 [ -r "$GRUB_CFG" ] || GRUB_CFG="/boot/grub/grub.cfg"
 
-mapfile -t cfg_entries < <(awk -F"'" '/^menuentry / {print $2}' "$GRUB_CFG")
+# Match menuentry even when indented (inside submenus)
+mapfile -t cfg_entries < <(awk -F"'" '/[[:space:]]*menuentry / {print $2}' "$GRUB_CFG")
 mapfile -t grubby_entries < <(
     sudo grubby --info=ALL 2>/dev/null |
     awk -F= '/^title=/ {gsub(/"/,"",$2); print $2}'
