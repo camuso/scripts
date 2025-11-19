@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# term-resize - Resize terminal window using escape sequence
+#
+
+#######################################
+# Script-Level Variables
+#######################################
+declare -i rows=0
+declare -i cols=0
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-h|--help] -r ROWS -c COLS
+
+Resize the terminal window to the specified number of rows and columns.
+
+Options:
+  -h, --help     Show this help message
+  -r ROWS        Number of rows (required)
+  -c COLS        Number of columns (required)
+
+Example:
+  $(basename "$0") -r 40 -c 120
+
+EOF
+)"
+
+#######################################
+# Functions
+#######################################
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exitme 1
+}
+
+#** main: main function
+#*
+main() {
+	trap control_c SIGINT
+
+	local opt
+
+	# Parse command-line arguments
+	while getopts "hr:c:" opt; do
+		case "$opt" in
+			h)
+				usage
+				exit 0
+				;;
+			r)
+				rows="$OPTARG"
+				;;
+			c)
+				cols="$OPTARG"
+				;;
+			\?)
+				exitme 1 "Invalid option: -$OPTARG"
+				;;
+			:)
+				exitme 1 "Option -$OPTARG requires an argument"
+				;;
+		esac
+	done
+
+	# Check for help as a positional argument
+	[[ "$1" == "help" ]] || [[ "$1" == "--help" ]] && {
+		usage
+		exit 0
+	}
+
+	# Validate required options
+	((rows == 0)) && exitme 1 "Error: -r option is required"
+	((cols == 0)) && exitme 1 "Error: -c option is required"
+
+	# Validate values are positive
+	((rows <= 0)) && exitme 1 "Error: rows must be a positive integer"
+	((cols <= 0)) && exitme 1 "Error: cols must be a positive integer"
+
+	# Output the terminal resize escape sequence
+	printf "\e[8;%d;%dt" "$rows" "$cols"
+}
+
+main "$@"
+
