@@ -57,7 +57,7 @@ ${MNU}Arguments:${OFF}
 
 	/work/upstream/kernel
 	/work/c9s/kernel
-	/wokr/9/kernel
+	/work/9/kernel
 \0
 EOF
 )"
@@ -116,7 +116,13 @@ mkrepo() {
 		return
 	else
 		echo -e "${CAU}Cloning $repo into $repodir/kernel...$OFF"
-		git clone "$repo" kernel
+		if ! git clone "$repo" kernel; then
+			echo -e "${CAU}Failed to clone $repo$OFF"
+			echo -e "${INF}Please verify:$OFF"
+			echo -e "  ${MNU}1.${INF} Your SSH key is uploaded to GitLab$OFF"
+			echo -e "  ${MNU}2.${INF} You have access to the repository$OFF"
+			return 1
+		fi
 		cd kernel || { echo -e "${CAU}cannot cd into $STA$PWD/$repodir$OFF"; exit 1; }
 		git fetch
 		git pull
@@ -126,36 +132,41 @@ mkrepo() {
 }
 
 create_upstream() {
-	cd /work
 	[ -d /work/upstream ] || mkdir -p /work/upstream
-	cd /work/upstream
-	[ -f kernel/.git/config ] || {
-		if [ -f "kernel/.git/config" ]; then
-			echo -e "\n{CAU}Upstream kernel already present.$OFF\n"
-			return
-		fi
-		git clone \
+	cd /work/upstream || { echo -e "${CAU}Cannot cd into /work/upstream$OFF"; return 1; }
+
+	if [ -f kernel/.git/config ]; then
+		echo -e "\n${CAU}Upstream kernel already present.$OFF\n"
+		return
+	fi
+
+	echo -e "${INF}Cloning upstream kernel...${OFF}"
+	if ! git clone \
 		git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
-		kernel
-		cd kernel
-		git remote add gh-ipmi https://github.com/cminyard/linux-ipmi.git
-		git remote add net-next \
-			https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git
-		git remote add scsi \
-			https://git.kernel.org/pub/scm/linux/kernel/git/jejb/scsi.git
-		git remote add power \
-			https://git.kernel.org/pub/scm/linux/kernel/git/powerpc/linux.git
-		git remote add perf \
-			https://git.kernel.org/pub/scm/linux/kernel/git/jolsa/perf.git
-		git remote add linux-rt-devel \
-			https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git
-		git remote add crypto \
-			https://git.kernel.org/pub/scm/linux/kernel/git/herbert/cryptodev-2.6.git
-		git remote add bluetooth \
-			git://git.kernel.org/pub/scm/linux/kernel/git/bluetooth/bluetooth-next.git
-		git fetch -p --all
-		echo "/work/upstream/kernel" >> "$repolist"
-	}
+		kernel; then
+		echo -e "${CAU}Failed to clone upstream kernel$OFF"
+		return 1
+	fi
+
+	cd kernel || { echo -e "${CAU}Cannot cd into kernel$OFF"; return 1; }
+
+	git remote add gh-ipmi https://github.com/cminyard/linux-ipmi.git
+	git remote add net-next \
+		https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git
+	git remote add scsi \
+		https://git.kernel.org/pub/scm/linux/kernel/git/jejb/scsi.git
+	git remote add power \
+		https://git.kernel.org/pub/scm/linux/kernel/git/powerpc/linux.git
+	git remote add perf \
+		https://git.kernel.org/pub/scm/linux/kernel/git/jolsa/perf.git
+	git remote add linux-rt-devel \
+		https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git
+	git remote add crypto \
+		https://git.kernel.org/pub/scm/linux/kernel/git/herbert/cryptodev-2.6.git
+	git remote add bluetooth \
+		git://git.kernel.org/pub/scm/linux/kernel/git/bluetooth/bluetooth-next.git
+	git fetch -p --all
+	echo "/work/upstream/kernel" >> "$repolist"
 }
 
 create_downstream() {
@@ -252,22 +263,37 @@ main() {
 
 	repolist="${pr_cfg_dir}/repolist"
 
+	# Ensure required directories exist
 	[ -d /work ] || {
 		echo -e "${CAU}There is no /work directory.$OFF"
 		exit 1
 	}
+	[ -d "$pr_cfg_dir" ] || mkdir -p "$pr_cfg_dir"
+	# Ensure ~/.ssh directory exists with correct permissions
+	mkdir -p "$HOME/.ssh"
+	chmod 700 "$HOME/.ssh"
+	[ -f "$HOME/.ssh/known_hosts" ] || touch "$HOME/.ssh/known_hosts"
 
+	# Add GitLab to known_hosts BEFORE any SSH operations to prevent
+	# interactive prompts asking about host authenticity
+	echo -e "${INF}Adding gitlab.com to SSH known_hosts...${OFF}"
+	ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts 2>/dev/null
+
+	# Set GIT_SSH_COMMAND to disable strict host key checking for any
+	# hosts not yet in known_hosts (belt and suspenders approach)
+	export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+
+	# Upload SSH key to GitLab (requires GITLAB_TOKEN)
+	echo -e "${INF}Uploading SSH key to GitLab...${OFF}"
 	if ! gitlab-upload-sshkey; then
 		echo -e "${CAU}gitlab-upload-sshkey failed$OFF"
+		echo -e "${INF}Please verify your GITLAB_TOKEN is valid and has 'api' scope.$OFF"
 		exit 1
 	fi
 
 	cd /work
 
-	[ -d "$pr_cfg_dir" ] || mkdir -p "$pr_cfg_dir"
-
 	> "$repolist"
-	ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts
 	get_distro
 	create_upstream
 
