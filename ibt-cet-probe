@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+
+#===========================================================
+# Script: check_ibt_cet.sh
+# Purpose: Ensure Development Tools are installed, build msr-tools,
+#	   read CET MSRs, and report IBT/CET state.
+#===========================================================
+
+#-------------------------------
+# Script-level variables
+#-------------------------------
+declare -r DEV_GROUP="Development Tools"
+declare -r MSR_REPO="https://github.com/intel/msr-tools.git"
+declare -r MSR_DIR="msr-tools"
+
+#-------------------------------
+# Trap Control-C
+#-------------------------------
+exitme() {
+	echo "Interrupted. Exiting cleanly..."
+	exit 1
+}
+trap exitme INT
+
+#-------------------------------
+# usage(): Display help
+#-------------------------------
+usage() {
+	cat <<EOF
+Usage: $0 [options]
+
+Options:
+	-h, --help, help	Show this help message
+
+Description:
+	This script checks if the "${DEV_GROUP}" group is installed.
+	If not, it installs it non-interactively.
+	Then it clones and builds msr-tools, loads the msr driver,
+	reads CET MSRs (0x6a0 and 0x6a2), and reports IBT/CET state.
+EOF
+}
+
+#-------------------------------
+# check_dev_tools(): Verify/install Development Tools group
+#-------------------------------
+check_dev_tools() {
+	local group_installed
+
+	# Detect dnf version (dnf5 uses different syntax)
+	if command -v dnf5 &>/dev/null; then
+		group_installed=$(dnf5 group list --installed 2>/dev/null | grep -i "${DEV_GROUP}")
+		if [[ -z "${group_installed}" ]]; then
+			echo "Installing ${DEV_GROUP}..."
+			sudo dnf5 group install "${DEV_GROUP}" -y
+		else
+			echo "${DEV_GROUP} already installed."
+		fi
+		# Ensure libtool and automake are installed (needed for autogen.sh)
+		echo "Ensuring autotools dependencies..."
+		sudo dnf5 install -y libtool automake autoconf
+	else
+		group_installed=$(dnf group list --installed | grep -i "${DEV_GROUP}")
+		if [[ -z "${group_installed}" ]]; then
+			echo "Installing ${DEV_GROUP}..."
+			sudo dnf groupinstall "${DEV_GROUP}" -y
+		else
+			echo "${DEV_GROUP} already installed."
+		fi
+		# Ensure libtool and automake are installed (needed for autogen.sh)
+		echo "Ensuring autotools dependencies..."
+		sudo dnf install -y libtool automake autoconf
+	fi
+}
+
+#-------------------------------
+# build_msr_tools(): Clone and build msr-tools
+#-------------------------------
+build_msr_tools() {
+	local repo="${MSR_REPO}"
+	local dir="${MSR_DIR}"
+
+	if [[ -d "${dir}" ]]; then
+		echo "Directory ${dir} already exists. Skipping clone."
+	else
+		echo "Cloning msr-tools..."
+		git clone "${repo}"
+	fi
+
+	cd "${dir}" || { echo "Failed to enter ${dir}"; exit 1; }
+
+	# Run autogen.sh if Makefile doesn't exist
+	if [[ ! -f "Makefile" ]]; then
+		if [[ -f "autogen.sh" ]]; then
+			echo "Running autogen.sh..."
+			# Clean any previous failed configure attempts
+			rm -f config.status config.log 2>/dev/null
+			chmod +x autogen.sh
+			./autogen.sh || { echo "autogen.sh failed"; exit 1; }
+		else
+			echo "Error: No Makefile and no autogen.sh found in $(pwd)"
+			exit 1
+		fi
+	fi
+
+	echo "Building msr-tools..."
+	make || { echo "Build failed"; exit 1; }
+	sudo make install || { echo "Install failed"; exit 1; }
+	cd ..
+}
+
+#-------------------------------
+# check_cet_state(): Load msr driver and read CET MSRs
+#-------------------------------
+check_cet_state() {
+	sudo modprobe msr
+
+	local u_cet s_cet
+	u_cet=$(sudo rdmsr -p 0 0x6a0 2>/dev/null)
+	s_cet=$(sudo rdmsr -p 0 0x6a2 2>/dev/null)
+
+	echo "IA32_U_CET (0x6a0): ${u_cet}"
+	echo "IA32_S_CET (0x6a2): ${s_cet}"
+
+	# Interpret values
+	if [[ "${u_cet}" -eq 1 ]]; then
+		echo "User-mode IBT is enabled."
+	else
+		echo "User-mode IBT is not enabled."
+	fi
+
+	if [[ "${s_cet}" -eq 4 ]]; then
+		echo "Kernel-mode IBT is enabled."
+	else
+		echo "Kernel-mode IBT is not enabled."
+	fi
+}
+
+#-------------------------------
+# main(): Orchestrate workflow
+#-------------------------------
+main() {
+	case "$1" in
+		-h|--help|help)
+			usage
+			exit 0
+			;;
+	esac
+
+	# Skip build steps if rdmsr is already installed
+	if command -v rdmsr &>/dev/null; then
+		echo "rdmsr already installed. Skipping build steps."
+	else
+		check_dev_tools
+		build_msr_tools
+	fi
+
+	check_cet_state
+}
+
+#-------------------------------
+# Script entry point
+#-------------------------------
+main "$@"
+
