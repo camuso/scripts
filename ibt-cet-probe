@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #===========================================================
-# Script: check_ibt_cet.sh
+# Script: ibt-cet-probe
 # Purpose: Ensure Development Tools are installed, build msr-tools,
 #	   read CET MSRs, and report IBT/CET state.
 #===========================================================
@@ -30,13 +30,15 @@ usage() {
 Usage: $0 [options]
 
 Options:
-	-h, --help, help	Show this help message
+        -h, --help, help
 
 Description:
-	This script checks if the "${DEV_GROUP}" group is installed.
-	If not, it installs it non-interactively.
-	Then it clones and builds msr-tools, loads the msr driver,
-	reads CET MSRs (0x6a0 and 0x6a2), and reports IBT/CET state.
+        This script uses msr-tools to probe for IBT / CET state.
+        msr-tools depends on the "${DEV_GROUP}" group. If that is
+        not installed, it will be installed non-interactively so
+        msr-tools can be cloned and installed.
+        With msr-tools installed, the script loads the msr driver,
+        reads CET MSRs (0x6a0 and 0x6a2), and reports IBT/CET state.
 EOF
 }
 
