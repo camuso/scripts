@@ -94,7 +94,7 @@ mkrepo() {
 		repodir="/work/$majver"
 		repo="git@gitlab.com:redhat/rhel/src/kernel/rhel-${majver}.git"
 
-	elif [ "$mr_distro" == "centos-stream" ]; then
+	elif [ "$mr_distro" == "centos-stream" ] || [ "$mr_distro" == "centos" ]; then
 		reponam="centos-stream-$majver"
 		repodir="/work/c${majver}s"
 		repo="git@gitlab.com:redhat/centos-stream/src/kernel/centos-stream-${majver}.git"
