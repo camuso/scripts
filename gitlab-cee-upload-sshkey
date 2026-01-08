@@ -1,0 +1,187 @@
+#!/bin/bash
+#
+# gitlab-cee-upload-sshkey
+#
+# Upload or update SSH key in GitLab CEE (gitlab.cee.redhat.com),
+# using hostname as title.
+#
+
+# --- Script-level variable declarations ---
+declare gitlab_token="${GITLAB_CEE_TOKEN:-}"
+declare gitlab_api="https://gitlab.cee.redhat.com/api/v4"
+declare title="$(hostname)"
+declare key_file=""
+declare pubkey=""
+declare keys_json=""
+declare key_id=""
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-h|--help] [-t TITLE]
+
+Upload or update your SSH public key to gitlab.cee.redhat.com.
+
+The script will:
+  1. Look for an existing SSH public key (~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)
+  2. Generate a new Ed25519 key if none exists
+  3. Upload the key to GitLab CEE, or update the title if key already exists
+
+Environment Variables:
+  GITLAB_CEE_TOKEN   Required. Your GitLab CEE personal access token with 'api' scope.
+                     Create one at: https://gitlab.cee.redhat.com/-/user_settings/personal_access_tokens
+
+Options:
+  -h, --help, help   Show this help message
+  -t, --title TITLE  Use TITLE instead of hostname for the key title
+
+Examples:
+  $(basename "$0")              # Upload key with hostname as title
+  $(basename "$0") -t mykey     # Upload key with "mykey" as title
+
+EOF
+)"
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exitme 1
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#** find_or_generate_key: locate SSH public key or generate new one
+#*
+# Sets global: key_file
+#*
+find_or_generate_key() {
+	if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
+		key_file="$HOME/.ssh/id_ed25519.pub"
+	elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
+		key_file="$HOME/.ssh/id_rsa.pub"
+	else
+		echo "No SSH public key found. Generating a new Ed25519 key..."
+		ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N "" || {
+			exitme 1 "Failed to generate Ed25519 key"
+		}
+		key_file="$HOME/.ssh/id_ed25519.pub"
+	fi
+
+	if [[ ! -f "$key_file" ]]; then
+		exitme 1 "Key file not found: $key_file"
+	fi
+
+	echo "Using SSH key: $key_file"
+}
+
+#** read_public_key: read the public key content
+#*
+# Sets global: pubkey
+#*
+read_public_key() {
+	pubkey=$(<"$key_file")
+}
+
+#** fetch_existing_keys: fetch existing SSH keys from GitLab
+#*
+# Sets global: keys_json
+#*
+fetch_existing_keys() {
+	echo "Fetching existing keys from GitLab CEE..."
+	keys_json=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
+		"$gitlab_api/user/keys")
+}
+
+#** find_matching_key: check if current key already exists in GitLab
+#*
+# Sets global: key_id
+#*
+find_matching_key() {
+	key_id=$(echo "$keys_json" | jq -r --arg PUBKEY "$pubkey" \
+		'.[] | select(.key==$PUBKEY) | .id')
+}
+
+#** upload_or_update_key: upload new key or update existing key title
+#*
+upload_or_update_key() {
+	local response=""
+
+	if [[ -n "$key_id" && "$key_id" != "null" ]]; then
+		echo "Key already exists (id=$key_id). Updating title to: $title"
+		response=$(curl -s --request PUT \
+			--header "PRIVATE-TOKEN: $gitlab_token" \
+			--header "Content-Type: application/json" \
+			--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
+			"$gitlab_api/user/keys/$key_id")
+	else
+		echo "Uploading new key with title: $title"
+		response=$(curl -s --request POST \
+			--header "PRIVATE-TOKEN: $gitlab_token" \
+			--header "Content-Type: application/json" \
+			--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
+			"$gitlab_api/user/keys")
+	fi
+
+	echo "$response" | jq .
+}
+
+#** main
+#*
+main() {
+	trap control_c SIGINT
+
+	# Check for required token
+	if [[ -z "$gitlab_token" ]]; then
+		exitme 1 "GITLAB_CEE_TOKEN environment variable is not set."
+	fi
+
+	# Parse arguments
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-t|--title)
+				shift
+				if [[ -z "$1" ]]; then
+					exitme 1 "Option -t requires a title argument"
+				fi
+				title="$1"
+				shift
+				;;
+			*)
+				exitme 1 "Unknown option: $1"
+				;;
+		esac
+	done
+
+	find_or_generate_key
+	read_public_key
+	fetch_existing_keys
+	find_matching_key
+	upload_or_update_key
+}
+
+main "$@"
+
