@@ -256,8 +256,6 @@ echo "* Clone or update Env Files   *"
 echo "*******************************"
 echo
 
-upload_github_ssh_key
-
 echo "repolist: $repolist"
 for repo in $repolist; do
 	if [ -e $repo ]; then
