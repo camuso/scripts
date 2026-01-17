@@ -123,7 +123,7 @@ echo "remotehost: $remotehost"
 #
 if [[ "$distro" == "fedora" ]]; then
 	installagent=dnf
-	installflags="--allowerasing --best"
+	installflags="--allowerasing --best --skip-unavailable"
 
 elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 	if [ $majvers -lt 8 ]; then
@@ -131,7 +131,7 @@ elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 		installflags="--nogpgcheck --skip-broken"
 	else
 		installagent="dnf"
-		installflags="--allowerasing --best"
+		installflags="--allowerasing --best --skip-unavailable"
 	fi
 
 elif [[ "$distro" == "ubuntu" ]]; then
@@ -428,66 +428,77 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 
 	$installagent group install -y "Development Tools"
 
-	for pkg in \
-	annobin-annocheck \
-	automake \
-	annobin \
-	annobin-annocheck \
-	centpkg \
-	elfutils-libelf-devel \
-	gcc \
-	gcc-c++ \
-	go \
-	bc \
-	bind-utils \
-	bison \
-	brewkoji \
-	ca-certificates \
-	cmake \
-	conserver-client \
-	cscope \
-	dwarves libdwarves1 \
-	elfutils-devel elfutils-libs elfutils-libelf \
-	elinks \
-	ethtool \
-	flex \
-	git-email \
-	golang \
-	hostname \
-	ipmitool \
-	kmod \
-	kmod-libs \
-	krb5-workstation krb5-libs \
-	lab \
-	libdwarf libdwarf-devel \
-	lynx \
-	make \
-	mutt \
-	ncurses ncurses-devel \
-	net-tools \
-	nmap \
-	OpenIPMI \
-	openssl openssl-devel \
-	patch patchutils \
-	perl \
-	pv \
-	python-bugzilla-cli \
-	rhpkg \
-	rpm-build \
-	rsync \
-	texinfo \
-	tpm-tools \
-	usbutils \
-	vim vim-enhanced vim-filesystem \
-	watchdog \
-	waiverdb-cli \
-	xclip \
-	xorg-x11-apps \
-	xz \
-	zenity \
-	; do
-		$installagent install -y $installflags $pkg
-	done
+	# Install all packages in a single transaction for speed
+	# (dnf handles missing packages gracefully with --skip-unavailable)
+	local pkglist=(
+		annobin
+		annobin-annocheck
+		automake
+		bc
+		bind-utils
+		bison
+		brewkoji
+		ca-certificates
+		centpkg
+		cmake
+		conserver-client
+		cscope
+		dwarves
+		elfutils-devel
+		elfutils-libelf
+		elfutils-libelf-devel
+		elfutils-libs
+		elinks
+		ethtool
+		flex
+		gcc
+		gcc-c++
+		git-email
+		go
+		golang
+		hostname
+		ipmitool
+		kmod
+		kmod-libs
+		krb5-libs
+		krb5-workstation
+		lab
+		libdwarf
+		libdwarf-devel
+		libdwarves1
+		lynx
+		make
+		mutt
+		ncurses
+		ncurses-devel
+		net-tools
+		nmap
+		OpenIPMI
+		openssl
+		openssl-devel
+		patch
+		patchutils
+		perl
+		pv
+		python-bugzilla-cli
+		rhpkg
+		rpm-build
+		rsync
+		texinfo
+		tpm-tools
+		usbutils
+		vim
+		vim-enhanced
+		vim-filesystem
+		waiverdb-cli
+		watchdog
+		xclip
+		xorg-x11-apps
+		xz
+		zenity
+	)
+
+	$installagent install -y $installflags "${pkglist[@]}"
 
 	# orphaned packages
 	#
