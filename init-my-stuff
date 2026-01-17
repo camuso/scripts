@@ -516,7 +516,7 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 		echo "filesys:$filesys:"
 # trap : DEBUG
 		case "$filesys" in
-			"xfs" ) yes | $HOME/bin/mkworkdir
+			"xfs" ) $HOME/bin/mkworkdir -y
 				;;
 			"btrfs" ) btrfs subvolume create /work
 				;;
