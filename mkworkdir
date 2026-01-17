@@ -2,79 +2,83 @@
 #
 # mkworkdir
 
-set -euo pipefail
-IFS=$'\n\t'
-
-MYDIR="$(dirname "$(readlink -f "$0")")"
-MYLIB="$MYDIR/lib"
+declare MYDIR="$(dirname "$(readlink -f "$0")")"
+declare MYLIB="$MYDIR/lib"
 
 declare usagestr=$(
 cat <<EOF
 
-$(basename $0)
+$(basename $0) [-h|--help] [-y|--yes] [-s size]
 
 Description:
-        NOTE: For xfs filesystems only!
-	Remove and recreate home directory with smaller size and create
-	a /work logical volume with a size large enough to do actual work.
+	Create a /work logical volume on an XFS filesystem.
 
-Arguments:
-	help : print this text to the screen.
+	If there is sufficient free space in the volume group, /work will be
+	created directly without modifying /home.
+
+	If there is insufficient free space, /home will be shrunk by removing
+	and recreating it at half size, with the remaining space used for /work.
+	NOTE: XFS cannot be shrunk, so /home must be destroyed and recreated!
+
+Options:
+	-h, --help   Show this help message
+	-y, --yes    Non-interactive mode (no confirmation prompts)
+	-s, --size   Specify /work size in GB (default: auto-calculated)
 
 \0
 EOF
 )
-
-usage() {
-	echo -e "$usagestr"
-	exit 1
-}
 
 declare warning=$(
 cat <<EOF
 
- Be sure you have backed-up or moved everything in your /home directory,
- because it will be destroyed.
+ WARNING: Insufficient free space in volume group!
 
- Press ctrl-c NOW if you need to do that first.
- Press any other key to continue.
+ To create /work, this script must DESTROY and recreate /home at half size.
+
+ Be sure you have backed-up or moved everything in your /home directory,
+ because it WILL BE DESTROYED.
+
+ Press 'y' to continue, or any other key to abort.
 \0
 EOF
 )
 
-declare homemap= 	# extracted from fstab
-declare workmap=	# same as homemap but with work in place of home
-declare homedir=	# fixed as "/home"
-declare workdir=	# fixed as "/work"
-declare worksiz=	# size of work directory, half of homdir size
-declare newhomesiz=	# new size of homedir is half of original size
+#** usage: print usage and exit
+#*
+usage() {
+	echo -e "$usagestr"
+	exit 0
+}
 
-declare -i aok=0
-declare -i novg=1
-declare -i novfree=2
-
-declare -a errmsg=(
-""
-"Cannot find VG in vgs fields."
-"Cannot find VFree in vgs fields."
-)
-
-# exitme
-#
+#** exitme: exit with code and optional message
+#*
 # Arguments
 #   $1 - exit code
 #   $2 - optional message
-#
+#*
 exitme() {
 	local -i code="$1"
-	local msg="$2"
+	local msg="${2:-}"
 
 	((code == 0)) && exit "$code"
-	echo -e "$msg"
-	usage
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
 	exit "$code"
 }
 
+#** control_c: handle SIGINT
+#*
+control_c() {
+	echo -e "\nAborted by user." >&2
+	exit 130
+}
+
+#** update_fstab: add or update fstab entry for a mount point
+#*
+# Arguments
+#   $1 - mount directory (e.g., /work)
+#   $2 - device mapper path
+#*
 update_fstab() {
 	local dir="$1"
 	local map="$2"
@@ -84,91 +88,234 @@ update_fstab() {
 	uid="$(blkid -s UUID -o value "$map")"
 	fline="$(grep -n -E "[[:space:]]$dir[[:space:]]" /etc/fstab | cut -d: -f1)"
 
-	# If the line already exists in the fstab, delete it, because
-	# we're going to replace it.
-	[ -n "$fline" ] && sed -i.bak "$fline"d /etc/fstab
+	# If the line already exists in fstab, delete it (we'll replace it)
+	[[ -n "$fline" ]] && sed -i.bak "${fline}d" /etc/fstab
 
 	printf 'UUID=%s %s xfs defaults 0 0\n' "$uid" "$dir" >> /etc/fstab
 }
 
-main() {
-	[[ "${1:-}" == *h* ]] && usage
-	(( EUID == 0 )) || exitme 1 "Must be root to run this script"
+#** get_vg_free: get free space in volume group in GB
+#*
+# Arguments
+#   $1 - volume group name
+# Returns
+#   Free space as integer GB via stdout
+#*
+get_vg_free() {
+	local vgname="$1"
+	vgs --noheadings --units g -o vg_free "$vgname" | awk '{ print int($1) }'
+}
 
-	local homesiz	# size of the home directory extracted from lvs
-	# /dev/mapper names
-	local homemap	# e.g. /dev/mapper/rhel_dell--per440--01-home
-	local workmap	# e.g. /dev/mapper/rhel_dell--per440--01-work
-	# fstab entries
-	local homefs	# fstab entry for /home
-	local workfs	# fstab entry for /work
-	local line
-	local uuid_ref
-	local uuid
-	local vgname
+#** create_work_from_free: create /work using VG free space
+#*
+# Arguments
+#   $1 - volume group name
+#   $2 - size in GB
+#*
+create_work_from_free() {
+	local vgname="$1"
+	local size="$2"
+	local workmap="/dev/$vgname/work"
 
-	# Find which logical volume is the home directory
-	uuid_ref="$(awk '$2=="/home" && $1 ~ /^UUID=/ { print $1 }' /etc/fstab)" \
-		|| exitme 1 "Can't find \'home\' in /etc/fstab"
-	uuid="${uuid_ref#UUID=}"
-	homemap="$(blkid -U "$uuid")"
-	workmap="${homemap/home/work}"
+	echo "Creating /work LV (${size}G) from free VG space..."
+	lvcreate -y -L "${size}G" -n work "$vgname"
 
-	# verify /dev/mapper/...-home is XFS, else abort
-	fsdev_type=$(blkid -s TYPE -o value "$homemap")
-	if [[ "$fsdev_type" != "xfs" ]]; then
-	  exitme 1 "$homemap is not XFS (found: $fsdev_type). Aborting."
-	fi
+	echo "Formatting /work as XFS..."
+	mkfs.xfs "$workmap"
 
-	homedir="/home"
-	workdir="/work"
+	mkdir -p /work
+	update_fstab /work "$workmap"
 
-	# Derive the VG name by invoking lvs for the $homemap.
-	# Remove leading white space with awk.
-	vgname="$(lvs --noheadings -o vg_name "$homemap" | awk '{$1=$1; print}')"
+	systemctl daemon-reload
+	mount /work
 
-	# Check for existing work LV
-	if lvdisplay "$vgname/work" &>/dev/null; then
-		exitme 1 "'work' LV already exists in $vgname"
-	fi
+	restorecon -R /work
+	echo "Done! /work created and mounted."
+}
 
-	# Pull the /home LV size in GB as an integer
-	# Use awk to convert to integer and remove leading white space.
-	homesiz="$(
-	  lvs --noheadings --units g -o lv_size "${vgname}/home" \
-	    | awk '{ print int($1) }'
-	)"
+#** create_work_by_splitting_home: destroy /home, recreate smaller, create /work
+#*
+# Arguments
+#   $1 - volume group name
+#   $2 - home device mapper path
+#   $3 - new home size in GB
+#   $4 - work size in GB
+#*
+create_work_by_splitting_home() {
+	local vgname="$1"
+	local homemap="$2"
+	local newhomesiz="$3"
+	local worksiz="$4"
+	local workmap="${homemap/home/work}"
 
-	# Compute new sizes
-	newhomesiz=$(( homesiz / 2 ))
-	worksiz=$(( homesiz - newhomesiz ))
+	echo "Unmounting /home..."
+	umount -l /home
 
-	# Debug output
-cat <<EOF
-VG name:      $vgname
-Current size: ${homesiz}G
-New /home:    ${newhomesiz}G
-/work size:   ${worksiz}G
-EOF
-	umount -v -l "$homedir"
-	lvremove -v /dev/"$vgname"/home
-	lvcreate -v -L "${newhomesiz}"G -n home "$vgname"
-	lvcreate -v -L "${worksiz}"G -n work "$vgname"
+	echo "Removing old /home LV..."
+	lvremove -y /dev/"$vgname"/home
 
+	echo "Creating new /home LV (${newhomesiz}G)..."
+	lvcreate -y -L "${newhomesiz}G" -n home "$vgname"
+
+	echo "Creating /work LV (${worksiz}G)..."
+	lvcreate -y -L "${worksiz}G" -n work "$vgname"
+
+	echo "Formatting filesystems..."
 	mkfs.xfs "$homemap"
 	mkfs.xfs "$workmap"
-	mkdir -p "$homedir" "$workdir"
 
-	update_fstab "$homedir" "$homemap"
-	update_fstab "$workdir" "$workmap"
+	mkdir -p /home /work
+
+	update_fstab /home "$homemap"
+	update_fstab /work "$workmap"
 
 	systemctl daemon-reload
 	mount -a
 
 	restorecon -R /work
 	restorecon -R /home
+
+	echo "Done! /home resized and /work created."
+}
+
+#** main
+#*
+main() {
+	trap control_c SIGINT
+
+	local b_yes=false
+	local requested_size=""
+	local homemap
+	local workmap
+	local uuid_ref
+	local uuid
+	local vgname
+	local homesiz
+	local vgfree
+	local newhomesiz
+	local worksiz
+	local fsdev_type
+	local response
+
+	# Parse arguments
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				;;
+			-y|--yes)
+				b_yes=true
+				;;
+			-s|--size)
+				shift
+				requested_size="$1"
+				;;
+			*)
+				exitme 1 "Unknown option: $1"
+				;;
+		esac
+		shift
+	done
+
+	# Must be root
+	(( EUID == 0 )) || exitme 1 "Must be root to run this script"
+
+	# Check if /work already exists
+	if [[ -d /work ]] && mountpoint -q /work; then
+		exitme 1 "/work is already mounted"
+	fi
+
+	# Find the /home logical volume via fstab UUID
+	uuid_ref="$(awk '$2=="/home" && $1 ~ /^UUID=/ { print $1 }' /etc/fstab)" \
+		|| exitme 1 "Cannot find /home in /etc/fstab"
+	uuid="${uuid_ref#UUID=}"
+	homemap="$(blkid -U "$uuid")" \
+		|| exitme 1 "Cannot find device for UUID: $uuid"
+	workmap="${homemap/home/work}"
+
+	# Verify /home is XFS
+	fsdev_type=$(blkid -s TYPE -o value "$homemap")
+	if [[ "$fsdev_type" != "xfs" ]]; then
+		exitme 1 "$homemap is not XFS (found: $fsdev_type). Aborting."
+	fi
+
+	# Get volume group name
+	vgname="$(lvs --noheadings -o vg_name "$homemap" | awk '{$1=$1; print}')"
+
+	# Check if work LV already exists
+	if lvdisplay "$vgname/work" &>/dev/null; then
+		exitme 1 "'work' LV already exists in VG '$vgname'"
+	fi
+
+	# Get current /home size and VG free space
+	homesiz="$(lvs --noheadings --units g -o lv_size "${vgname}/home" | awk '{ print int($1) }')"
+	vgfree="$(get_vg_free "$vgname")"
+
+	# Determine /work size
+	if [[ -n "$requested_size" ]]; then
+		worksiz="$requested_size"
+	else
+		# Default: half of /home size
+		worksiz=$(( homesiz / 2 ))
+	fi
+
+	# Ensure we have a reasonable size
+	if (( worksiz < 10 )); then
+		exitme 1 "Calculated /work size (${worksiz}G) is too small. Specify with -s."
+	fi
+
+	echo "========================================"
+	echo "Volume Group:     $vgname"
+	echo "Current /home:    ${homesiz}G"
+	echo "VG Free Space:    ${vgfree}G"
+	echo "Requested /work:  ${worksiz}G"
+	echo "========================================"
+
+	# Strategy: use free space if available, otherwise split /home
+	if (( vgfree >= worksiz )); then
+		echo ""
+		echo "Sufficient free space available in VG."
+		echo "/home will NOT be modified."
+		echo ""
+
+		if $b_yes; then
+			echo "Non-interactive mode: proceeding..."
+			create_work_from_free "$vgname" "$worksiz"
+		else
+			read -r -p "Create /work (${worksiz}G) from free space? [y/N] " response
+			if [[ "$response" =~ ^[Yy]$ ]]; then
+				create_work_from_free "$vgname" "$worksiz"
+			else
+				echo "Aborted."
+				exit 0
+			fi
+		fi
+	else
+		# Need to split /home
+		newhomesiz=$(( homesiz / 2 ))
+		worksiz=$(( homesiz - newhomesiz ))
+
+		echo ""
+		echo "New /home size:   ${newhomesiz}G"
+		echo "New /work size:   ${worksiz}G"
+		echo ""
+
+		if $b_yes; then
+			echo "Non-interactive mode: proceeding to destroy and recreate /home..."
+			create_work_by_splitting_home "$vgname" "$homemap" "$newhomesiz" "$worksiz"
+		else
+			echo -e "$warning"
+			read -r -n 1 -p "" response
+			echo ""
+
+			if [[ "$response" =~ ^[Yy]$ ]]; then
+				create_work_by_splitting_home "$vgname" "$homemap" "$newhomesiz" "$worksiz"
+			else
+				echo "Aborted."
+				exit 0
+			fi
+		fi
+	fi
 }
 
 main "$@"
-
-exit 0
