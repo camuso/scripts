@@ -24,6 +24,7 @@ declare host="$(hostname)"
 declare tmpstr=
 declare newuser=
 declare majvers
+declare -a pkglist
 
 # Init the logfile
 > "$logfile"
@@ -123,7 +124,7 @@ echo "remotehost: $remotehost"
 #
 if [[ "$distro" == "fedora" ]]; then
 	installagent=dnf
-	installflags="--allowerasing --best --skip-unavailable"
+	installflags="--allowerasing --best --skip-broken"
 
 elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 	if [ $majvers -lt 8 ]; then
@@ -131,7 +132,7 @@ elif [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
 		installflags="--nogpgcheck --skip-broken"
 	else
 		installagent="dnf"
-		installflags="--allowerasing --best --skip-unavailable"
+		installflags="--allowerasing --best --skip-broken"
 	fi
 
 elif [[ "$distro" == "ubuntu" ]]; then
@@ -178,71 +179,115 @@ else
 fi
 
 upload_github_ssh_key() {
-    local key_type="${1:-ed25519}"   # default to ed25519, fallback to rsa if needed
-    local key_file
+	local key_type="${1:-ed25519}"
+	local key_file
+	local priv_file
+	local pubkey
+	local existing_keys
 
-    # Decide key file path based on type
-    if [[ "$key_type" == "rsa" ]]; then
-        key_file="$HOME/.ssh/id_rsa.pub"
-        priv_file="$HOME/.ssh/id_rsa"
-    else
-        key_file="$HOME/.ssh/id_ed25519.pub"
-        priv_file="$HOME/.ssh/id_ed25519"
-    fi
+	# Decide key file path based on type
+	if [[ "$key_type" == "rsa" ]]; then
+		key_file="$HOME/.ssh/id_rsa.pub"
+		priv_file="$HOME/.ssh/id_rsa"
+	else
+		key_file="$HOME/.ssh/id_ed25519.pub"
+		priv_file="$HOME/.ssh/id_ed25519"
+	fi
 
-    # Generate key if missing
-    if [[ ! -f "$key_file" ]]; then
-        echo "No $key_type key found, generating one..."
-        mkdir -p "$HOME/.ssh"
-        chmod 700 "$HOME/.ssh"
-        if [[ "$key_type" == "rsa" ]]; then
-            ssh-keygen -t rsa -b 4096 -f "$priv_file" -N ""
-        else
-            ssh-keygen -t ed25519 -f "$priv_file" -N ""
-        fi
-    fi
+	# Generate key if missing
+	if [[ ! -f "$key_file" ]]; then
+		echo "No $key_type key found, generating one..."
+		mkdir -p "$HOME/.ssh"
+		chmod 700 "$HOME/.ssh"
+		if [[ "$key_type" == "rsa" ]]; then
+			ssh-keygen -t rsa -b 4096 -f "$priv_file" -N ""
+		else
+			ssh-keygen -t ed25519 -f "$priv_file" -N ""
+		fi
+	fi
 
-    # Ensure token is present
-    if [[ -z "$GITHUB_TOKEN" ]]; then
-        echo "Error: GITHUB_TOKEN environment variable not set" >&2
-        return 1
-    fi
+	# Ensure token is present
+	if [[ -z "$GITHUB_TOKEN" ]]; then
+		echo "Error: GITHUB_TOKEN environment variable not set" >&2
+		return 1
+	fi
 
-    # Prepare title and key
-    local pubkey
-    pubkey=$(<"$key_file")
-    local title="${HOSTNAME:-$(hostname)}-$(date +%Y%m%d%H%M%S)"
+	# Extract just the key data (second field) for comparison
+	local key_data
+	key_data=$(awk '{print $2}' < "$key_file")
 
-    # Upload via GitHub API
-    curl -s -H "Authorization: token $GITHUB_TOKEN" \
-         -H "Accept: application/vnd.github+json" \
-         https://api.github.com/user/keys \
-         -d "{\"title\":\"$title\",\"key\":\"$pubkey\"}"
+	# Check if key already exists on GitHub
+	existing_keys=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github+json" \
+		https://api.github.com/user/keys 2>/dev/null)
+
+	if echo "$existing_keys" | grep -qF "$key_data"; then
+		echo "SSH key already exists on GitHub. Skipping upload."
+		return 0
+	fi
+
+	# Prepare title and key
+	pubkey=$(<"$key_file")
+	local title="${HOSTNAME:-$(hostname)}-$(date +%Y%m%d%H%M%S)"
+
+	# Upload via GitHub API
+	echo "Uploading SSH key to GitHub..."
+	if curl -s -H "Authorization: token $GITHUB_TOKEN" \
+		-H "Accept: application/vnd.github+json" \
+		https://api.github.com/user/keys \
+		-d "{\"title\":\"$title\",\"key\":\"$pubkey\"}" >/dev/null; then
+		echo "SSH key uploaded to GitHub successfully."
+	else
+		echo "GitHub key upload failed. You may need to enter it manually."
+	fi
 }
 
 # copy the ssh key to gitlab
 #
 upload_gitlab_ssh_key() {
-	# --- Upload SSH key to GitLab ---
-	if [[ -n "$gitlabtok" ]]; then
-	    # Detect available public key
-	    if [[ -f ~/.ssh/id_ed25519.pub ]]; then
-		KEYFILE=~/.ssh/id_ed25519.pub
-	    elif [[ -f ~/.ssh/id_rsa.pub ]]; then
-		KEYFILE=~/.ssh/id_rsa.pub
-	    else
-		echo "❌ No SSH public key found. Skipping GitLab upload."
-		return 1
-	    fi
+	local keyfile
+	local local_key
+	local existing_keys
 
-	    echo "⬆️  Uploading SSH key to GitLab..."
-	    curl --silent --show-error --fail \
+	# --- Upload SSH key to GitLab ---
+	if [[ -z "$gitlabtok" ]]; then
+		return 0
+	fi
+
+	# Detect available public key
+	if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+		keyfile=~/.ssh/id_ed25519.pub
+	elif [[ -f ~/.ssh/id_rsa.pub ]]; then
+		keyfile=~/.ssh/id_rsa.pub
+	else
+		echo "No SSH public key found. Skipping GitLab upload."
+		return 1
+	fi
+
+	# Extract just the key type and key data (without the comment)
+	# Format: "ssh-ed25519 AAAA... comment"
+	local_key=$(awk '{print $1, $2}' < "$keyfile")
+
+	# Check if key already exists on GitLab
+	existing_keys=$(curl --silent \
+		--header "PRIVATE-TOKEN: $gitlabtok" \
+		https://gitlab.com/api/v4/user/keys 2>/dev/null)
+
+	if echo "$existing_keys" | grep -qF "$(awk '{print $2}' < "$keyfile")"; then
+		echo "SSH key already exists on GitLab. Skipping upload."
+		return 0
+	fi
+
+	echo "Uploading SSH key to GitLab..."
+	if curl --silent --show-error --fail \
 		--header "PRIVATE-TOKEN: $gitlabtok" \
 		--request POST \
 		--form "title=$(hostname)-$(date +%Y%m%d)" \
-		--form "key=$(<"$KEYFILE")" \
-		https://gitlab.com/api/v4/user/keys \
-		|| echo "❌ GitLab key upload failed. You may need to enter it manually."
+		--form "key=$(<"$keyfile")" \
+		https://gitlab.com/api/v4/user/keys >/dev/null; then
+		echo "SSH key uploaded to GitLab successfully."
+	else
+		echo "GitLab key upload failed. You may need to enter it manually."
 	fi
 }
 
@@ -429,8 +474,8 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 	$installagent group install -y "Development Tools"
 
 	# Install all packages in a single transaction for speed
-	# (dnf handles missing packages gracefully with --skip-unavailable)
-	local pkglist=(
+	# (dnf handles missing packages gracefully with --skip-broken)
+	pkglist=(
 		annobin
 		annobin-annocheck
 		automake
