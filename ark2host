@@ -103,6 +103,16 @@ else
 	echo "Can't find .config/lab/lab.toml"
 fi
 
+# Copy the GitHub token file
+if [ -f ~/.config/github/mygithubtoken ]; then
+       rsync -Pat --rsync-path='mkdir -p .config/github/ && rsync' \
+               ~/.config/github/mygithubtoken "$user"@"$host":.config/github/mygithubtoken
+       ssh "$user@$host" "chmod 600 ~/.config/github/mygithubtoken"
+       echo "Copied GitHub token to remote host"
+else
+       echo "Warning: ~/.config/github/mygithubtoken not found locally"
+fi
+
 script="$HOME/bin/bootstrap-github-access"
 if [[ ! -f "$script" ]]; then
   echo "❌ Script not found: $script"
