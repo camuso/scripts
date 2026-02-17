@@ -1,0 +1,488 @@
+#!/bin/bash
+#
+# tboot-check - Check system readiness for tboot with SECRETS=TRUE
+#
+# Checks:
+#   1. msr-tools installation
+#   2. IA32_FEATURE_CONTROL MSR (0x3A) for TXT/tboot support
+#   3. BIOS settings for successful tboot launch
+#   4. IBT/CET (Control-flow Enforcement Technology) support
+#
+
+#######################################
+# Script-Level Variables
+#######################################
+
+# Minimal color definitions
+declare OFF=$'\e[0m'
+declare BLD=$'\e[1m'
+declare MNU=$'\e[1;96m'
+declare INF=$'\e[0;96m'
+declare WRN=$'\e[0;93m'
+declare CAU=$'\e[0;91m'
+declare STA=$'\e[0;92m'
+
+declare -i verbose=0
+declare -i exit_status=0
+
+# MSR 0x3A bit definitions (IA32_FEATURE_CONTROL)
+declare -ir MSR_LOCK=0x1              # Bit 0: Lock bit
+declare -ir MSR_VMX_SMX=0x2           # Bit 1: Enable VMX inside SMX
+declare -ir MSR_VMX_NO_SMX=0x4        # Bit 2: Enable VMX outside SMX
+declare -ir MSR_SENTER_LOCAL=0x7F00   # Bits 8-14: SENTER local enables
+declare -ir MSR_SENTER_GLOBAL=0x8000  # Bit 15: SENTER global enable
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-h] [-v]
+
+Check system readiness for tboot with SECRETS=TRUE.
+
+Options:
+  -h, --help     Show this help message
+  -v, --verbose  Verbose output with detailed explanations
+
+Checks performed:
+  1. msr-tools package installation
+  2. IA32_FEATURE_CONTROL MSR (0x3A) for TXT support
+  3. BIOS/firmware settings for tboot
+  4. IBT/CET support and activation status
+
+Exit codes:
+  0 - All checks passed, system ready for tboot with SECRETS=TRUE
+  1 - One or more checks failed
+  2 - Cannot determine (insufficient permissions or missing tools)
+
+EOF
+)"
+
+#######################################
+# Functions
+#######################################
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exitme 130
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	exit "$code"
+}
+
+#** print_header: print a section header
+#*
+print_header() {
+	local title="$1"
+	echo ""
+	echo -e "${MNU}=== $title ===${OFF}"
+}
+
+#** print_pass: print a passing check
+#*
+print_pass() {
+	echo -e "  ${STA}[PASS]${OFF} $1"
+}
+
+#** print_fail: print a failing check
+#*
+print_fail() {
+	echo -e "  ${CAU}[FAIL]${OFF} $1"
+	exit_status=1
+}
+
+#** print_warn: print a warning
+#*
+print_warn() {
+	echo -e "  ${WRN}[WARN]${OFF} $1"
+}
+
+#** print_info: print info (verbose only)
+#*
+print_info() {
+	((verbose)) && echo -e "  ${INF}[INFO]${OFF} $1"
+}
+
+#** check_root: verify running as root
+#*
+check_root() {
+	if [[ $EUID -ne 0 ]]; then
+		echo -e "${CAU}Error:${OFF} This script must be run as root (for MSR access)"
+		echo "Try: sudo $0"
+		exitme 2
+	fi
+}
+
+#** check_msr_tools: ensure msr-tools is installed
+#*
+check_msr_tools() {
+	print_header "MSR Tools Check"
+
+	if command -v rdmsr &>/dev/null; then
+		print_pass "msr-tools is installed"
+		print_info "rdmsr location: $(command -v rdmsr)"
+		return 0
+	fi
+
+	print_warn "msr-tools not installed, attempting to install..."
+
+	# Detect package manager and install
+	if command -v dnf &>/dev/null; then
+		dnf install -y msr-tools &>/dev/null
+	elif command -v yum &>/dev/null; then
+		yum install -y msr-tools &>/dev/null
+	elif command -v apt-get &>/dev/null; then
+		apt-get update &>/dev/null && apt-get install -y msr-tools &>/dev/null
+	else
+		print_fail "Cannot install msr-tools: unknown package manager"
+		return 1
+	fi
+
+	if command -v rdmsr &>/dev/null; then
+		print_pass "msr-tools installed successfully"
+		return 0
+	else
+		print_fail "Failed to install msr-tools"
+		return 1
+	fi
+}
+
+#** load_msr_module: ensure msr kernel module is loaded
+#*
+load_msr_module() {
+	if [[ ! -c /dev/cpu/0/msr ]]; then
+		print_info "Loading msr kernel module..."
+		modprobe msr 2>/dev/null
+		if [[ ! -c /dev/cpu/0/msr ]]; then
+			print_fail "Cannot load msr kernel module"
+			return 1
+		fi
+	fi
+	return 0
+}
+
+#** check_msr_feature_control: read and analyze IA32_FEATURE_CONTROL (0x3A)
+#*
+check_msr_feature_control() {
+	print_header "IA32_FEATURE_CONTROL MSR (0x3A) Analysis"
+
+	load_msr_module || return 1
+
+	local msr_val
+	msr_val=$(rdmsr -p 0 0x3a 2>/dev/null)
+
+	if [[ -z "$msr_val" ]]; then
+		print_fail "Cannot read MSR 0x3A"
+		return 1
+	fi
+
+	# Convert to decimal for bitwise operations
+	local -i val=$((16#$msr_val))
+
+	echo -e "  ${INF}Raw value:${OFF} 0x$msr_val (decimal: $val)"
+
+	# Check each relevant bit
+	local -i locked=$((val & MSR_LOCK))
+	local -i vmx_smx=$((val & MSR_VMX_SMX))
+	local -i vmx_no_smx=$((val & MSR_VMX_NO_SMX))
+	local -i senter_local=$((val & MSR_SENTER_LOCAL))
+	local -i senter_global=$((val & MSR_SENTER_GLOBAL))
+
+	echo ""
+	echo -e "  ${INF}Bit Analysis:${OFF}"
+
+	# Bit 0: Lock
+	if ((locked)); then
+		print_pass "Bit 0 (Lock): SET - BIOS has locked settings"
+	else
+		print_warn "Bit 0 (Lock): CLEAR - Settings not locked (unusual)"
+	fi
+
+	# Bit 1: VMX inside SMX (required for tboot with SECRETS=TRUE)
+	if ((vmx_smx)); then
+		print_pass "Bit 1 (VMX in SMX): SET - Required for tboot SECRETS=TRUE"
+	else
+		print_fail "Bit 1 (VMX in SMX): CLEAR - tboot SECRETS=TRUE will NOT work"
+		print_info "Enable 'TXT' or 'Trusted Execution' in BIOS"
+	fi
+
+	# Bit 2: VMX outside SMX
+	if ((vmx_no_smx)); then
+		print_pass "Bit 2 (VMX outside SMX): SET - VMX available"
+	else
+		print_warn "Bit 2 (VMX outside SMX): CLEAR - VMX only in SMX mode"
+	fi
+
+	# Bits 8-14: SENTER local enables
+	if ((senter_local)); then
+		print_pass "Bits 8-14 (SENTER local): 0x$(printf '%x' $((senter_local >> 8))) - SENTER enabled"
+	else
+		print_fail "Bits 8-14 (SENTER local): CLEAR - SENTER not enabled"
+		print_info "SENTER is required for TXT measured launch"
+	fi
+
+	# Bit 15: SENTER global enable
+	if ((senter_global)); then
+		print_pass "Bit 15 (SENTER global): SET - SENTER globally enabled"
+	else
+		print_warn "Bit 15 (SENTER global): CLEAR"
+	fi
+
+	echo ""
+
+	# Summary for tboot SECRETS=TRUE
+	if ((vmx_smx && senter_local && locked)); then
+		print_pass "MSR 0x3A indicates tboot with SECRETS=TRUE should work"
+		return 0
+	else
+		print_fail "MSR 0x3A indicates tboot with SECRETS=TRUE will NOT work"
+		return 1
+	fi
+}
+
+#** check_bios_settings: check BIOS-related settings for tboot
+#*
+check_bios_settings() {
+	print_header "BIOS/Firmware Settings for tboot"
+
+	local -i all_good=1
+
+	# Check for TXT support in CPU
+	if grep -q 'smx' /proc/cpuinfo 2>/dev/null; then
+		print_pass "CPU supports SMX (Safer Mode Extensions / TXT)"
+	else
+		print_fail "CPU does not support SMX - TXT not available"
+		all_good=0
+	fi
+
+	# Check for VMX support
+	if grep -q 'vmx' /proc/cpuinfo 2>/dev/null; then
+		print_pass "CPU supports VMX (VT-x)"
+	else
+		print_fail "CPU does not support VMX - Required for TXT"
+		all_good=0
+	fi
+
+	# Check TPM
+	echo ""
+	echo -e "  ${INF}TPM Status:${OFF}"
+
+	if [[ -c /dev/tpm0 ]] || [[ -c /dev/tpmrm0 ]]; then
+		print_pass "TPM device present (/dev/tpm0 or /dev/tpmrm0)"
+
+		# Check TPM version if tpm2_getcap is available
+		if command -v tpm2_getcap &>/dev/null; then
+			local tpm_ver
+			tpm_ver=$(tpm2_getcap properties-fixed 2>/dev/null | grep -i "TPM2_PT_FAMILY_INDICATOR" | awk '{print $2}')
+			if [[ -n "$tpm_ver" ]]; then
+				print_info "TPM version: $tpm_ver"
+			fi
+		fi
+	else
+		print_fail "TPM device not found - Required for tboot"
+		print_info "Enable TPM in BIOS and ensure tpm module is loaded"
+		all_good=0
+	fi
+
+	# Check IOMMU/VT-d
+	echo ""
+	echo -e "  ${INF}IOMMU/VT-d Status:${OFF}"
+
+	if dmesg 2>/dev/null | grep -qi "DMAR.*IOMMU enabled"; then
+		print_pass "Intel VT-d (IOMMU) is enabled"
+	elif dmesg 2>/dev/null | grep -qi "AMD-Vi"; then
+		print_pass "AMD-Vi (IOMMU) is enabled"
+	elif [[ -d /sys/class/iommu ]]; then
+		local iommu_count
+		iommu_count=$(find /sys/class/iommu -maxdepth 1 -type l 2>/dev/null | wc -l)
+		if ((iommu_count > 0)); then
+			print_pass "IOMMU devices found: $iommu_count"
+		else
+			print_warn "IOMMU directory exists but no devices found"
+		fi
+	else
+		print_warn "IOMMU status unclear - check 'intel_iommu=on' kernel param"
+		print_info "VT-d may need to be enabled in BIOS"
+	fi
+
+	# Check Secure Boot status (informational)
+	echo ""
+	echo -e "  ${INF}Secure Boot Status:${OFF}"
+
+	if [[ -d /sys/firmware/efi ]]; then
+		if [[ -f /sys/firmware/efi/efivars/SecureBoot-* ]]; then
+			local sb_val
+			sb_val=$(od -An -t u1 /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | awk '{print $NF}')
+			if [[ "$sb_val" == "1" ]]; then
+				print_info "Secure Boot: ENABLED"
+			else
+				print_info "Secure Boot: DISABLED"
+			fi
+		else
+			print_info "Secure Boot status: Unknown"
+		fi
+	else
+		print_info "System booted in Legacy/BIOS mode (not UEFI)"
+	fi
+
+	((all_good)) && return 0 || return 1
+}
+
+#** check_cet_ibt: check for CET/IBT support and status
+#*
+check_cet_ibt() {
+	print_header "CET/IBT (Control-flow Enforcement Technology) Check"
+
+	local -i cet_supported=0
+	local -i ibt_active=0
+	local -i shstk_active=0
+
+	# Check CPU flags for CET support
+	echo -e "  ${INF}CPU Feature Flags:${OFF}"
+
+	if grep -q ' ibt' /proc/cpuinfo 2>/dev/null; then
+		print_pass "IBT (Indirect Branch Tracking) supported by CPU"
+		cet_supported=1
+	else
+		print_warn "IBT not listed in CPU flags"
+	fi
+
+	if grep -q ' shstk' /proc/cpuinfo 2>/dev/null; then
+		print_pass "SHSTK (Shadow Stack) supported by CPU"
+		cet_supported=1
+	else
+		print_warn "SHSTK not listed in CPU flags"
+	fi
+
+	if ! ((cet_supported)); then
+		print_fail "CET not supported by this CPU"
+		print_info "CET requires Intel 11th gen (Tiger Lake) or newer"
+		return 1
+	fi
+
+	# Check if kernel has CET support compiled in
+	echo ""
+	echo -e "  ${INF}Kernel CET Support:${OFF}"
+
+	if [[ -f /proc/config.gz ]]; then
+		if zcat /proc/config.gz 2>/dev/null | grep -q "CONFIG_X86_USER_SHADOW_STACK=y"; then
+			print_pass "Kernel compiled with Shadow Stack support"
+		else
+			print_info "Kernel Shadow Stack support unclear"
+		fi
+		if zcat /proc/config.gz 2>/dev/null | grep -q "CONFIG_X86_KERNEL_IBT=y"; then
+			print_pass "Kernel compiled with IBT support"
+		else
+			print_info "Kernel IBT support unclear"
+		fi
+	elif [[ -f "/boot/config-$(uname -r)" ]]; then
+		if grep -q "CONFIG_X86_USER_SHADOW_STACK=y" "/boot/config-$(uname -r)" 2>/dev/null; then
+			print_pass "Kernel compiled with Shadow Stack support"
+		fi
+		if grep -q "CONFIG_X86_KERNEL_IBT=y" "/boot/config-$(uname -r)" 2>/dev/null; then
+			print_pass "Kernel compiled with IBT support"
+		fi
+	else
+		print_info "Cannot check kernel config"
+	fi
+
+	# Check dmesg for CET activation
+	echo ""
+	echo -e "  ${INF}CET Activation Status:${OFF}"
+
+	if dmesg 2>/dev/null | grep -qi "CET.*IBT.*enabled\|IBT.*enabled\|Control-flow.*enabled"; then
+		print_pass "CET/IBT appears active (per dmesg)"
+		ibt_active=1
+	else
+		print_info "No CET/IBT activation messages found in dmesg"
+	fi
+
+	if dmesg 2>/dev/null | grep -qi "shadow.stack\|shstk"; then
+		print_info "Shadow stack references found in dmesg"
+		shstk_active=1
+	fi
+
+	# Check /proc/cpuinfo for bugs/mitigations
+	echo ""
+	echo -e "  ${INF}Additional CPU Info:${OFF}"
+
+	local cpu_model
+	cpu_model=$(grep -m1 "model name" /proc/cpuinfo | cut -d: -f2 | xargs)
+	print_info "CPU: $cpu_model"
+
+	local cpu_family
+	cpu_family=$(grep -m1 "cpu family" /proc/cpuinfo | awk '{print $NF}')
+	local model
+	model=$(grep -m1 "^model[[:space:]]" /proc/cpuinfo | awk '{print $NF}')
+	print_info "Family: $cpu_family, Model: $model"
+
+	return 0
+}
+
+#** main: main entry point
+#*
+main() {
+	trap control_c SIGINT
+
+	# Parse arguments
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-v|--verbose)
+				verbose=1
+				shift
+				;;
+			*)
+				echo -e "${CAU}Unknown option:${OFF} $1"
+				usage
+				exitme 1
+				;;
+		esac
+	done
+
+	echo -e "${BLD}tboot System Readiness Check${OFF}"
+	echo -e "${INF}==============================${OFF}"
+
+	check_root
+	check_msr_tools || exitme 2
+	check_msr_feature_control
+	check_bios_settings
+	check_cet_ibt
+
+	# Final summary
+	print_header "Summary"
+
+	if ((exit_status == 0)); then
+		echo -e "  ${STA}All critical checks passed.${OFF}"
+		echo -e "  ${STA}System appears ready for tboot with SECRETS=TRUE${OFF}"
+	else
+		echo -e "  ${CAU}One or more checks failed.${OFF}"
+		echo -e "  ${WRN}Review the output above and adjust BIOS settings as needed.${OFF}"
+	fi
+
+	echo ""
+	exit $exit_status
+}
+
+main "$@"
