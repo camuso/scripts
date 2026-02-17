@@ -24,6 +24,7 @@ declare STA=$'\e[0;92m'
 
 declare -i verbose=0
 declare -i exit_status=0
+declare -i cpu_has_smx=0    # Set by check_bios_settings if CPU supports SMX
 
 # MSR 0x3A bit definitions (IA32_FEATURE_CONTROL)
 declare -ir MSR_LOCK=0x1              # Bit 0: Lock bit
@@ -221,7 +222,6 @@ check_msr_feature_control() {
 		print_pass "Bit 1 (VMX in SMX): SET - Required for tboot SECRETS=TRUE"
 	else
 		print_fail "Bit 1 (VMX in SMX): CLEAR - tboot SECRETS=TRUE will NOT work"
-		print_info "Enable 'TXT' or 'Trusted Execution' in BIOS"
 	fi
 
 	# Bit 2: VMX outside SMX
@@ -236,7 +236,7 @@ check_msr_feature_control() {
 		print_pass "Bits 8-14 (SENTER local): 0x$(printf '%x' $((senter_local >> 8))) - SENTER enabled"
 	else
 		print_fail "Bits 8-14 (SENTER local): CLEAR - SENTER not enabled"
-		print_info "SENTER is required for TXT measured launch"
+		print_info "SENTER is required for TXT measured launch (set via TXT BIOS option)"
 	fi
 
 	# Bit 15: SENTER global enable
@@ -254,6 +254,21 @@ check_msr_feature_control() {
 		return 0
 	else
 		print_fail "MSR 0x3A indicates tboot with SECRETS=TRUE will NOT work"
+		echo ""
+		# Provide actionable guidance based on CPU capability
+		# Note: cpu_has_smx is set later by check_bios_settings, but we can
+		# check /proc/cpuinfo directly here for immediate feedback
+		if grep -q 'smx' /proc/cpuinfo 2>/dev/null; then
+			echo -e "  ${STA}[INFO]${OFF} CPU supports SMX - TXT CAN be enabled in BIOS"
+			echo -e "  ${INF}       Look for these BIOS settings:${OFF}"
+			echo -e "  ${INF}         - 'Intel TXT' or 'Trusted Execution Technology'${OFF}"
+			echo -e "  ${INF}         - 'Intel VT-d' (IOMMU - often required for TXT)${OFF}"
+			echo -e "  ${INF}         - 'TPM' or 'Security Device Support'${OFF}"
+			echo -e "  ${INF}       These are typically found under Security or Advanced CPU settings.${OFF}"
+		else
+			echo -e "  ${CAU}[INFO]${OFF} CPU does NOT support SMX - TXT cannot be enabled"
+			echo -e "  ${INF}       This is a hardware limitation, not a BIOS setting.${OFF}"
+		fi
 		return 1
 	fi
 }
@@ -268,8 +283,10 @@ check_bios_settings() {
 	# Check for TXT support in CPU
 	if grep -q 'smx' /proc/cpuinfo 2>/dev/null; then
 		print_pass "CPU supports SMX (Safer Mode Extensions / TXT)"
+		cpu_has_smx=1
 	else
 		print_fail "CPU does not support SMX - TXT not available"
+		print_info "TXT cannot be enabled - hardware does not support it"
 		all_good=0
 	fi
 
