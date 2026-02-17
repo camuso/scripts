@@ -513,6 +513,7 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 		libdwarves1
 		lynx
 		make
+		msr-tools
 		mutt
 		ncurses
 		ncurses-devel
