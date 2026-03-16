@@ -1,0 +1,158 @@
+#!/bin/bash
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-i] [-h|--help] <yaml-file> <key> <value>
+
+Search a YAML file for entries where a mapping key contains a value.
+Recursively searches the entire file and returns the full record
+containing the match. Works with both scalar fields and arrays.
+
+Arguments:
+  yaml-file      Path to the YAML file to search
+  key            The mapping key to search for (e.g., "name", "status")
+  value          The value to match
+
+Options:
+  -i, --ignore-case    Case insensitive matching
+  -h, --help, help     Show this help message
+
+Examples:
+  $(basename "$0") config.yaml name "my-app"
+  $(basename "$0") -i data.yaml status active
+  $(basename "$0") owners.yaml maintainer tcamuso
+
+Requires: yq (https://github.com/mikefarah/yq)
+
+EOF
+)"
+
+declare yamlfile=""
+declare key=""
+declare value=""
+declare -i ignore_case=0
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exitme 1
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#** check_dependencies: verify required tools are installed
+#*
+check_dependencies() {
+	if ! command -v yq &>/dev/null; then
+		exitme 1 "Error: yq is not installed.\nInstall with: sudo dnf install yq"
+	fi
+}
+
+#** search_yaml: search the yaml file for key/value matches
+#*
+# Recursively searches the entire YAML structure and returns the full
+# record (object) containing the matching key/value pair.
+# For array fields, checks if any element contains the search value.
+#
+# Arguments
+#   $1 - yaml file path
+#   $2 - key to search for
+#   $3 - value to match
+#   $4 - ignore case flag (0 or 1)
+#*
+search_yaml() {
+	local file="$1"
+	local searchkey="$2"
+	local searchval="$3"
+	local -i icase="$4"
+	local yq_expr
+
+	if ((icase)); then
+		yq_expr=".. | select(has(\"$searchkey\") and .[\"$searchkey\"] != null and ((.[\"$searchkey\"] | tostring | downcase) | test(\"$searchval\" | downcase)))"
+	else
+		yq_expr=".. | select(has(\"$searchkey\") and .[\"$searchkey\"] != null and ((.[\"$searchkey\"] | tostring) | test(\"$searchval\")))"
+	fi
+
+	yq eval "$yq_expr" "$file"
+}
+
+#** parse_args: parse command line arguments
+#*
+parse_args() {
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-i|--ignore-case)
+				ignore_case=1
+				shift
+				;;
+			-*)
+				exitme 1 "Unknown option: $1"
+				;;
+			*)
+				if [[ -z "$yamlfile" ]]; then
+					yamlfile="$1"
+				elif [[ -z "$key" ]]; then
+					key="$1"
+				elif [[ -z "$value" ]]; then
+					value="$1"
+				else
+					exitme 1 "Too many arguments: $1"
+				fi
+				shift
+				;;
+		esac
+	done
+
+	if [[ -z "$yamlfile" ]]; then
+		exitme 1 "Error: YAML file is required"
+	fi
+
+	if [[ ! -f "$yamlfile" ]]; then
+		exitme 1 "Error: File not found: $yamlfile"
+	fi
+
+	if [[ -z "$key" ]]; then
+		exitme 1 "Error: Key is required"
+	fi
+
+	if [[ -z "$value" ]]; then
+		exitme 1 "Error: Value is required"
+	fi
+}
+
+#** main
+#*
+main() {
+	trap control_c SIGINT
+
+	parse_args "$@"
+	check_dependencies
+	search_yaml "$yamlfile" "$key" "$value" "$ignore_case"
+}
+
+main "$@"
