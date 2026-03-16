@@ -94,7 +94,30 @@ search_yaml() {
 		yq_expr=".. | select(has(\"$searchkey\") and .[\"$searchkey\"] != null and ((.[\"$searchkey\"] | tostring) | test(\"$searchval\")))"
 	fi
 
-	yq eval "$yq_expr" "$file"
+	yq eval --colors "$yq_expr" "$file" | awk '
+		BEGIN { first_key = "" }
+		{
+			# Strip ANSI color codes for pattern matching
+			stripped = $0
+			gsub(/\033\[[0-9;]*m/, "", stripped)
+			
+			if (match(stripped, /^[a-zA-Z_][a-zA-Z0-9_-]*:/)) {
+				# Extract the key name from stripped line
+				split(stripped, parts, ":")
+				key = parts[1]
+				
+				if (first_key == "") {
+					# Remember the first key of the first record
+					first_key = key
+				} else if (key == first_key) {
+					# Same key as first line means new record
+					print "---------"
+					print ""
+				}
+			}
+			print
+		}
+	'
 }
 
 #** parse_args: parse command line arguments
