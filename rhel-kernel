@@ -1,0 +1,132 @@
+#!/bin/bash
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-h|--help] <rhel-version>
+
+Look up the kernel version for a RHEL point release.
+
+Arguments:
+  rhel-version   RHEL version (e.g., 9.4, 9.7, 8.10)
+
+Options:
+  -h, --help, help     Show this help message
+
+Examples:
+  $(basename "$0") 9.7
+  $(basename "$0") 9.4
+  $(basename "$0") 8.10
+
+Requires: brew (Koji/Brew client)
+
+EOF
+)"
+
+declare version=""
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nExiting."
+	exit 1
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#** check_dependencies: verify required tools are installed
+#*
+check_dependencies() {
+	if ! command -v brew &>/dev/null; then
+		exitme 1 "Error: brew (Koji/Brew client) is not installed or not in PATH"
+	fi
+}
+
+#** lookup_kernel: query brew for the kernel version
+#*
+# Arguments
+#   $1 - RHEL version (e.g., 9.7)
+#*
+lookup_kernel() {
+	local ver="$1"
+	local tag="rhel-${ver}.0-candidate"
+	local result
+
+	echo "Looking up kernel for RHEL ${ver} (tag: ${tag})..."
+	echo
+
+	result=$(brew list-tagged --latest "$tag" kernel 2>&1)
+
+	if [[ $? -ne 0 ]] || [[ "$result" == *"Invalid tag"* ]] || [[ -z "$result" ]]; then
+		# Try alternate tag format
+		tag="rhel-${ver}-candidate"
+		result=$(brew list-tagged --latest "$tag" kernel 2>&1)
+	fi
+
+	if [[ $? -ne 0 ]] || [[ "$result" == *"Invalid tag"* ]] || [[ -z "$result" ]]; then
+		echo "Could not find kernel for RHEL ${ver}"
+		echo "Tried tags: rhel-${ver}.0-candidate, rhel-${ver}-candidate"
+		return 1
+	fi
+
+	echo "$result"
+}
+
+#** parse_args: parse command line arguments
+#*
+parse_args() {
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-*)
+				exitme 1 "Unknown option: $1"
+				;;
+			*)
+				if [[ -z "$version" ]]; then
+					version="$1"
+				else
+					exitme 1 "Too many arguments: $1"
+				fi
+				shift
+				;;
+		esac
+	done
+
+	if [[ -z "$version" ]]; then
+		exitme 1 "Error: RHEL version is required"
+	fi
+}
+
+#** main
+#*
+main() {
+	trap control_c SIGINT
+
+	parse_args "$@"
+	check_dependencies
+	lookup_kernel "$version"
+}
+
+main "$@"
