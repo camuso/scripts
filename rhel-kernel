@@ -2,7 +2,7 @@
 
 declare usagestr="$(
 cat <<EOF
-$(basename "$0") [-h|--help] <rhel-version>
+$(basename "$0") [-h|--help] [-c] <rhel-version>
 
 Look up the kernel version for a RHEL point release.
 
@@ -11,11 +11,14 @@ Arguments:
 
 Options:
   -h, --help, help     Show this help message
+  -c, --commit         Query brew for exact commit (slow, use if not in repo)
+
+When run from a kernel git repo, automatically shows the local tag and commit.
+Use -c to force a brew buildinfo query for the exact RHEL build commit.
 
 Examples:
-  $(basename "$0") 9.7
-  $(basename "$0") 9.4
-  $(basename "$0") 8.10
+  $(basename "$0") 9.7           # Show kernel NVR (and commit if in repo)
+  $(basename "$0") -c 9.7        # Query brew for exact commit
 
 Requires: brew (Koji/Brew client)
 
@@ -23,6 +26,7 @@ EOF
 )"
 
 declare version=""
+declare -i b_commit=0
 
 #** usage: print usage information
 #*
@@ -70,25 +74,116 @@ lookup_kernel() {
 	local ver="$1"
 	local tag="rhel-${ver}.0-candidate"
 	local result
+	local -i rc
 
 	echo "Looking up kernel for RHEL ${ver} (tag: ${tag})..."
 	echo
 
 	result=$(brew list-tagged --latest "$tag" kernel 2>&1)
+	rc=$?
 
-	if [[ $? -ne 0 ]] || [[ "$result" == *"Invalid tag"* ]] || [[ -z "$result" ]]; then
+	if ((rc != 0)) || [[ "$result" == *"Invalid tag"* ]] || [[ -z "$result" ]] || [[ "$result" == *"error"* ]]; then
 		# Try alternate tag format
 		tag="rhel-${ver}-candidate"
+		echo "Trying alternate tag: ${tag}..."
 		result=$(brew list-tagged --latest "$tag" kernel 2>&1)
+		rc=$?
 	fi
 
-	if [[ $? -ne 0 ]] || [[ "$result" == *"Invalid tag"* ]] || [[ -z "$result" ]]; then
+	if ((rc != 0)) || [[ "$result" == *"Invalid tag"* ]] || [[ -z "$result" ]] || [[ "$result" == *"error"* ]]; then
 		echo "Could not find kernel for RHEL ${ver}"
 		echo "Tried tags: rhel-${ver}.0-candidate, rhel-${ver}-candidate"
+		echo
+		echo "Brew output: $result"
+		echo
+		echo "Possible causes:"
+		echo "  - Brew client not configured (check ~/.koji/config or /etc/koji.conf)"
+		echo "  - Network connectivity to Brew server"
+		echo "  - Invalid RHEL version"
 		return 1
 	fi
 
 	echo "$result"
+
+	# Extract NVR and get commit info
+	# Always try local git (fast), only use brew buildinfo with -c flag
+	{
+		local nvr
+		# Extract NVR from the output (first column after header)
+		nvr=$(echo "$result" | tail -n +3 | awk '{print $1}' | head -1)
+		
+		if [[ -n "$nvr" ]]; then
+			echo
+			
+			# Check if we're in a git repo
+			if git rev-parse --git-dir &>/dev/null; then
+				local commit=""
+				
+				# Try exact NVR tag first
+				commit=$(git rev-parse --verify "${nvr}^{commit}" 2>/dev/null)
+				if [[ -n "$commit" ]]; then
+					echo "Git tag: $nvr"
+					echo "Git commit: ${commit:0:12}"
+					echo
+					echo "To checkout:"
+					echo "  git checkout -b rhel-${ver} $nvr"
+					return 0
+				fi
+				
+				# Try base tag (strip z-stream suffix like .8.1.el10_1 -> .el10)
+				# Pattern: kernel-X.Y.Z-NNN.A.B.elM_N -> kernel-X.Y.Z-NNN.elM
+				local base_tag
+				base_tag=$(echo "$nvr" | sed -E 's/\.[0-9]+\.[0-9]+\.el([0-9]+)_[0-9]+$/.el\1/')
+				
+				if [[ "$base_tag" != "$nvr" ]]; then
+					commit=$(git rev-parse --verify "${base_tag}^{commit}" 2>/dev/null)
+					if [[ -n "$commit" ]]; then
+						echo "RHEL NVR: $nvr"
+						echo "Base tag: $base_tag"
+						echo "Git commit: ${commit:0:12}"
+						echo
+						echo "To checkout (CentOS Stream base):"
+						echo "  git checkout -b rhel-${ver} $base_tag"
+						return 0
+					fi
+				fi
+				
+				echo "Tag not found locally."
+				((b_commit)) || return 0
+			fi
+			
+			# Fall back to brew buildinfo (slow but accurate) - only with -c flag
+			((b_commit)) || return 0
+			echo "Querying brew for exact commit (this may take a moment)..."
+			echo
+			
+			local buildinfo
+			buildinfo=$(brew buildinfo "$nvr" 2>&1)
+			
+			# Extract source URL which contains the commit
+			local source
+			source=$(echo "$buildinfo" | grep -E "^Source:" | head -1)
+			
+			if [[ -n "$source" ]]; then
+				echo "$source"
+				
+				# Extract commit hash if present (format: git+https://...#COMMIT or git://...#COMMIT)
+				local commit
+				commit=$(echo "$source" | grep -oE '#[a-f0-9]{40}' | tr -d '#')
+				
+				if [[ -n "$commit" ]]; then
+					echo
+					echo "Git commit: ${commit:0:12}"
+					echo
+					echo "To checkout:"
+					echo "  git fetch origin"
+					echo "  git checkout -b rhel-${ver} ${commit:0:12}"
+				fi
+			else
+				echo "Could not extract source info from buildinfo"
+			fi
+		fi
+	}
 }
 
 #** parse_args: parse command line arguments
@@ -99,6 +194,10 @@ parse_args() {
 			-h|--help|help)
 				usage
 				exit 0
+				;;
+			-c|--commit)
+				b_commit=1
+				shift
 				;;
 			-*)
 				exitme 1 "Unknown option: $1"
