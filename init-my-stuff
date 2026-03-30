@@ -478,17 +478,21 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 	pkglist=(
 		annobin
 		annobin-annocheck
+		audit-libs-devel
 		automake
 		bc
 		bind-utils
+		binutils-devel
 		bison
 		brewkoji
 		ca-certificates
 		centpkg
+		clang
 		cmake
 		conserver-client
 		cscope
 		dwarves
+		elfutils-debuginfod-client-devel
 		elfutils-devel
 		elfutils-libelf
 		elfutils-libelf-devel
@@ -496,21 +500,36 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 		elinks
 		ethtool
 		flex
+		fuse-devel
 		gcc
 		gcc-c++
+		gcc-plugin-devel
 		git-email
+		glibc-static
 		go
 		golang
 		hostname
 		ipmitool
+		java-devel
+		kernel-rpm-macros
 		kmod
 		kmod-libs
 		krb5-libs
 		krb5-workstation
 		lab
+		libbabeltrace-devel
+		libbpf-devel
+		libcap-devel
+		libcap-ng-devel
 		libdwarf
 		libdwarf-devel
 		libdwarves1
+		libmnl-devel
+		libnl3-devel
+		libtraceevent-devel
+		libtracefs-devel
+		lld
+		llvm
 		lynx
 		make
 		msr-tools
@@ -518,18 +537,26 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 		ncurses
 		ncurses-devel
 		net-tools
+		newt-devel
 		nmap
 		OpenIPMI
 		openssl
 		openssl-devel
 		patch
 		patchutils
+		pciutils-devel
 		perl
 		pv
 		python-bugzilla-cli
+		python3-devel
+		python3-docutils
+		redhat-sb-certs
 		rhpkg
 		rpm-build
 		rsync
+		system-sb-certs
+		systemd-boot-unsigned
+		systemd-ukify
 		texinfo
 		tpm-tools
 		usbutils
@@ -539,6 +566,7 @@ if $b_install && [ "$remoteuser" == "root" ]; then
 		waiverdb-cli
 		watchdog
 		xclip
+		xmlto
 		xorg-x11-apps
 		xz
 		zenity
