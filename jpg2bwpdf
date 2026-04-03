@@ -1,0 +1,197 @@
+#!/bin/bash
+
+#===========================================================
+# Script: jpeg2bwpdf.sh
+# Purpose: Convert a JPEG to pure B/W, resize to fit
+#          landscape or portrait 8.5x11 with 0.5" margins,
+#          and output PDF.
+#===========================================================
+
+#===========================
+# Script-level variables
+#===========================
+declare script_name="$(basename "$0")"
+declare input_file=""
+declare output_pdf=""
+declare threshold="35%"           # default threshold
+declare orientation="landscape"   # default orientation
+
+declare usagestr="$(
+cat <<EOF
+$script_name [-h|--help|help] [-t <threshold>] [-o <output.pdf>]
+             [-l|--landscape] [-p|--portrait] <input.jpg>
+
+Convert a JPEG image to pure black & white, resize it to fit
+inside an 8.5x11" PDF with 0.5" margins, and output a properly
+sized PDF using img2pdf.
+
+Arguments:
+  input.jpg              Source JPEG image
+
+Options:
+  -t, --threshold <val>  Threshold percentage (default: 35%)
+                         Example: 40%, 55%, 60%
+  -o, --output <file>    Output PDF filename
+  -l, --landscape        Landscape orientation (default)
+  -p, --portrait         Portrait orientation
+  -h, --help             Show this help message
+
+EOF
+)"
+
+#===========================
+#** usage: print usage text
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#===========================
+#** exitme: exit with code and optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#===========================
+#** control_c: handle Ctrl-C
+#*
+control_c() {
+	echo -e "\nCtrl-C detected. Exiting."
+	exitme 1
+}
+
+#===========================
+#** check_dependencies: ensure required tools exist
+#*
+check_dependencies() {
+	local -a deps=("convert" "img2pdf")
+
+	for dep in "${deps[@]}"; do
+	if ! command -v "$dep" >/dev/null 2>&1; then
+		exitme 1 "Missing required tool: $dep"
+	fi
+	done
+}
+
+#===========================
+#** compute_dimensions: set canvas + margin sizes
+#*
+# Arguments:
+#   $1 - orientation
+#   sets globals: page_w, page_h, box_w, box_h
+#*
+compute_dimensions() {
+	local orient="$1"
+
+	if [[ "$orient" == "landscape" ]]; then
+	page_w=3300
+	page_h=2550
+	box_w=3000
+	box_h=2250
+	else
+	page_w=2550
+	page_h=3300
+	box_w=2250
+	box_h=3000
+	fi
+}
+
+#===========================
+#** process_image: convert, resize, and wrap into PDF
+#*
+process_image() {
+	local infile="$1"
+	local outfile="$2"
+	local thresh="$3"
+	local orient="$4"
+	local tmp_png="__tmp_bw_page.png"
+
+	compute_dimensions "$orient"
+
+	convert "$infile" \
+	-units PixelsPerInch -density 300 \
+	-colorspace Gray -threshold "$thresh" \
+	-resize "${box_w}x${box_h}" \
+	-gravity center \
+	-extent "${page_w}x${page_h}" \
+	"$tmp_png" || exitme 1 "ImageMagick conversion failed."
+
+	img2pdf "$tmp_png" -o "$outfile" || exitme 1 "img2pdf failed."
+
+	rm -f "$tmp_png"
+}
+
+#===========================
+#** main: main program logic
+#*
+main() {
+	trap control_c SIGINT
+
+	check_dependencies
+
+	local -i landscape_flag=0
+	local -i portrait_flag=0
+
+	while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-h|--help|help)
+		usage
+		exit 0
+		;;
+		-t|--threshold)
+		shift
+		threshold="$1"
+		;;
+		-o|--output)
+		shift
+		output_pdf="$1"
+		;;
+		-l|--landscape)
+		landscape_flag=1
+		;;
+		-p|--portrait)
+		portrait_flag=1
+		;;
+		*)
+		if [[ -z "$input_file" ]]; then
+			input_file="$1"
+		else
+			exitme 1 "Unexpected argument: $1"
+		fi
+		;;
+	esac
+	shift
+	done
+
+	# Mutually exclusive orientation
+	if (( landscape_flag == 1 && portrait_flag == 1 )); then
+	exitme 1 "Cannot specify both --landscape and --portrait."
+	fi
+
+	# Determine orientation
+	if (( portrait_flag == 1 )); then
+	orientation="portrait"
+	else
+	orientation="landscape"
+	fi
+
+	[[ -z "$input_file" ]] && exitme 1 "Missing input JPEG."
+	[[ ! -f "$input_file" ]] && exitme 1 "Input file not found: $input_file"
+
+	if [[ -z "$output_pdf" ]]; then
+	output_pdf="${input_file%.*}.pdf"
+	fi
+
+	process_image "$input_file" "$output_pdf" "$threshold" "$orientation"
+	echo "Created PDF: $output_pdf"
+}
+
+main "$@"
+
