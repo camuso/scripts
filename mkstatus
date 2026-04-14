@@ -1,0 +1,369 @@
+#!/bin/bash
+#
+# mkstatus - Generate weekly status report
+#
+# Collects data from Jira, GitLab MRs, git repos, and an optional
+# calendar file, then assembles a status report in the standard
+# team format.
+#
+# Requires: myjiras, mygitlab-mrs, gitnice (in $PATH)
+# Optional: ~/.config/mkstatus/repos.conf (list of git repos)
+# Optional: ~/status/calendar.ics (exported Google Calendar)
+#
+# Usage:
+#   mkstatus                    # Report for this week
+#   mkstatus -s 2026-04-07      # Report since a specific date
+#   mkstatus -o 2026-04-10      # Add an off-day
+#   mkstatus -o 2026-04-10 -o 2026-04-11  # Multiple off-days
+#   mkstatus -f output.txt      # Write to specific file
+#   mkstatus -e                 # Open in $EDITOR after generating
+#
+
+declare -r CONF_DIR="$HOME/.config/mkstatus"
+declare -r REPOS_CONF="$CONF_DIR/repos.conf"
+declare -r CALENDAR_FILE="$HOME/status/calendar.ics"
+declare -r STATUS_DIR="$HOME/status"
+
+declare since_date=""
+declare report_date=""
+declare -a off_days=()
+declare output_file=""
+declare b_edit=false
+declare sep="=========================================================================="
+declare subsep="--------------------------------------------------------------------------"
+
+usage() {
+    cat <<EOF
+mkstatus - Generate weekly status report
+
+USAGE
+    mkstatus [OPTIONS]
+
+OPTIONS
+    -s DATE     Report since date (default: 7 days ago) (YYYY-MM-DD)
+    -d DATE     Report date header (default: today) (YYYYMMDD)
+    -o DATE     Off-day to note (repeatable) (YYYY-MM-DD or YYYYMMDD)
+    -f FILE     Output file (default: ~/status/Status-YYYY-MM-DD.txt)
+    -e          Open in \$EDITOR after generating
+    -h          Show this help
+
+CONFIGURATION
+    Repo list:  $REPOS_CONF
+                One repo per line: /path/to/repo [label]
+                Example:
+                    \$HOME/patchtools Patchtools
+                    \$HOME/bin Workflow Scripts
+
+    Calendar:   $CALENDAR_FILE
+                Export from Google Calendar:
+                  Settings → Import & export → Export → extract .ics
+                  cp ~/Downloads/*.ics $CALENDAR_FILE
+                Meetings for the report week will be extracted.
+
+FIRST-TIME SETUP
+    Run: mkstatus -h
+    Then create $REPOS_CONF with your git repos.
+EOF
+    exit 0
+}
+
+init_config() {
+    if [[ ! -d "$CONF_DIR" ]]; then
+        mkdir -p "$CONF_DIR"
+    fi
+
+    if [[ ! -f "$REPOS_CONF" ]]; then
+        cat > "$REPOS_CONF" <<'EOCONF'
+# mkstatus repos.conf
+# One repo per line: /path/to/repo [Label]
+# Lines starting with # are ignored.
+#
+# Example:
+# /home/tcamuso/patchtools Patchtools
+# /home/tcamuso/bin Workflow Scripts
+EOCONF
+        echo "Created default config: $REPOS_CONF"
+        echo "Edit it to add your git repos, then re-run."
+        exit 0
+    fi
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -s) since_date="$2"; shift 2 ;;
+            -d) report_date="$2"; shift 2 ;;
+            -o) off_days+=("$2"); shift 2 ;;
+            -f) output_file="$2"; shift 2 ;;
+            -e) b_edit=true; shift ;;
+            -h) usage ;;
+            *)  echo "Unknown option: $1"; usage ;;
+        esac
+    done
+
+    if [[ -z "$report_date" ]]; then
+        report_date=$(date +%Y%m%d)
+    fi
+
+    if [[ -z "$since_date" ]]; then
+        since_date=$(date -d '7 days ago' +%Y-%m-%d)
+    fi
+
+    if [[ -z "$output_file" ]]; then
+        output_file="$STATUS_DIR/Status-$(date +%Y-%m-%d).txt"
+    fi
+}
+
+emit() {
+    echo "$@" >> "$output_file"
+}
+
+emit_section() {
+    local title="$1"
+    emit ""
+    emit "$sep"
+    emit "$title"
+    emit "$subsep"
+}
+
+generate_header() {
+    emit ""
+    emit "$report_date"
+    for day in "${off_days[@]}"; do
+        emit "$day - off"
+    done
+}
+
+generate_executive_summary() {
+    emit_section "Executive Summary"
+    emit ""
+    emit "- Meetings"
+
+    if [[ -f "$CALENDAR_FILE" ]]; then
+        extract_meetings
+    else
+        emit "  [TODO: Add meetings from calendar]"
+    fi
+
+    emit "- [TODO: Add key work items]"
+    emit "- Some tools work"
+}
+
+extract_meetings() {
+    local start_epoch end_epoch
+    start_epoch=$(date -d "$since_date" +%s)
+    end_epoch=$(date +%s)
+
+    local in_event=false
+    local summary=""
+    local dtstart=""
+
+    while IFS= read -r line; do
+        line="${line%%$'\r'}"
+
+        case "$line" in
+            BEGIN:VEVENT)
+                in_event=true
+                summary=""
+                dtstart=""
+                ;;
+            END:VEVENT)
+                if [[ -n "$summary" && -n "$dtstart" ]]; then
+                    local evt_year="${dtstart:0:4}"
+                    local evt_month="${dtstart:4:2}"
+                    local evt_day="${dtstart:6:2}"
+                    local evt_epoch
+                    evt_epoch=$(date -d "$evt_year-$evt_month-$evt_day" +%s 2>/dev/null)
+                    if [[ -n "$evt_epoch" ]] \
+                       && (( evt_epoch >= start_epoch )) \
+                       && (( evt_epoch <= end_epoch )); then
+                        emit "  - $summary"
+                    fi
+                fi
+                in_event=false
+                ;;
+            SUMMARY:*)
+                if $in_event; then
+                    summary="${line#SUMMARY:}"
+                fi
+                ;;
+            DTSTART*)
+                if $in_event; then
+                    dtstart="${line##*:}"
+                    dtstart="${dtstart%%T*}"
+                fi
+                ;;
+        esac
+    done < "$CALENDAR_FILE"
+}
+
+generate_patchreviews() {
+    emit_section "Patchreviews"
+    emit "- Up to date and continuing."
+}
+
+generate_ai_section() {
+    emit_section "Incorporating Agentic AI"
+    emit ""
+    emit "[TODO: Describe AI-assisted work this week]"
+    emit ""
+    emit "Tooling"
+    emit "-------"
+    emit "[TODO: List any new tools or enhancements]"
+}
+
+generate_jira_section() {
+    emit_section "Jira Activity where I am assignee"
+    emit ""
+    emit "Condensed from:"
+    emit "myjiras -R assignee -q 'updated >= $since_date'"
+    emit ""
+
+    if command -v myjiras &>/dev/null; then
+        local jira_output
+        jira_output=$(myjiras -R assignee -q "updated >= $since_date" 2>&1)
+        if [[ $? -eq 0 && -n "$jira_output" ]]; then
+            local cleaned
+            cleaned=$(echo "$jira_output" | sed 's/\x1b\[[0-9;]*m//g')
+            emit "$cleaned"
+        else
+            emit "[ERROR: myjiras failed or returned empty output]"
+            emit "[Run manually: myjiras -R assignee -q 'updated >= $since_date']"
+        fi
+    else
+        emit "[myjiras not found in PATH]"
+    fi
+}
+
+generate_gitlab_section() {
+    emit_section "GitLab Merge Requests (Open)"
+    emit ""
+    emit "Condensed from:"
+    emit "mygitlab-mrs -so"
+    emit ""
+
+    if command -v mygitlab-mrs &>/dev/null; then
+        local mr_output
+        mr_output=$(mygitlab-mrs -so 2>&1)
+        if [[ $? -eq 0 && -n "$mr_output" ]]; then
+            local cleaned
+            cleaned=$(echo "$mr_output" | sed 's/\x1b\[[0-9;]*m//g')
+            emit "$cleaned"
+        else
+            emit "[No open MRs]"
+        fi
+
+        emit ""
+        emit "Recently Merged (since $since_date):"
+        emit "mygitlab-mrs -sm -da $since_date"
+        emit ""
+
+        mr_output=$(mygitlab-mrs -sm -da "$since_date" 2>&1)
+        if [[ $? -eq 0 && -n "$mr_output" ]]; then
+            local cleaned
+            cleaned=$(echo "$mr_output" | sed 's/\x1b\[[0-9;]*m//g')
+            emit "$cleaned"
+        else
+            emit "[No MRs merged since $since_date]"
+        fi
+    else
+        emit "[mygitlab-mrs not found in PATH]"
+    fi
+}
+
+generate_tools_section() {
+    emit_section "Tools Diffs"
+    emit ""
+
+    if [[ ! -f "$REPOS_CONF" ]]; then
+        emit "[No repos configured. Edit $REPOS_CONF]"
+        return
+    fi
+
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$line" ]] && continue
+
+        local repo_path label
+        repo_path=$(echo "$line" | awk '{print $1}')
+        label=$(echo "$line" | awk '{$1=""; print}' | sed 's/^ *//')
+
+        if [[ -z "$label" ]]; then
+            label=$(basename "$repo_path")
+        fi
+
+        if [[ ! -d "$repo_path/.git" ]]; then
+            emit "$label"
+            emit "$(printf '%*s' ${#label} '' | tr ' ' '-')"
+            emit "[Not a git repo: $repo_path]"
+            emit ""
+            continue
+        fi
+
+        local commits
+        commits=$(git -C "$repo_path" log --oneline --since="$since_date" 2>/dev/null)
+
+        if [[ -z "$commits" ]]; then
+            continue
+        fi
+
+        emit "$label"
+        emit "$(printf '%*s' ${#label} '' | tr ' ' '-')"
+
+        if command -v gitnice &>/dev/null; then
+            local nice_output
+            nice_output=$(cd "$repo_path" && gitnice --since="$since_date" 2>/dev/null)
+            if [[ -n "$nice_output" ]]; then
+                emit "\$ gitnice --since=$since_date"
+                emit "$nice_output"
+            else
+                emit "\$ git log --oneline --since=$since_date"
+                emit "$(git -C "$repo_path" log --oneline --since="$since_date")"
+            fi
+        else
+            emit "\$ git log --oneline --since=$since_date"
+            emit "$(git -C "$repo_path" log --oneline --since="$since_date")"
+        fi
+
+        local first_commit
+        first_commit=$(git -C "$repo_path" log --format=%H --since="$since_date" \
+                       --reverse 2>/dev/null | head -1)
+        if [[ -n "$first_commit" ]]; then
+            emit ""
+            emit "\$ git diff --stat=75 ${first_commit}^"
+            git -C "$repo_path" diff --stat=75 "${first_commit}^" HEAD 2>/dev/null >> "$output_file"
+        fi
+
+        emit ""
+    done < "$REPOS_CONF"
+}
+
+main() {
+    parse_args "$@"
+    init_config
+
+    mkdir -p "$STATUS_DIR"
+
+    : > "$output_file"
+
+    generate_header
+    generate_executive_summary
+    generate_patchreviews
+    generate_ai_section
+    generate_jira_section
+    generate_gitlab_section
+    generate_tools_section
+
+    echo ""
+    echo "Status report written to: $output_file"
+    echo ""
+    echo "Sections marked [TODO] need your input:"
+    grep -n '\[TODO' "$output_file" | sed 's/^/  /'
+    echo ""
+
+    if $b_edit && [[ -n "$EDITOR" ]]; then
+        "$EDITOR" "$output_file"
+    fi
+}
+
+main "$@"
