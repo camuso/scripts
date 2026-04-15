@@ -1,0 +1,91 @@
+#!/bin/bash
+#
+# mkdist
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(readlink -f "$0")")"
+}
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")
+\0
+EOF
+)"
+
+#** usage: print info and instructions to screen
+#
+# Global
+# 	usagestr
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+#** exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+#** main
+#*
+main() {
+	local mkstart
+	local mkend
+	local mkdiff
+	local etmins
+	local etsecs
+
+        # Trap for control-c
+        trap control_c SIGINT
+
+	mkstart=$(date +%s)
+	make dist-rpm-baseonly \
+	RPMBUILDOPTS="--target x86_64 \
+        --without debug \
+        --without debuginfo \
+        --without vdso_install \
+        --without perf \
+        --without tools \
+        --without selftests \
+        --without realtime \
+        --without doc \
+        --without cross_headers \
+        -bb"
+
+	mkend=$(date +%s)
+
+	mkdiff=$((mkend - mkstart))
+	etmins=$((mkdiff / 60))
+	etsecs=$((mkdiff % 60))
+
+	echo "Elapsed time: $etmins : $etsecs"
+
+	exitme 0
+}
+
+main "$@"
