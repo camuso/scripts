@@ -1,0 +1,225 @@
+#!/bin/bash
+#
+# replaceline - Replace entire lines that begin with a given string
+#
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [OPTIONS] -p PATTERN -r REPLACEMENT FILE|DIR
+
+Replace entire lines that begin with PATTERN with REPLACEMENT.
+
+Arguments:
+  FILE|DIR          File or directory to process
+                    If a directory, all files in it are processed
+
+Required Options:
+  -p, --pattern     String that the line must begin with
+  -r, --replace     Replacement string for the entire line
+
+Options:
+  -i, --ignore-case  Case-insensitive matching
+  -n, --dry-run      Show what would be changed without modifying file
+  -h, --help         Show this help message
+
+Examples:
+  $(basename "$0") -p "export PATH" -r "export PATH=/usr/bin" ~/.bashrc
+  $(basename "$0") -i -p "TIMEOUT=" -r "TIMEOUT=30" config.ini
+  $(basename "$0") -n -p "# Old comment" -r "# New comment" script.sh
+
+Notes:
+  - PATTERN can contain non-alphanumeric characters (they are escaped)
+  - The replacement applies to the entire line, not just the match
+  - Use -n (dry-run) to preview changes before applying
+
+EOF
+)"
+
+declare pattern=""
+declare replacement=""
+declare target=""
+declare -i ignore_case=0
+declare -i dry_run=0
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nExiting."
+	exitme 130
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	exit "$code"
+}
+
+#** escape_pattern: escape special characters for sed regex
+#*
+# Arguments
+#   $1 - string to escape
+#*
+escape_pattern() {
+	local str="$1"
+	# Escape sed special characters: \ / & . * [ ] ^ $ 
+	printf '%s' "$str" | sed 's/[]\/$*.^&[]/\\&/g'
+}
+
+#** escape_replacement: escape special characters for sed replacement
+#*
+# Arguments
+#   $1 - string to escape
+#*
+escape_replacement() {
+	local str="$1"
+	# Escape sed replacement special characters: \ / &
+	printf '%s' "$str" | sed 's/[\/&]/\\&/g'
+}
+
+#** do_replace: perform the line replacement
+#*
+# Arguments
+#   $1 - file to process
+#*
+do_replace() {
+	local file="$1"
+	local escaped_pattern
+	local escaped_replacement
+	local sed_flags=""
+	local sed_cmd
+
+	escaped_pattern=$(escape_pattern "$pattern")
+	escaped_replacement=$(escape_replacement "$replacement")
+
+	# Build sed command with optional case-insensitive flag
+	if ((ignore_case)); then
+		sed_flags="I"
+	fi
+
+	sed_cmd="s/^${escaped_pattern}.*\$/${escaped_replacement}/${sed_flags}"
+
+	if ((dry_run)); then
+		echo "Would apply to: $file"
+		echo "Pattern: ^${pattern}.*"
+		echo "Replacement: ${replacement}"
+		echo ""
+		echo "Lines that would be changed:"
+		local matches
+		if ((ignore_case)); then
+			matches=$(awk -v pat="$pattern" 'BEGIN{IGNORECASE=1} index($0,pat)==1 {print NR":"$0}' "$file")
+		else
+			matches=$(awk -v pat="$pattern" 'index($0,pat)==1 {print NR":"$0}' "$file")
+		fi
+		if [[ -n "$matches" ]]; then
+			echo "$matches" | head -20
+		else
+			echo "  (no matching lines)"
+		fi
+		echo ""
+		echo "Preview of result:"
+		sed "$sed_cmd" "$file"
+	else
+		sed -i "$sed_cmd" "$file"
+		echo "Replaced lines beginning with '$pattern' in $file"
+	fi
+}
+
+#** parse_args: parse command line arguments
+#*
+parse_args() {
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-p|--pattern)
+				shift
+				[[ -z "$1" ]] && exitme 1 "Error: -p requires an argument"
+				pattern="$1"
+				;;
+			-r|--replace)
+				shift
+				[[ -z "$1" ]] && exitme 1 "Error: -r requires an argument"
+				replacement="$1"
+				;;
+			-i|--ignore-case)
+				ignore_case=1
+				;;
+			-n|--dry-run)
+				dry_run=1
+				;;
+		-*)
+			exitme 1 "Error: Unknown option: $1"
+			;;
+		*)
+			target="$1"
+			;;
+	esac
+	shift
+done
+}
+
+#** validate_args: ensure required arguments are provided
+#*
+validate_args() {
+	[[ -z "$pattern" ]] && exitme 1 "Error: Pattern (-p) is required"
+	[[ -z "$replacement" ]] && exitme 1 "Error: Replacement (-r) is required"
+	[[ -z "$target" ]] && exitme 1 "Error: File or directory argument is required"
+	[[ ! -e "$target" ]] && exitme 1 "Error: Path not found: $target"
+	[[ ! -r "$target" ]] && exitme 1 "Error: Path not readable: $target"
+}
+
+#** process_target: process file or directory
+#*
+process_target() {
+	local f
+
+	if [[ -d "$target" ]]; then
+		for f in "$target"/*; do
+			[[ -f "$f" ]] || continue
+			[[ -r "$f" ]] || { echo "Skipping unreadable: $f" >&2; continue; }
+			if ((dry_run == 0)) && [[ ! -w "$f" ]]; then
+				echo "Skipping unwritable: $f" >&2
+				continue
+			fi
+			do_replace "$f"
+		done
+	elif [[ -f "$target" ]]; then
+		if ((dry_run == 0)) && [[ ! -w "$target" ]]; then
+			exitme 1 "Error: File not writable: $target"
+		fi
+		do_replace "$target"
+	else
+		exitme 1 "Error: Not a file or directory: $target"
+	fi
+}
+
+#** main
+#*
+main() {
+	trap control_c SIGINT
+
+	[[ $# -eq 0 ]] && { usage; exit 0; }
+
+	parse_args "$@"
+	validate_args
+	process_target
+}
+
+main "$@"
