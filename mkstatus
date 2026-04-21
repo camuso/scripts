@@ -28,6 +28,7 @@ declare since_date=""
 declare report_date=""
 declare -a off_days=()
 declare output_file=""
+declare calendar_zip=""
 declare b_edit=false
 declare sep="=========================================================================="
 declare subsep="--------------------------------------------------------------------------"
@@ -43,6 +44,7 @@ OPTIONS
     -s DATE     Report since date (default: 7 days ago) (YYYY-MM-DD)
     -d DATE     Report date header (default: today) (YYYYMMDD)
     -o DATE     Off-day to note (repeatable) (YYYY-MM-DD or YYYYMMDD)
+    -z FILE     Calendar zip file (extracts .ics to ~/status/calendar.ics)
     -f FILE     Output file (default: ~/status/Status-YYYY-MM-DD.txt)
     -e          Open in \$EDITOR after generating
     -h          Show this help
@@ -55,9 +57,7 @@ CONFIGURATION
                     \$HOME/bin Workflow Scripts
 
     Calendar:   $CALENDAR_FILE
-                Export from Google Calendar:
-                  Settings → Import & export → Export → extract .ics
-                  cp ~/Downloads/*.ics $CALENDAR_FILE
+                Export from Google Calendar as ICS to this path.
                 Meetings for the report week will be extracted.
 
 FIRST-TIME SETUP
@@ -65,6 +65,40 @@ FIRST-TIME SETUP
     Then create $REPOS_CONF with your git repos.
 EOF
     exit 0
+}
+
+extract_calendar_zip() {
+    if [[ -z "$calendar_zip" ]]; then
+        return 0
+    fi
+
+    if [[ ! -f "$calendar_zip" ]]; then
+        echo "Error: Calendar zip file not found: $calendar_zip" >&2
+        return 1
+    fi
+
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    
+    if ! unzip -q "$calendar_zip" -d "$tmpdir" 2>/dev/null; then
+        echo "Error: Failed to extract $calendar_zip" >&2
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    local ics_file
+    ics_file=$(find "$tmpdir" -name "*.ics" -type f | grep -v "resource.calendar" | head -1)
+    
+    if [[ -z "$ics_file" ]]; then
+        echo "Error: No .ics file found in $calendar_zip" >&2
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    cp -f "$ics_file" "$CALENDAR_FILE"
+    echo "Extracted calendar to $CALENDAR_FILE"
+    rm -rf "$tmpdir"
+    return 0
 }
 
 init_config() {
@@ -94,6 +128,7 @@ parse_args() {
             -s) since_date="$2"; shift 2 ;;
             -d) report_date="$2"; shift 2 ;;
             -o) off_days+=("$2"); shift 2 ;;
+            -z) calendar_zip="$2"; shift 2 ;;
             -f) output_file="$2"; shift 2 ;;
             -e) b_edit=true; shift ;;
             -h) usage ;;
@@ -235,42 +270,6 @@ generate_jira_section() {
     fi
 }
 
-generate_gitlab_section() {
-    emit_section "GitLab Merge Requests (Open)"
-    emit ""
-    emit "Condensed from:"
-    emit "mygitlab-mrs -so"
-    emit ""
-
-    if command -v mygitlab-mrs &>/dev/null; then
-        local mr_output
-        mr_output=$(mygitlab-mrs -so 2>&1)
-        if [[ $? -eq 0 && -n "$mr_output" ]]; then
-            local cleaned
-            cleaned=$(echo "$mr_output" | sed 's/\x1b\[[0-9;]*m//g')
-            emit "$cleaned"
-        else
-            emit "[No open MRs]"
-        fi
-
-        emit ""
-        emit "Recently Merged (since $since_date):"
-        emit "mygitlab-mrs -sm -da $since_date"
-        emit ""
-
-        mr_output=$(mygitlab-mrs -sm -da "$since_date" 2>&1)
-        if [[ $? -eq 0 && -n "$mr_output" ]]; then
-            local cleaned
-            cleaned=$(echo "$mr_output" | sed 's/\x1b\[[0-9;]*m//g')
-            emit "$cleaned"
-        else
-            emit "[No MRs merged since $since_date]"
-        fi
-    else
-        emit "[mygitlab-mrs not found in PATH]"
-    fi
-}
-
 generate_tools_section() {
     emit_section "Tools Diffs"
     emit ""
@@ -341,6 +340,7 @@ generate_tools_section() {
 main() {
     parse_args "$@"
     init_config
+    extract_calendar_zip || exit 1
 
     mkdir -p "$STATUS_DIR"
 
@@ -351,7 +351,6 @@ main() {
     generate_patchreviews
     generate_ai_section
     generate_jira_section
-    generate_gitlab_section
     generate_tools_section
 
     echo ""
