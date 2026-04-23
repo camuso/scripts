@@ -65,7 +65,7 @@ main() {
 
 	mkstart=$(date +%s)
 	make dist-rpm-baseonly \
-	RPMBUILDOPTS="--target x86_64 \
+	RPMBUILDOPTS="--target $(uname -m) \
         --without debug \
         --without debuginfo \
         --without vdso_install \
