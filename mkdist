@@ -69,6 +69,7 @@ main() {
         --without debug \
         --without debuginfo \
         --without vdso_install \
+	--without bpftool \
         --without perf \
         --without tools \
         --without selftests \
