@@ -1,0 +1,115 @@
+#!/bin/bash
+#
+# dnf-getreq
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(readlink -f "$0")")"
+}
+declare pkg=
+declare -a argv=()
+declare -i argc=1
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0") pkg
+
+Determines the required packages to support pkg
+
+Arguments
+---------
+   pkg : an rpm package
+
+\0
+EOF
+)"
+
+#** usage: print info and instructions to screen
+#
+# Global
+# 	usagestr
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+#** exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+#** check_arg
+#
+# Global
+#   argv - array containing command line arguments
+#*
+check_arg() {
+        local arg="$1"
+
+        # If 1st char is a hyphen, then invalid switch
+        [ "${arg:0:1}" == "-" ] && return 1
+
+        # Otherwise, add the arg to the argary
+        argv+=("$arg")
+        return 0
+}
+
+#** parseopts
+#
+# Global
+#   argv
+#   argc
+#*
+parseopts() {
+	while (($# > 0)); do
+	    case "$1" in
+		-h | --help )
+		     echo -e "$usagestr"
+		     exit 0
+		     ;;
+		* )  argv+=("$1")
+		     ;;
+	    esac
+	    shift
+	done
+}
+
+#** main
+#*
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	parseopts "$@"
+	pkg="${argv[0]}"
+
+	dnf repoquery --disablerepo=* --enablerepo=epel --requires --resolve \
+                --recursive --queryformat "%{name}" rpmlint
+
+	exitme 0
+}
+
+main "$@"
