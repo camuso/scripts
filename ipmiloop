@@ -119,10 +119,8 @@ main() {
 	while getopts c:d:h OPTION; do
 	    case "$OPTION" in
 		c ) count=$OPTARG
-		    let ++optcount
 		    ;;
 		d ) delay=$OPTARG
-		    let ++optcount
 		    ;;
 		h ) usage
 		    ;;
@@ -132,8 +130,7 @@ main() {
 	    esac
 	done
 
-	shift $optcount
-	[ $# -eq 0 ] || exitme $EXIT_INVARG
+	shift $((OPTIND - 1))
 
 	for ((j = 0; j < count; ++j)); do
 		runloop
