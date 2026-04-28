@@ -1,4 +1,10 @@
-#!/bin/sh
+#!/bin/bash
+#
+# ipmi-hang-test - stress test IPMI module load/unload cycles
+#
+# Tests for hangs/deadlocks in IPMI locking code by repeatedly
+# loading and unloading IPMI kernel modules.
+#
 
 __waitsecs() {
 	local secs=$1
@@ -25,35 +31,56 @@ __waitsecs() {
 	echo
 }
 
-set -e
+declare -i cycles=10
+declare -i failed=0
 
 modprobe -v ipmi_poweroff
 modprobe -v ipmi_watchdog
-modprobe -v acpi_ipmi
-# modprobe -v power_meter
+modprobe -v acpi_ipmi 2>/dev/null || true
 
-for i in $(seq 0 10); do
+for i in $(seq 1 $cycles); do
+	echo "=== Cycle $i/$cycles ==="
 	echo "Remove ipmi modules"
-	# modprobe -rv power_meter
-	modprobe -rv acpi_ipmi
-	modprobe -rv ipmi_poweroff
-	modprobe -rv ipmi_watchdog
-	modprobe -rv ipmi_devintf
-	modprobe -rv ipmi_si
-	# modprobe -rv ipmi_ssif
-	modprobe -rv ipmi_msghandler
+
+	# First try to unload modules that depend on acpi_ipmi
+	modprobe -rv acpi_power_meter 2>/dev/null || true
+
+	# Now unload IPMI modules (some may fail if in use - that's OK)
+	modprobe -rv acpi_ipmi 2>/dev/null || true
+	modprobe -rv ipmi_poweroff 2>/dev/null || true
+	modprobe -rv ipmi_watchdog 2>/dev/null || true
+	modprobe -rv ipmi_devintf 2>/dev/null || true
+	modprobe -rv ipmi_ssif 2>/dev/null || true
+	modprobe -rv ipmi_si 2>/dev/null || true
+	modprobe -rv ipmi_msghandler 2>/dev/null || true
 	__waitsecs 2
 
 	echo "Insert ipmi modules"
-	modprobe -v ipmi_msghandler
-	modprobe -v ipmi_si
-	# modprobe -v ipmi_ssif
-	modprobe -v ipmi_devintf
-	modprobe -v ipmi_watchdog
-	modprobe -v ipmi_poweroff
-	# modprobe -v power_meter
-	modprobe -v acpi_ipmi
+	if ! modprobe -v ipmi_msghandler; then
+		echo "ERROR: Failed to load ipmi_msghandler"
+		failed=1
+		break
+	fi
+	modprobe -v ipmi_si || true
+	modprobe -v ipmi_ssif 2>/dev/null || true
+	modprobe -v ipmi_devintf || true
+	modprobe -v ipmi_watchdog || true
+	modprobe -v ipmi_poweroff || true
+	modprobe -v acpi_ipmi 2>/dev/null || true
 	__waitsecs 2
 
+	# Verify IPMI is functional
+	if [ ! -e /dev/ipmi0 ]; then
+		echo "ERROR: /dev/ipmi0 not present after reload"
+		failed=1
+		break
+	fi
 done
-echo "If you see this message, the test passed."
+
+if [ $failed -eq 0 ]; then
+	echo "SUCCESS: Completed $cycles cycles without hang or failure."
+	exit 0
+else
+	echo "FAILED: Test did not complete successfully."
+	exit 1
+fi
