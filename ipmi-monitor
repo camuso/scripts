@@ -1,0 +1,319 @@
+#!/bin/bash
+#
+# ipmi-monitor
+#
+# Remote monitoring script for IPMI test targets.
+# Runs on a monitoring host to watch a remote system during IPMI stress testing.
+# Detects hangs, crashes, and BMC unresponsiveness.
+#
+# Author: Claude <no-reply@anthropic.com>
+# Prompted-by: Tony Camuso <tcamuso@redhat.com>
+#
+
+declare -r VERSION="1.0"
+declare -r SCRIPT_NAME="$(basename "$0")"
+
+# Text formatting
+declare -r BLD='\e[1m'
+declare -r GRN='\e[32m'
+declare -r YLW='\e[33m'
+declare -r RED='\e[31m'
+declare -r OFF='\e[0m'
+
+# Configuration
+declare opt_target=""
+declare opt_bmc_host=""
+declare opt_bmc_user="root"
+declare opt_bmc_pass=""
+declare -i opt_interval=5
+declare -i opt_duration=0
+declare opt_logfile=""
+declare -i opt_verbose=0
+
+# State tracking
+declare -i consecutive_ping_fails=0
+declare -i consecutive_bmc_fails=0
+declare -i total_ping_fails=0
+declare -i total_bmc_fails=0
+declare -i total_checks=0
+declare -i start_time=0
+
+usage() {
+    cat << USAGE
+
+$SCRIPT_NAME [OPTIONS] -t TARGET_HOST
+
+Monitor a remote system during IPMI stress testing.
+
+Required:
+    -t HOST         Target hostname/IP to monitor (OS-level ping/SSH)
+
+Optional:
+    -b BMC_HOST     BMC hostname/IP for out-of-band monitoring
+    -u USER         BMC username (default: root)
+    -p PASS         BMC password (or set IPMI_PASSWORD env var)
+    -i SECONDS      Check interval (default: $opt_interval)
+    -d SECONDS      Duration to monitor, 0=forever (default: $opt_duration)
+    -o FILE         Log file
+    -v              Verbose output
+    -h              Show this help
+
+Examples:
+    # Monitor target with ping only
+    $SCRIPT_NAME -t 192.168.1.100 -i 10
+
+    # Monitor with BMC access
+    $SCRIPT_NAME -t server1 -b server1-bmc -u admin -p secret
+
+    # Monitor for 5 minutes, log to file
+    $SCRIPT_NAME -t server1 -d 300 -o monitor.log
+
+Status Indicators:
+    [OK]    - System responding normally
+    [WARN]  - Intermittent issues detected
+    [FAIL]  - System not responding
+    [BMC]   - BMC-specific status
+
+Author: Claude <no-reply@anthropic.com>
+Prompted-by: Tony Camuso <tcamuso@redhat.com>
+
+USAGE
+    exit 0
+}
+
+log() {
+    local msg="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo -e "[$timestamp] $msg"
+    [[ -n "$opt_logfile" ]] && echo -e "[$timestamp] $msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$opt_logfile"
+}
+
+log_status() {
+    local status="$1"
+    local msg="$2"
+    case "$status" in
+        OK)   log "${GRN}[OK]${OFF}   $msg" ;;
+        WARN) log "${YLW}[WARN]${OFF} $msg" ;;
+        FAIL) log "${RED}[FAIL]${OFF} $msg" ;;
+        BMC)  log "${BLD}[BMC]${OFF}  $msg" ;;
+        INFO) log "[INFO] $msg" ;;
+    esac
+}
+
+# Check if target responds to ping
+check_ping() {
+    if ping -c 1 -W 2 "$opt_target" > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check if target responds to SSH
+check_ssh() {
+    if timeout 5 ssh -o ConnectTimeout=3 -o BatchMode=yes "$opt_target" "true" > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check BMC via IPMI LAN
+check_bmc() {
+    [[ -z "$opt_bmc_host" ]] && return 0
+    
+    local pass_opt=""
+    if [[ -n "$opt_bmc_pass" ]]; then
+        pass_opt="-P $opt_bmc_pass"
+    elif [[ -n "$IPMI_PASSWORD" ]]; then
+        pass_opt="-E"
+    else
+        return 0  # No password, skip BMC check
+    fi
+    
+    if timeout 10 ipmitool -I lanplus -H "$opt_bmc_host" -U "$opt_bmc_user" $pass_opt mc info > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Get BMC power status
+get_bmc_power_status() {
+    [[ -z "$opt_bmc_host" ]] && return
+    
+    local pass_opt=""
+    if [[ -n "$opt_bmc_pass" ]]; then
+        pass_opt="-P $opt_bmc_pass"
+    elif [[ -n "$IPMI_PASSWORD" ]]; then
+        pass_opt="-E"
+    else
+        return
+    fi
+    
+    local status=$(timeout 10 ipmitool -I lanplus -H "$opt_bmc_host" -U "$opt_bmc_user" $pass_opt chassis power status 2>/dev/null)
+    echo "$status"
+}
+
+# Get remote system load (if accessible)
+get_remote_load() {
+    local load=$(timeout 5 ssh -o ConnectTimeout=3 -o BatchMode=yes "$opt_target" "cat /proc/loadavg 2>/dev/null | cut -d' ' -f1-3" 2>/dev/null)
+    echo "$load"
+}
+
+# Main monitoring loop
+monitor_loop() {
+    local end_time=0
+    if ((opt_duration > 0)); then
+        end_time=$((start_time + opt_duration))
+    fi
+    
+    while true; do
+        ((total_checks++))
+        
+        # Check duration limit
+        if ((opt_duration > 0)) && (($(date +%s) >= end_time)); then
+            log_status INFO "Duration reached, stopping monitor"
+            break
+        fi
+        
+        # Ping check
+        if check_ping; then
+            consecutive_ping_fails=0
+            
+            if ((opt_verbose)); then
+                local load=$(get_remote_load)
+                if [[ -n "$load" ]]; then
+                    log_status OK "Target responding (load: $load)"
+                else
+                    log_status OK "Target responding (ping OK, SSH unavailable)"
+                fi
+            fi
+        else
+            ((consecutive_ping_fails++))
+            ((total_ping_fails++))
+            
+            if ((consecutive_ping_fails >= 3)); then
+                log_status FAIL "Target not responding! ($consecutive_ping_fails consecutive failures)"
+                
+                # Try to get BMC status if available
+                if [[ -n "$opt_bmc_host" ]]; then
+                    local power=$(get_bmc_power_status)
+                    if [[ -n "$power" ]]; then
+                        log_status BMC "Power status: $power"
+                    else
+                        log_status FAIL "BMC also not responding!"
+                    fi
+                fi
+            else
+                log_status WARN "Ping failed ($consecutive_ping_fails)"
+            fi
+        fi
+        
+        # BMC check (if configured)
+        if [[ -n "$opt_bmc_host" ]] && [[ -n "$opt_bmc_pass" || -n "$IPMI_PASSWORD" ]]; then
+            if check_bmc; then
+                consecutive_bmc_fails=0
+                ((opt_verbose)) && log_status BMC "BMC responding"
+            else
+                ((consecutive_bmc_fails++))
+                ((total_bmc_fails++))
+                log_status WARN "BMC not responding ($consecutive_bmc_fails)"
+            fi
+        fi
+        
+        sleep "$opt_interval"
+    done
+}
+
+print_summary() {
+    local elapsed=$(($(date +%s) - start_time))
+    local mins=$((elapsed / 60))
+    local secs=$((elapsed % 60))
+    
+    echo ""
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "${BLD}  Monitoring Summary${OFF}"
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "Target:          $opt_target"
+    [[ -n "$opt_bmc_host" ]] && log "BMC:             $opt_bmc_host"
+    log "Duration:        ${mins}m ${secs}s"
+    log "Total checks:    $total_checks"
+    log "Ping failures:   $total_ping_fails"
+    [[ -n "$opt_bmc_host" ]] && log "BMC failures:    $total_bmc_fails"
+    
+    if ((total_ping_fails == 0 && total_bmc_fails == 0)); then
+        log ""
+        log "${GRN}Result: All checks passed - target remained stable${OFF}"
+    else
+        log ""
+        log "${YLW}Result: Some failures detected - review log for details${OFF}"
+    fi
+}
+
+cleanup() {
+    echo ""
+    log_status INFO "Interrupt received, stopping..."
+    print_summary
+    exit 0
+}
+
+main() {
+    while getopts "t:b:u:p:i:d:o:vh" opt; do
+        case "$opt" in
+            t) opt_target="$OPTARG" ;;
+            b) opt_bmc_host="$OPTARG" ;;
+            u) opt_bmc_user="$OPTARG" ;;
+            p) opt_bmc_pass="$OPTARG" ;;
+            i) opt_interval="$OPTARG" ;;
+            d) opt_duration="$OPTARG" ;;
+            o) opt_logfile="$OPTARG" ;;
+            v) opt_verbose=1 ;;
+            h) usage ;;
+            *) usage ;;
+        esac
+    done
+    
+    # Validate required options
+    if [[ -z "$opt_target" ]]; then
+        echo -e "${RED}ERROR: Target host (-t) is required${OFF}"
+        echo "Use $SCRIPT_NAME -h for help"
+        exit 1
+    fi
+    
+    # Initialize log file
+    [[ -n "$opt_logfile" ]] && : > "$opt_logfile"
+    
+    # Set up signal handler
+    trap cleanup SIGINT SIGTERM
+    
+    start_time=$(date +%s)
+    
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "${BLD}  IPMI Test Monitor v$VERSION${OFF}"
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "Target:      $opt_target"
+    [[ -n "$opt_bmc_host" ]] && log "BMC:         $opt_bmc_host"
+    log "Interval:    ${opt_interval}s"
+    if ((opt_duration > 0)); then
+        log "Duration:    ${opt_duration}s"
+    else
+        log "Duration:    unlimited (Ctrl+C to stop)"
+    fi
+    log ""
+    log "Starting monitoring... (Ctrl+C to stop and show summary)"
+    log ""
+    
+    # Initial connectivity check
+    if ! check_ping; then
+        log_status WARN "Initial ping failed - target may be unreachable"
+    else
+        log_status OK "Initial connectivity verified"
+    fi
+    
+    monitor_loop
+    
+    print_summary
+}
+
+main "$@"

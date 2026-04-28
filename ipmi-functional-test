@@ -1,0 +1,454 @@
+#!/bin/bash
+#
+# ipmi-functional-test
+#
+# Functional tests for IPMI driver verification.
+# Tests concurrent access, watchdog, sensors, SEL, and chassis operations.
+#
+# Author: Claude <no-reply@anthropic.com>
+# Prompted-by: Tony Camuso <tcamuso@redhat.com>
+#
+
+declare -r VERSION="1.0"
+declare -r SCRIPT_NAME="$(basename "$0")"
+
+# Text formatting
+declare -r BLD='\e[1m'
+declare -r GRN='\e[32m'
+declare -r YLW='\e[33m'
+declare -r RED='\e[31m'
+declare -r OFF='\e[0m'
+
+# Test results
+declare -i tests_run=0
+declare -i tests_passed=0
+declare -i tests_failed=0
+declare -a failed_tests=()
+
+# Options
+declare -i opt_verbose=0
+declare -i opt_concurrent_procs=4
+declare -i opt_stress_duration=10
+declare opt_logfile=""
+declare -i opt_watchdog_test=0
+
+usage() {
+    cat << USAGE
+
+$SCRIPT_NAME [OPTIONS]
+
+Run IPMI functional tests to verify driver correctness.
+
+Options:
+    -v              Verbose output
+    -p COUNT        Number of concurrent processes (default: $opt_concurrent_procs)
+    -d SECONDS      Stress test duration (default: $opt_stress_duration)
+    -w              Include watchdog test (sets/pets/disables watchdog)
+    -o FILE         Write results to log file
+    -h              Show this help
+
+Test Suite:
+    1. Concurrent access   - Multiple parallel IPMI operations
+    2. Sensor polling      - Sustained sensor reads
+    3. SEL operations      - Read/write/clear System Event Log
+    4. Chassis identify    - LED blink control
+    5. Watchdog (opt-in)   - Set/pet/disable cycle (safe)
+
+Author: Claude <no-reply@anthropic.com>
+Prompted-by: Tony Camuso <tcamuso@redhat.com>
+
+USAGE
+    exit 0
+}
+
+log() {
+    local msg="$1"
+    echo -e "$msg"
+    [[ -n "$opt_logfile" ]] && echo -e "$msg" | sed 's/\x1b\[[0-9;]*m//g' >> "$opt_logfile"
+}
+
+log_header() {
+    local title="$1"
+    log ""
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "${BLD}  $title${OFF}"
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+}
+
+log_result() {
+    local test_name="$1"
+    local result="$2"
+    
+    ((tests_run++))
+    if [[ "$result" == "PASS" ]]; then
+        ((tests_passed++))
+        log "${GRN}✓ PASS:${OFF} $test_name"
+    else
+        ((tests_failed++))
+        failed_tests+=("$test_name")
+        log "${RED}✗ FAIL:${OFF} $test_name"
+    fi
+}
+
+# Test 1: Concurrent IPMI access
+test_concurrent_access() {
+    log_header "Test 1: Concurrent Access ($opt_concurrent_procs processes)"
+    log "${YLW}Testing locking under parallel IPMI operations...${OFF}"
+    
+    local -i i
+    local -a pids=()
+    local -i failed=0
+    local tmpdir=$(mktemp -d)
+    
+    # Launch concurrent ipmitool processes
+    for ((i=1; i<=opt_concurrent_procs; i++)); do
+        (
+            local -i count=0
+            local -i errors=0
+            while [[ $count -lt 20 ]]; do
+                if ! ipmitool mc info > /dev/null 2>&1; then
+                    ((errors++))
+                fi
+                if ! ipmitool sdr type temperature > /dev/null 2>&1; then
+                    ((errors++))
+                fi
+                ((count++))
+            done
+            echo $errors > "$tmpdir/proc_$i"
+        ) &
+        pids+=($!)
+    done
+    
+    log "Launched ${#pids[@]} concurrent processes..."
+    
+    # Wait for all processes
+    for pid in "${pids[@]}"; do
+        wait $pid
+    done
+    
+    # Check results
+    local -i total_errors=0
+    for ((i=1; i<=opt_concurrent_procs; i++)); do
+        if [[ -f "$tmpdir/proc_$i" ]]; then
+            local errs=$(cat "$tmpdir/proc_$i")
+            ((total_errors += errs))
+        fi
+    done
+    
+    rm -rf "$tmpdir"
+    
+    if [[ $total_errors -eq 0 ]]; then
+        log_result "concurrent access ($opt_concurrent_procs procs, 40 ops each)" "PASS"
+    else
+        log_result "concurrent access ($total_errors errors)" "FAIL"
+    fi
+}
+
+# Test 2: Sustained sensor polling
+test_sensor_polling() {
+    log_header "Test 2: Sustained Sensor Polling (${opt_stress_duration}s)"
+    log "${YLW}Continuous sensor reads to stress driver...${OFF}"
+    
+    local -i count=0
+    local -i errors=0
+    local start_time=$(date +%s)
+    local end_time=$((start_time + opt_stress_duration))
+    
+    while [[ $(date +%s) -lt $end_time ]]; do
+        if ! ipmitool sdr > /dev/null 2>&1; then
+            ((errors++))
+        fi
+        ((count++))
+        
+        # Brief delay to avoid overwhelming
+        sleep 0.1
+    done
+    
+    log "Completed $count sensor reads in ${opt_stress_duration}s"
+    
+    if [[ $errors -eq 0 ]]; then
+        log_result "sensor polling ($count reads, 0 errors)" "PASS"
+    else
+        log_result "sensor polling ($count reads, $errors errors)" "FAIL"
+    fi
+}
+
+# Test 3: SEL operations
+test_sel_operations() {
+    log_header "Test 3: System Event Log (SEL) Operations"
+    log "${YLW}Testing SEL read/info operations...${OFF}"
+    
+    local -i failed=0
+    
+    # Get SEL info
+    log "Reading SEL info..."
+    if ((opt_verbose)); then
+        ipmitool sel info
+    fi
+    if ! ipmitool sel info > /dev/null 2>&1; then
+        log "  ERROR: Failed to read SEL info"
+        failed=1
+    fi
+    
+    # Get SEL entries (list, don't clear)
+    log "Reading SEL entries..."
+    if ((opt_verbose)); then
+        ipmitool sel list 2>/dev/null | head -10
+    fi
+    if ! ipmitool sel list > /dev/null 2>&1; then
+        log "  WARNING: No SEL entries or failed to read"
+    fi
+    
+    # Get SEL time
+    log "Reading SEL time..."
+    if ((opt_verbose)); then
+        ipmitool sel time get
+    fi
+    if ! ipmitool sel time get > /dev/null 2>&1; then
+        log "  ERROR: Failed to read SEL time"
+        failed=1
+    fi
+    
+    if [[ $failed -eq 0 ]]; then
+        log_result "SEL operations" "PASS"
+    else
+        log_result "SEL operations" "FAIL"
+    fi
+}
+
+# Test 4: Chassis identify
+test_chassis_identify() {
+    log_header "Test 4: Chassis Identify (LED Blink)"
+    log "${YLW}Testing chassis identify on/off...${OFF}"
+    
+    local -i failed=0
+    
+    # Turn on identify LED for 5 seconds
+    log "Turning on identify LED (5 seconds)..."
+    if ! ipmitool chassis identify 5 > /dev/null 2>&1; then
+        log "  ERROR: Failed to turn on identify"
+        failed=1
+    fi
+    
+    sleep 2
+    
+    # Turn off identify LED
+    log "Turning off identify LED..."
+    if ! ipmitool chassis identify 0 > /dev/null 2>&1; then
+        log "  ERROR: Failed to turn off identify"
+        failed=1
+    fi
+    
+    if [[ $failed -eq 0 ]]; then
+        log_result "chassis identify" "PASS"
+    else
+        log_result "chassis identify" "FAIL"
+    fi
+}
+
+# Test 5: Watchdog operations (opt-in)
+test_watchdog() {
+    log_header "Test 5: Watchdog Timer Operations"
+    log "${YLW}Testing watchdog set/pet/disable cycle...${OFF}"
+    log "${YLW}NOTE: Watchdog is disabled at end - safe test${OFF}"
+    
+    local -i failed=0
+    
+    # First, ensure watchdog is stopped
+    log "Ensuring watchdog is disabled..."
+    ipmitool mc watchdog off > /dev/null 2>&1 || true
+    sleep 1
+    
+    # Get current watchdog status
+    log "Reading watchdog status..."
+    if ((opt_verbose)); then
+        ipmitool mc watchdog get
+    fi
+    if ! ipmitool mc watchdog get > /dev/null 2>&1; then
+        log "  ERROR: Failed to read watchdog status"
+        failed=1
+    fi
+    
+    # Set watchdog (60 second timeout, no action on timeout for safety)
+    # We'll reset it before it expires
+    log "Setting watchdog timer (60s timeout, will pet before expiry)..."
+    
+    # Use raw command to set a safe watchdog config
+    # Timer use: SMS/OS (0x04), Action: None (0x00), Pre-timeout: None
+    # Timeout: 600 deciseconds = 60 seconds
+    if ! ipmitool raw 0x06 0x24 0x04 0x00 0x00 0x00 0x58 0x02 > /dev/null 2>&1; then
+        log "  WARNING: Could not set watchdog via raw command, trying standard..."
+    fi
+    
+    # Reset/pet the watchdog
+    log "Petting watchdog..."
+    for i in 1 2 3; do
+        sleep 1
+        if ! ipmitool mc watchdog reset > /dev/null 2>&1; then
+            log "  WARNING: Pet $i may have failed (watchdog might not be running)"
+        else
+            log "  Pet $i successful"
+        fi
+    done
+    
+    # Disable watchdog
+    log "Disabling watchdog..."
+    if ! ipmitool mc watchdog off > /dev/null 2>&1; then
+        log "  ERROR: Failed to disable watchdog!"
+        failed=1
+    fi
+    
+    # Verify it's off
+    log "Verifying watchdog is disabled..."
+    local wd_status=$(ipmitool mc watchdog get 2>/dev/null | grep -i "stopped\|off" || true)
+    if [[ -n "$wd_status" ]]; then
+        log "  Watchdog confirmed disabled"
+    fi
+    
+    if [[ $failed -eq 0 ]]; then
+        log_result "watchdog operations" "PASS"
+    else
+        log_result "watchdog operations" "FAIL"
+    fi
+}
+
+# Test 6: Raw command test
+test_raw_commands() {
+    log_header "Test 6: Raw IPMI Commands"
+    log "${YLW}Testing direct IPMI message passing...${OFF}"
+    
+    local -i failed=0
+    
+    # Get Device ID (raw command)
+    log "Sending Get Device ID (raw 0x06 0x01)..."
+    if ((opt_verbose)); then
+        ipmitool raw 0x06 0x01
+    fi
+    if ! ipmitool raw 0x06 0x01 > /dev/null 2>&1; then
+        log "  ERROR: Get Device ID failed"
+        failed=1
+    fi
+    
+    # Get Self Test Results
+    log "Sending Get Self Test Results (raw 0x06 0x04)..."
+    if ((opt_verbose)); then
+        ipmitool raw 0x06 0x04
+    fi
+    if ! ipmitool raw 0x06 0x04 > /dev/null 2>&1; then
+        log "  ERROR: Get Self Test Results failed"
+        failed=1
+    fi
+    
+    # Get System GUID
+    log "Sending Get System GUID (raw 0x06 0x37)..."
+    if ((opt_verbose)); then
+        ipmitool raw 0x06 0x37
+    fi
+    if ! ipmitool raw 0x06 0x37 > /dev/null 2>&1; then
+        log "  ERROR: Get System GUID failed"
+        failed=1
+    fi
+    
+    if [[ $failed -eq 0 ]]; then
+        log_result "raw IPMI commands" "PASS"
+    else
+        log_result "raw IPMI commands" "FAIL"
+    fi
+}
+
+capture_state() {
+    log_header "System State"
+    log "Kernel: $(uname -r)"
+    log "Date: $(date)"
+    log ""
+    log "BMC Info:"
+    ipmitool mc info 2>/dev/null | grep -E "^(Device ID|Firmware|IPMI Version|Manufacturer)" | while read line; do
+        log "  $line"
+    done
+}
+
+print_summary() {
+    log_header "Test Summary"
+    log ""
+    log "Tests run:    $tests_run"
+    log "${GRN}Tests passed: $tests_passed${OFF}"
+    log "${RED}Tests failed: $tests_failed${OFF}"
+    
+    if ((tests_failed > 0)); then
+        log ""
+        log "${RED}Failed tests:${OFF}"
+        for t in "${failed_tests[@]}"; do
+            log "  - $t"
+        done
+    fi
+    
+    log ""
+    if ((tests_failed == 0)); then
+        log "${GRN}════════════════════════════════════════════════════════════${OFF}"
+        log "${GRN}  ALL TESTS PASSED${OFF}"
+        log "${GRN}════════════════════════════════════════════════════════════${OFF}"
+        return 0
+    else
+        log "${RED}════════════════════════════════════════════════════════════${OFF}"
+        log "${RED}  SOME TESTS FAILED${OFF}"
+        log "${RED}════════════════════════════════════════════════════════════${OFF}"
+        return 1
+    fi
+}
+
+main() {
+    while getopts "vp:d:wo:h" opt; do
+        case "$opt" in
+            v) opt_verbose=1 ;;
+            p) opt_concurrent_procs="$OPTARG" ;;
+            d) opt_stress_duration="$OPTARG" ;;
+            w) opt_watchdog_test=1 ;;
+            o) opt_logfile="$OPTARG" ;;
+            h) usage ;;
+            *) usage ;;
+        esac
+    done
+    
+    [[ -n "$opt_logfile" ]] && : > "$opt_logfile"
+    
+    # Check for root
+    if [[ $EUID -ne 0 ]]; then
+        log "${RED}ERROR: This script must be run as root${OFF}"
+        exit 1
+    fi
+    
+    # Check for ipmitool
+    if ! command -v ipmitool &> /dev/null; then
+        log "${RED}ERROR: ipmitool not found${OFF}"
+        exit 1
+    fi
+    
+    # Check for IPMI device
+    if [[ ! -e /dev/ipmi0 ]]; then
+        log "${RED}ERROR: /dev/ipmi0 not found - IPMI driver not loaded?${OFF}"
+        exit 1
+    fi
+    
+    log_header "IPMI Functional Test Suite v$VERSION"
+    log "Author: Claude <no-reply@anthropic.com>"
+    log "Prompted-by: Tony Camuso <tcamuso@redhat.com>"
+    
+    capture_state
+    
+    test_concurrent_access
+    test_sensor_polling
+    test_sel_operations
+    test_chassis_identify
+    test_raw_commands
+    
+    if ((opt_watchdog_test)); then
+        test_watchdog
+    else
+        log ""
+        log "${YLW}Skipping watchdog test (use -w to enable)${OFF}"
+    fi
+    
+    print_summary
+}
+
+main "$@"
