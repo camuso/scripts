@@ -1,0 +1,122 @@
+#!/bin/bash
+#
+# input-test-sysfs - Validate input subsystem sysfs interface
+#
+# Checks that sysfs attributes for input devices are readable
+# and correctly structured.
+#
+# Exit codes: 0=pass, 1=fail, 77=skip
+#
+
+KERNEL_DIR="${KERNEL_DIR:-/work/c10s/kernel}"
+
+declare -i ERRORS=0
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+skip() { echo "SKIP: $*" >&2; exit 77; }
+
+[[ $(id -u) -ne 0 ]] && skip "Must run as root"
+
+INPUT_CLASS="/sys/class/input"
+[[ -d "$INPUT_CLASS" ]] || skip "No /sys/class/input directory"
+
+# Ensure uinput is loaded so we have at least one device to test
+if [[ ! -e /dev/uinput ]]; then
+	modprobe uinput 2>/dev/null
+fi
+
+echo "sysfs attribute validation:"
+
+# Check that input class directory is populated
+device_count=$(ls -d "$INPUT_CLASS"/input* 2>/dev/null | wc -l)
+if ((device_count == 0)); then
+	fail "No input devices found in $INPUT_CLASS"
+fi
+echo "  found $device_count input device(s) in sysfs"
+
+# For each input device, verify core attributes exist and are readable
+for dev_dir in "$INPUT_CLASS"/input*; do
+	devname=$(basename "$dev_dir")
+
+	# name attribute
+	if [[ -f "$dev_dir/name" ]]; then
+		name=$(cat "$dev_dir/name" 2>/dev/null)
+		if [[ -z "$name" ]]; then
+			echo "  ERROR: $devname/name is empty"
+			((ERRORS++))
+		fi
+	else
+		echo "  ERROR: $devname/name missing"
+		((ERRORS++))
+	fi
+
+	# capabilities directory
+	if [[ -d "$dev_dir/capabilities" ]]; then
+		for cap in ev key rel abs; do
+			if [[ -f "$dev_dir/capabilities/$cap" ]]; then
+				val=$(cat "$dev_dir/capabilities/$cap" 2>/dev/null)
+				if [[ -z "$val" ]]; then
+					echo "  ERROR: $devname/capabilities/$cap is empty"
+					((ERRORS++))
+				fi
+			fi
+		done
+	else
+		echo "  ERROR: $devname/capabilities/ directory missing"
+		((ERRORS++))
+	fi
+
+	# id directory
+	if [[ -d "$dev_dir/id" ]]; then
+		for id_attr in bustype vendor product version; do
+			if [[ -f "$dev_dir/id/$id_attr" ]]; then
+				val=$(cat "$dev_dir/id/$id_attr" 2>/dev/null)
+				if [[ -z "$val" ]]; then
+					echo "  ERROR: $devname/id/$id_attr is empty"
+					((ERRORS++))
+				fi
+			else
+				echo "  ERROR: $devname/id/$id_attr missing"
+				((ERRORS++))
+			fi
+		done
+	else
+		echo "  ERROR: $devname/id/ directory missing"
+		((ERRORS++))
+	fi
+
+	# properties attribute
+	if [[ ! -f "$dev_dir/properties" ]]; then
+		echo "  ERROR: $devname/properties missing"
+		((ERRORS++))
+	fi
+done
+
+# Check event nodes in sysfs
+event_count=$(ls -d "$INPUT_CLASS"/event* 2>/dev/null | wc -l)
+echo "  found $event_count event node(s) in sysfs"
+
+for ev_dir in "$INPUT_CLASS"/event*; do
+	[[ -d "$ev_dir" ]] || continue
+	evname=$(basename "$ev_dir")
+
+	# dev attribute (major:minor)
+	if [[ -f "$ev_dir/dev" ]]; then
+		dev_num=$(cat "$ev_dir/dev" 2>/dev/null)
+		if ! echo "$dev_num" | grep -qE '^[0-9]+:[0-9]+$'; then
+			echo "  ERROR: $evname/dev malformed: '$dev_num'"
+			((ERRORS++))
+		fi
+	else
+		echo "  ERROR: $evname/dev missing"
+		((ERRORS++))
+	fi
+done
+
+if ((ERRORS > 0)); then
+	echo "  $ERRORS error(s) found"
+	exit 1
+fi
+
+echo "  all sysfs attributes validated OK"
+exit 0

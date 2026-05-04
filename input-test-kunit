@@ -1,0 +1,75 @@
+#!/bin/bash
+#
+# input-test-kunit - Run KUnit input_core test suite
+#
+# Loads the input_test.ko module from the build tree and checks
+# KUnit results via debugfs.
+#
+# Exit codes: 0=pass, 1=fail, 77=skip
+#
+
+KERNEL_DIR="${KERNEL_DIR:-/work/c10s/kernel}"
+TEST_MODULE="$KERNEL_DIR/drivers/input/tests/input_test.ko"
+KUNIT_MODULE="$KERNEL_DIR/lib/kunit/kunit.ko"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+skip() { echo "SKIP: $*" >&2; exit 77; }
+
+[[ $(id -u) -ne 0 ]] && skip "Must run as root"
+[[ -f "$TEST_MODULE" ]] || skip "input_test.ko not built at $TEST_MODULE"
+
+# Ensure kunit is loaded
+if ! lsmod | grep -q '^kunit'; then
+	if [[ -f "$KUNIT_MODULE" ]]; then
+		insmod "$KUNIT_MODULE" 2>/dev/null || true
+	else
+		modprobe kunit 2>/dev/null || skip "Cannot load kunit module"
+	fi
+fi
+
+# Ensure debugfs is mounted
+if ! mountpoint -q /sys/kernel/debug 2>/dev/null; then
+	mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || \
+		skip "Cannot mount debugfs"
+fi
+
+# Remove any previous instance
+rmmod input_test 2>/dev/null
+
+# Load the test module
+if ! insmod "$TEST_MODULE" 2>/dev/null; then
+	fail "Failed to load input_test.ko"
+fi
+
+# Give KUnit a moment to finish
+sleep 1
+
+# Read results
+RESULTS_FILE="/sys/kernel/debug/kunit/input_core/results"
+if [[ ! -f "$RESULTS_FILE" ]]; then
+	rmmod input_test 2>/dev/null
+	fail "KUnit results not found at $RESULTS_FILE"
+fi
+
+results=$(cat "$RESULTS_FILE")
+echo "$results"
+
+# Check for failures
+if echo "$results" | grep -q "^not ok"; then
+	rmmod input_test 2>/dev/null
+	fail "KUnit test case(s) failed"
+fi
+
+if ! echo "$results" | grep -q "^ok"; then
+	rmmod input_test 2>/dev/null
+	fail "No KUnit test results found"
+fi
+
+# Count passed tests
+passed=$(echo "$results" | grep -c "^    ok")
+echo "KUnit: $passed test cases passed"
+
+# Cleanup
+rmmod input_test 2>/dev/null
+
+exit 0

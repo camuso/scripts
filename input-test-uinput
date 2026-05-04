@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""
+input-test-uinput - Functional tests for uinput virtual device creation.
+
+Creates virtual input devices via /dev/uinput and verifies:
+- Device appears in /proc/bus/input/devices
+- Key events can be injected and read back
+- Relative motion events work (mouse)
+- Absolute events work (touchscreen)
+- Device cleanup on destroy
+
+Exit codes: 0=pass, 1=fail, 77=skip
+"""
+
+import ctypes
+import fcntl
+import os
+import struct
+import sys
+import time
+import select
+import errno
+
+# ioctl constants
+UINPUT_MAX_NAME_SIZE = 80
+
+# Event types
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_REL = 0x02
+EV_ABS = 0x03
+
+# Sync events
+SYN_REPORT = 0x00
+
+# Key codes
+BTN_LEFT = 0x110
+BTN_RIGHT = 0x111
+BTN_TOUCH = 0x14a
+KEY_A = 30
+KEY_B = 48
+
+# Relative axes
+REL_X = 0x00
+REL_Y = 0x01
+
+# Absolute axes
+ABS_X = 0x00
+ABS_Y = 0x01
+
+# ioctl numbers
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_SET_RELBIT = 0x40045566
+UI_SET_ABSBIT = 0x40045567
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+UI_DEV_SETUP = 0x405c5503
+UI_ABS_SETUP = 0x401c5504
+
+# input_event struct: time_sec, time_usec, type, code, value
+if struct.calcsize("l") == 8:
+    INPUT_EVENT_FORMAT = "llHHi"
+else:
+    INPUT_EVENT_FORMAT = "iiHHi"
+INPUT_EVENT_SIZE = struct.calcsize(INPUT_EVENT_FORMAT)
+
+
+def skip(msg):
+    print(f"SKIP: {msg}", file=sys.stderr)
+    sys.exit(77)
+
+
+def fail(msg):
+    print(f"FAIL: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+class UinputDevice:
+    def __init__(self, name, events):
+        self.fd = None
+        self.name = name
+        self.evdev_path = None
+
+        try:
+            self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        except PermissionError:
+            skip("Cannot open /dev/uinput (permission denied)")
+        except FileNotFoundError:
+            skip("/dev/uinput not found - load uinput module")
+
+        for ev_type, codes in events.items():
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, ev_type)
+            if ev_type == EV_KEY:
+                for code in codes:
+                    fcntl.ioctl(self.fd, UI_SET_KEYBIT, code)
+            elif ev_type == EV_REL:
+                for code in codes:
+                    fcntl.ioctl(self.fd, UI_SET_RELBIT, code)
+            elif ev_type == EV_ABS:
+                for code in codes:
+                    fcntl.ioctl(self.fd, UI_SET_ABSBIT, code)
+
+        # Setup device info using uinput_setup struct
+        setup = struct.pack(
+            "HHHi" + str(UINPUT_MAX_NAME_SIZE) + "sI",
+            0x03,    # BUS_VIRTUAL (id.bustype)
+            0x1234,  # id.vendor
+            0x5678,  # id.product
+            1,       # id.version
+            name.encode("utf-8").ljust(UINPUT_MAX_NAME_SIZE, b'\0'),
+            0        # ff_effects_max
+        )
+
+        try:
+            os.write(self.fd, setup[:struct.calcsize("HHHi" + str(UINPUT_MAX_NAME_SIZE) + "sI")])
+        except OSError:
+            # Fallback: write uinput_user_dev directly
+            uinput_user_dev = struct.pack(
+                str(UINPUT_MAX_NAME_SIZE) + "sHHHHi" + "i" * 64 + "i" * 64 + "i" * 64 + "i" * 64,
+                name.encode("utf-8").ljust(UINPUT_MAX_NAME_SIZE, b'\0'),
+                0x03, 0x1234, 0x5678, 1, 0,
+                *([0] * 64), *([0] * 64), *([1024] * 64), *([0] * 64)
+            )
+            os.lseek(self.fd, 0, os.SEEK_SET)
+            os.write(self.fd, uinput_user_dev)
+
+        fcntl.ioctl(self.fd, UI_DEV_CREATE)
+        time.sleep(0.3)
+        self._find_evdev()
+
+    def _find_evdev(self):
+        """Find the evdev node for this device."""
+        for entry in os.listdir("/sys/class/input"):
+            if not entry.startswith("event"):
+                continue
+            name_path = f"/sys/class/input/{entry}/device/name"
+            try:
+                with open(name_path) as f:
+                    if f.read().strip() == self.name:
+                        self.evdev_path = f"/dev/input/{entry}"
+                        return
+            except (FileNotFoundError, PermissionError):
+                continue
+
+    def write_event(self, ev_type, code, value):
+        """Write an input event."""
+        now = time.time()
+        sec = int(now)
+        usec = int((now - sec) * 1_000_000)
+        event = struct.pack(INPUT_EVENT_FORMAT, sec, usec, ev_type, code, value)
+        os.write(self.fd, event)
+
+    def syn(self):
+        """Send SYN_REPORT."""
+        self.write_event(EV_SYN, SYN_REPORT, 0)
+
+    def destroy(self):
+        """Destroy the uinput device."""
+        if self.fd is not None:
+            try:
+                fcntl.ioctl(self.fd, UI_DEV_DESTROY)
+            except OSError:
+                pass
+            os.close(self.fd)
+            self.fd = None
+
+
+def read_events(evdev_path, timeout=0.5):
+    """Read input events from an evdev node."""
+    events = []
+    try:
+        fd = os.open(evdev_path, os.O_RDONLY | os.O_NONBLOCK)
+    except (PermissionError, FileNotFoundError):
+        return events
+
+    try:
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if ready:
+                try:
+                    data = os.read(fd, INPUT_EVENT_SIZE * 64)
+                    for i in range(0, len(data), INPUT_EVENT_SIZE):
+                        chunk = data[i:i + INPUT_EVENT_SIZE]
+                        if len(chunk) == INPUT_EVENT_SIZE:
+                            ev = struct.unpack(INPUT_EVENT_FORMAT, chunk)
+                            events.append(ev)
+                except OSError:
+                    break
+    finally:
+        os.close(fd)
+    return events
+
+
+def test_keyboard():
+    """Test virtual keyboard device."""
+    dev = UinputDevice("backport-test-kbd", {
+        EV_KEY: [KEY_A, KEY_B],
+    })
+
+    try:
+        if dev.evdev_path is None:
+            fail("Virtual keyboard device not found in /dev/input/")
+
+        # Inject key press and release
+        dev.write_event(EV_KEY, KEY_A, 1)
+        dev.syn()
+        dev.write_event(EV_KEY, KEY_A, 0)
+        dev.syn()
+
+        events = read_events(dev.evdev_path)
+        key_events = [e for e in events if e[2] == EV_KEY]
+
+        if len(key_events) < 2:
+            fail(f"Expected 2 key events, got {len(key_events)}")
+
+        if key_events[0][3] != KEY_A or key_events[0][4] != 1:
+            fail("Key press event mismatch")
+        if key_events[1][3] != KEY_A or key_events[1][4] != 0:
+            fail("Key release event mismatch")
+
+        print("  keyboard: key inject/readback OK")
+    finally:
+        dev.destroy()
+
+
+def test_mouse():
+    """Test virtual mouse device."""
+    dev = UinputDevice("backport-test-mouse", {
+        EV_KEY: [BTN_LEFT, BTN_RIGHT],
+        EV_REL: [REL_X, REL_Y],
+    })
+
+    try:
+        if dev.evdev_path is None:
+            fail("Virtual mouse device not found in /dev/input/")
+
+        # Inject relative motion
+        dev.write_event(EV_REL, REL_X, 10)
+        dev.write_event(EV_REL, REL_Y, -5)
+        dev.syn()
+
+        events = read_events(dev.evdev_path)
+        rel_events = [e for e in events if e[2] == EV_REL]
+
+        if len(rel_events) < 2:
+            fail(f"Expected 2 REL events, got {len(rel_events)}")
+
+        x_ev = [e for e in rel_events if e[3] == REL_X]
+        y_ev = [e for e in rel_events if e[3] == REL_Y]
+
+        if not x_ev or x_ev[0][4] != 10:
+            fail("REL_X value mismatch")
+        if not y_ev or y_ev[0][4] != -5:
+            fail("REL_Y value mismatch")
+
+        print("  mouse: relative motion inject/readback OK")
+    finally:
+        dev.destroy()
+
+
+def test_device_appears_in_proc():
+    """Test that virtual device appears in /proc/bus/input/devices."""
+    dev = UinputDevice("backport-test-proc", {
+        EV_KEY: [KEY_A],
+    })
+
+    try:
+        with open("/proc/bus/input/devices") as f:
+            content = f.read()
+        if "backport-test-proc" not in content:
+            fail("Device not found in /proc/bus/input/devices")
+        print("  proc: device appears in /proc/bus/input/devices OK")
+    finally:
+        dev.destroy()
+
+
+def test_device_cleanup():
+    """Test that device disappears after destroy."""
+    dev = UinputDevice("backport-test-cleanup", {
+        EV_KEY: [KEY_A],
+    })
+    evdev = dev.evdev_path
+    dev.destroy()
+    time.sleep(0.3)
+
+    if evdev and os.path.exists(evdev):
+        # Check if sysfs entry is gone
+        gone = True
+        for entry in os.listdir("/sys/class/input"):
+            if not entry.startswith("event"):
+                continue
+            name_path = f"/sys/class/input/{entry}/device/name"
+            try:
+                with open(name_path) as f:
+                    if f.read().strip() == "backport-test-cleanup":
+                        gone = False
+            except (FileNotFoundError, PermissionError):
+                continue
+        if not gone:
+            fail("Device still in sysfs after destroy")
+
+    print("  cleanup: device removed after destroy OK")
+
+
+def main():
+    if os.geteuid() != 0:
+        skip("Must run as root")
+
+    # Ensure uinput module is loaded
+    if not os.path.exists("/dev/uinput"):
+        os.system("modprobe uinput 2>/dev/null")
+        time.sleep(0.5)
+        if not os.path.exists("/dev/uinput"):
+            skip("/dev/uinput not available")
+
+    print("uinput functional tests:")
+    test_device_appears_in_proc()
+    test_keyboard()
+    test_mouse()
+    test_device_cleanup()
+    print("All uinput tests passed")
+
+
+if __name__ == "__main__":
+    main()

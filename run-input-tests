@@ -1,0 +1,98 @@
+#!/bin/bash
+#
+# run-input-tests - Master orchestrator for input subsystem backport tests
+#
+# Runs all input subsystem test scripts and produces a TAP-format summary.
+# Must be run as root on a system with the backported kernel modules built.
+#
+# Usage: run-input-tests [-k KERNEL_BUILD_DIR] [-v]
+#
+
+set -o pipefail
+
+declare KERNEL_DIR="/work/c10s/kernel"
+declare -i VERBOSE=0
+declare -i PASS=0
+declare -i FAIL=0
+declare -i SKIP=0
+declare -i TEST_NUM=0
+declare MYDIR
+MYDIR="$(dirname "$(readlink -f "$0")")"
+
+usage() {
+	echo "Usage: $(basename "$0") [-k KERNEL_BUILD_DIR] [-v]"
+	echo "  -k DIR   Path to kernel build tree (default: /work/c10s/kernel)"
+	echo "  -v       Verbose output"
+	exit 0
+}
+
+while getopts "k:vh" opt; do
+	case "$opt" in
+		k) KERNEL_DIR="$OPTARG" ;;
+		v) VERBOSE=1 ;;
+		h) usage ;;
+		*) usage ;;
+	esac
+done
+
+[[ $(id -u) -ne 0 ]] && { echo "ERROR: Must run as root"; exit 1; }
+[[ -d "$KERNEL_DIR/drivers/input" ]] || {
+	echo "ERROR: $KERNEL_DIR does not look like a kernel build tree"
+	exit 1
+}
+
+export KERNEL_DIR VERBOSE
+
+tap_result() {
+	local status="$1"
+	local desc="$2"
+	((TEST_NUM++))
+
+	case "$status" in
+		ok)   echo "ok $TEST_NUM - $desc"; ((PASS++)) ;;
+		fail) echo "not ok $TEST_NUM - $desc"; ((FAIL++)) ;;
+		skip) echo "ok $TEST_NUM - $desc # SKIP"; ((SKIP++)) ;;
+	esac
+}
+
+run_test() {
+	local script="$1"
+	local name="$2"
+	local output
+	local rc
+
+	if [[ ! -x "$MYDIR/$script" ]]; then
+		tap_result skip "$name (script not found)"
+		return
+	fi
+
+	((VERBOSE)) && echo "# Running: $script" >&2
+	output=$("$MYDIR/$script" 2>&1)
+	rc=$?
+
+	if ((rc == 0)); then
+		tap_result ok "$name"
+	elif ((rc == 77)); then
+		tap_result skip "$name"
+	else
+		tap_result fail "$name"
+		while IFS= read -r line; do
+			echo "  # $line"
+		done <<< "$output"
+	fi
+}
+
+echo "TAP version 13"
+
+run_test "input-test-kunit" "KUnit input_core test suite"
+run_test "input-test-modprobe" "Module load/unload smoke tests"
+run_test "input-test-uinput" "uinput functional tests"
+run_test "input-test-sysfs" "Sysfs attribute validation"
+run_test "input-test-events" "Event injection regression tests"
+
+echo "1..$TEST_NUM"
+echo ""
+echo "# Summary: $PASS passed, $FAIL failed, $SKIP skipped (total: $TEST_NUM)"
+
+((FAIL > 0)) && exit 1
+exit 0

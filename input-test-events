@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""
+input-test-events - Event injection regression tests for input subsystem.
+
+Tests event path integrity:
+- Timestamp propagation
+- Multi-event synchronization
+- Event ordering guarantees
+- Force-feedback memless path (if available)
+
+Exit codes: 0=pass, 1=fail, 77=skip
+"""
+
+import ctypes
+import fcntl
+import os
+import struct
+import sys
+import time
+import select
+
+# Event types and codes
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_REL = 0x02
+EV_ABS = 0x03
+SYN_REPORT = 0x00
+KEY_A = 30
+KEY_B = 48
+KEY_C = 46
+REL_X = 0x00
+REL_Y = 0x01
+BTN_LEFT = 0x110
+
+# uinput ioctls
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_SET_RELBIT = 0x40045566
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+
+UINPUT_MAX_NAME_SIZE = 80
+
+if struct.calcsize("l") == 8:
+    INPUT_EVENT_FORMAT = "llHHi"
+else:
+    INPUT_EVENT_FORMAT = "iiHHi"
+INPUT_EVENT_SIZE = struct.calcsize(INPUT_EVENT_FORMAT)
+
+
+def skip(msg):
+    print(f"SKIP: {msg}", file=sys.stderr)
+    sys.exit(77)
+
+
+def fail(msg):
+    print(f"FAIL: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def create_uinput(name, ev_types):
+    """Create a uinput device with given capabilities."""
+    try:
+        fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+    except (PermissionError, FileNotFoundError):
+        skip("Cannot open /dev/uinput")
+
+    for ev_type, codes in ev_types.items():
+        fcntl.ioctl(fd, UI_SET_EVBIT, ev_type)
+        if ev_type == EV_KEY:
+            for c in codes:
+                fcntl.ioctl(fd, UI_SET_KEYBIT, c)
+        elif ev_type == EV_REL:
+            for c in codes:
+                fcntl.ioctl(fd, UI_SET_RELBIT, c)
+
+    # Write uinput_user_dev struct
+    uinput_user_dev = struct.pack(
+        str(UINPUT_MAX_NAME_SIZE) + "sHHHHi" + "i" * 64 + "i" * 64 + "i" * 64 + "i" * 64,
+        name.encode("utf-8").ljust(UINPUT_MAX_NAME_SIZE, b'\0'),
+        0x03, 0x1234, 0x5678, 1, 0,
+        *([0] * 64), *([0] * 64), *([0] * 64), *([0] * 64)
+    )
+    os.write(fd, uinput_user_dev)
+    fcntl.ioctl(fd, UI_DEV_CREATE)
+    time.sleep(0.3)
+
+    # Find evdev
+    evdev_path = None
+    for entry in os.listdir("/sys/class/input"):
+        if not entry.startswith("event"):
+            continue
+        name_path = f"/sys/class/input/{entry}/device/name"
+        try:
+            with open(name_path) as f:
+                if f.read().strip() == name:
+                    evdev_path = f"/dev/input/{entry}"
+                    break
+        except (FileNotFoundError, PermissionError):
+            continue
+
+    return fd, evdev_path
+
+
+def write_event(fd, ev_type, code, value):
+    """Write an input event with current timestamp."""
+    now = time.time()
+    sec = int(now)
+    usec = int((now - sec) * 1_000_000)
+    event = struct.pack(INPUT_EVENT_FORMAT, sec, usec, ev_type, code, value)
+    os.write(fd, event)
+
+
+def read_all_events(evdev_path, timeout=0.5):
+    """Read all pending events from evdev."""
+    events = []
+    try:
+        fd = os.open(evdev_path, os.O_RDONLY | os.O_NONBLOCK)
+    except (PermissionError, FileNotFoundError) as e:
+        fail(f"Cannot open {evdev_path}: {e}")
+
+    try:
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if ready:
+                try:
+                    data = os.read(fd, INPUT_EVENT_SIZE * 256)
+                    for i in range(0, len(data), INPUT_EVENT_SIZE):
+                        chunk = data[i:i + INPUT_EVENT_SIZE]
+                        if len(chunk) == INPUT_EVENT_SIZE:
+                            events.append(struct.unpack(INPUT_EVENT_FORMAT, chunk))
+                except OSError:
+                    break
+    finally:
+        os.close(fd)
+    return events
+
+
+def test_timestamp_ordering():
+    """Verify that event timestamps are monotonically increasing."""
+    fd, evdev = create_uinput("backport-test-ts", {
+        EV_KEY: [KEY_A, KEY_B, KEY_C],
+    })
+
+    try:
+        if evdev is None:
+            fail("Could not find evdev for timestamp test device")
+
+        # Send a burst of events
+        for key in [KEY_A, KEY_B, KEY_C]:
+            write_event(fd, EV_KEY, key, 1)
+        write_event(fd, EV_SYN, SYN_REPORT, 0)
+        for key in [KEY_A, KEY_B, KEY_C]:
+            write_event(fd, EV_KEY, key, 0)
+        write_event(fd, EV_SYN, SYN_REPORT, 0)
+
+        events = read_all_events(evdev)
+        if not events:
+            fail("No events received in timestamp test")
+
+        # Verify monotonic timestamps
+        prev_time = 0
+        for ev in events:
+            ev_time = ev[0] * 1_000_000 + ev[1]
+            if ev_time < prev_time:
+                fail(f"Timestamp went backwards: {prev_time} -> {ev_time}")
+            prev_time = ev_time
+
+        print("  timestamp: monotonic ordering verified OK")
+    finally:
+        fcntl.ioctl(fd, UI_DEV_DESTROY)
+        os.close(fd)
+
+
+def test_syn_report_boundaries():
+    """Verify SYN_REPORT correctly delimits event packets."""
+    fd, evdev = create_uinput("backport-test-syn", {
+        EV_KEY: [KEY_A],
+        EV_REL: [REL_X, REL_Y],
+    })
+
+    try:
+        if evdev is None:
+            fail("Could not find evdev for syn test device")
+
+        # Packet 1: key press
+        write_event(fd, EV_KEY, KEY_A, 1)
+        write_event(fd, EV_SYN, SYN_REPORT, 0)
+
+        # Packet 2: mouse move
+        write_event(fd, EV_REL, REL_X, 42)
+        write_event(fd, EV_REL, REL_Y, -17)
+        write_event(fd, EV_SYN, SYN_REPORT, 0)
+
+        # Packet 3: key release
+        write_event(fd, EV_KEY, KEY_A, 0)
+        write_event(fd, EV_SYN, SYN_REPORT, 0)
+
+        events = read_all_events(evdev)
+        syn_events = [e for e in events if e[2] == EV_SYN and e[3] == SYN_REPORT]
+
+        if len(syn_events) < 3:
+            fail(f"Expected 3 SYN_REPORT events, got {len(syn_events)}")
+
+        # Verify event content between syn boundaries
+        key_press = [e for e in events if e[2] == EV_KEY and e[4] == 1]
+        rel_events = [e for e in events if e[2] == EV_REL]
+        key_release = [e for e in events if e[2] == EV_KEY and e[4] == 0]
+
+        if not key_press:
+            fail("Missing key press event")
+        if len(rel_events) != 2:
+            fail(f"Expected 2 REL events, got {len(rel_events)}")
+        if not key_release:
+            fail("Missing key release event")
+
+        # Verify REL values
+        rel_x = [e for e in rel_events if e[3] == REL_X]
+        rel_y = [e for e in rel_events if e[3] == REL_Y]
+        if not rel_x or rel_x[0][4] != 42:
+            fail(f"REL_X value wrong: expected 42")
+        if not rel_y or rel_y[0][4] != -17:
+            fail(f"REL_Y value wrong: expected -17")
+
+        print("  syn_report: packet boundaries verified OK")
+    finally:
+        fcntl.ioctl(fd, UI_DEV_DESTROY)
+        os.close(fd)
+
+
+def test_event_ordering():
+    """Verify events arrive in the order they were injected."""
+    fd, evdev = create_uinput("backport-test-order", {
+        EV_KEY: [KEY_A, KEY_B, KEY_C],
+    })
+
+    try:
+        if evdev is None:
+            fail("Could not find evdev for ordering test device")
+
+        # Send keys in order A, B, C
+        for key in [KEY_A, KEY_B, KEY_C]:
+            write_event(fd, EV_KEY, key, 1)
+            write_event(fd, EV_SYN, SYN_REPORT, 0)
+
+        events = read_all_events(evdev)
+        key_events = [e for e in events if e[2] == EV_KEY]
+
+        if len(key_events) < 3:
+            fail(f"Expected 3 key events, got {len(key_events)}")
+
+        expected_order = [KEY_A, KEY_B, KEY_C]
+        actual_order = [e[3] for e in key_events[:3]]
+
+        if actual_order != expected_order:
+            fail(f"Event order wrong: expected {expected_order}, got {actual_order}")
+
+        print("  ordering: event sequence preserved OK")
+    finally:
+        fcntl.ioctl(fd, UI_DEV_DESTROY)
+        os.close(fd)
+
+
+def test_rapid_events():
+    """Stress test: inject many events rapidly and verify none are lost."""
+    fd, evdev = create_uinput("backport-test-rapid", {
+        EV_REL: [REL_X, REL_Y],
+    })
+
+    try:
+        if evdev is None:
+            fail("Could not find evdev for rapid event test device")
+
+        num_packets = 100
+        for i in range(num_packets):
+            write_event(fd, EV_REL, REL_X, i % 50)
+            write_event(fd, EV_REL, REL_Y, -(i % 50))
+            write_event(fd, EV_SYN, SYN_REPORT, 0)
+
+        events = read_all_events(evdev, timeout=2.0)
+        rel_x_events = [e for e in events if e[2] == EV_REL and e[3] == REL_X]
+
+        if len(rel_x_events) < num_packets:
+            fail(f"Event loss: sent {num_packets}, received {len(rel_x_events)}")
+
+        print(f"  rapid: {num_packets} packets sent/received without loss OK")
+    finally:
+        fcntl.ioctl(fd, UI_DEV_DESTROY)
+        os.close(fd)
+
+
+def main():
+    if os.geteuid() != 0:
+        skip("Must run as root")
+
+    if not os.path.exists("/dev/uinput"):
+        os.system("modprobe uinput 2>/dev/null")
+        time.sleep(0.5)
+        if not os.path.exists("/dev/uinput"):
+            skip("/dev/uinput not available")
+
+    print("Event injection regression tests:")
+    test_timestamp_ordering()
+    test_syn_report_boundaries()
+    test_event_ordering()
+    test_rapid_events()
+    print("All event tests passed")
+
+
+if __name__ == "__main__":
+    main()

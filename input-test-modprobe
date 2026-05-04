@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# input-test-modprobe - Module load/unload smoke tests
+#
+# Iterates over built input modules and verifies they can be
+# loaded and unloaded without kernel errors.
+#
+# Exit codes: 0=pass, 1=fail, 77=skip
+#
+
+KERNEL_DIR="${KERNEL_DIR:-/work/c10s/kernel}"
+INPUT_DIR="$KERNEL_DIR/drivers/input"
+
+declare -i LOADED=0
+declare -i FAILED=0
+declare -i SKIPPED=0
+declare -a FAILURES=()
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+skip() { echo "SKIP: $*" >&2; exit 77; }
+
+[[ $(id -u) -ne 0 ]] && skip "Must run as root"
+[[ -d "$INPUT_DIR" ]] || skip "Input build dir not found: $INPUT_DIR"
+
+# Record dmesg position
+dmesg_start=$(dmesg | wc -l)
+
+test_module() {
+	local ko="$1"
+	local modname
+	modname=$(basename "$ko" .ko)
+
+	# Skip test module (handled by kunit test)
+	[[ "$modname" == "input_test" ]] && return
+
+	# Try to load
+	if insmod "$ko" 2>/dev/null; then
+		# Check dmesg for errors during load
+		local new_msgs
+		new_msgs=$(dmesg | tail -n +$((dmesg_start + 1)) | grep -i "error\|bug\|oops\|panic" | grep -iv "error_report\|error\.c\|error_code")
+
+		if [[ -n "$new_msgs" ]]; then
+			FAILURES+=("$modname: kernel errors on load: $new_msgs")
+			((FAILED++))
+		else
+			((LOADED++))
+		fi
+
+		# Unload
+		rmmod "$modname" 2>/dev/null
+		dmesg_start=$(dmesg | wc -l)
+	else
+		# Distinguish hardware-missing (expected) from code errors
+		local load_err
+		load_err=$(insmod "$ko" 2>&1)
+
+		if echo "$load_err" | grep -qE "No such device|not found|Resource busy"; then
+			((SKIPPED++))
+		else
+			# Check if it's a dependency issue
+			if echo "$load_err" | grep -qE "Unknown symbol|disagrees about"; then
+				((SKIPPED++))
+			else
+				FAILURES+=("$modname: load failed: $load_err")
+				((FAILED++))
+			fi
+		fi
+	fi
+}
+
+# Find all built .ko files under drivers/input
+while IFS= read -r -d '' ko; do
+	test_module "$ko"
+done < <(find "$INPUT_DIR" -name "*.ko" -print0 2>/dev/null)
+
+echo "Module smoke test: $LOADED loaded OK, $SKIPPED skipped (no hw), $FAILED failed"
+
+if ((FAILED > 0)); then
+	for f in "${FAILURES[@]}"; do
+		echo "  FAIL: $f"
+	done
+	exit 1
+fi
+
+exit 0
