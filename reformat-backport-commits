@@ -1,0 +1,141 @@
+#!/bin/bash
+#
+# reformat-backport-commits - Rewrite cherry-picked commits to gort format
+#
+# Rewrites commit messages on a backport branch to match the standard
+# RHEL backport format used by gort:
+#
+#   <subject>
+#
+#   Upstream status: <version>
+#
+#   commit <full hash>
+#   Author: <original author>
+#   Date:   <original date>
+#
+#       <original commit message body>
+#
+#   Signed-off-by: <maintainer>
+#
+# Usage: reformat-backport-commits -u UPSTREAM_REPO -s STATUS [-j JIRA] [-n COUNT] BASE_COMMIT
+#
+#   -u DIR     Upstream repo to look up original commit logs
+#   -s STATUS  Upstream status string (e.g. "v7.0+")
+#   -j JIRA    JIRA URL (optional, can add later with inscmtinfo)
+#   -n COUNT   Number of commits to rewrite (default: all above BASE_COMMIT)
+#   BASE_COMMIT  The commit just before the first backported commit
+#
+
+set -e
+
+declare upstream_repo=""
+declare upstream_status=""
+declare jira=""
+declare -i count=0
+declare base_commit=""
+
+usage() {
+	echo "Usage: $(basename "$0") -u UPSTREAM_REPO -s STATUS [-j JIRA] [-n COUNT] BASE_COMMIT"
+	echo ""
+	echo "  -u DIR     Upstream repo for looking up original commit logs"
+	echo "  -s STATUS  Upstream status (e.g. 'v7.0+')"
+	echo "  -j JIRA    JIRA URL (optional)"
+	echo "  -n COUNT   Number of commits to rewrite (default: all above BASE)"
+	echo "  BASE_COMMIT  Commit just before first backported commit"
+	exit 1
+}
+
+while getopts "u:s:j:n:h" opt; do
+	case "$opt" in
+		u) upstream_repo="$OPTARG" ;;
+		s) upstream_status="$OPTARG" ;;
+		j) jira="$OPTARG" ;;
+		n) count="$OPTARG" ;;
+		h) usage ;;
+		*) usage ;;
+	esac
+done
+shift $((OPTIND - 1))
+
+base_commit="${1:-}"
+
+[[ -z "$upstream_repo" ]] && { echo "ERROR: -u upstream repo required"; usage; }
+[[ -z "$upstream_status" ]] && { echo "ERROR: -s upstream status required"; usage; }
+[[ -z "$base_commit" ]] && { echo "ERROR: BASE_COMMIT required"; usage; }
+[[ -d "$upstream_repo/.git" ]] || [[ -f "$upstream_repo/HEAD" ]] || {
+	echo "ERROR: $upstream_repo is not a git repository"
+	exit 1
+}
+
+# Get maintainer info from git config
+maintainer_name=$(git config user.name)
+maintainer_email=$(git config user.email)
+[[ -z "$maintainer_name" ]] && { echo "ERROR: git user.name not set"; exit 1; }
+
+# Determine number of commits to rewrite
+if ((count == 0)); then
+	count=$(git rev-list --count "$base_commit"..HEAD)
+fi
+
+echo "Reformatting $count commits above $base_commit"
+echo "  Upstream repo:   $upstream_repo"
+echo "  Upstream status: $upstream_status"
+[[ -n "$jira" ]] && echo "  JIRA:            $jira"
+echo ""
+
+# Create the message filter script
+filter_script=$(mktemp)
+cat > "$filter_script" << 'FILTER_EOF'
+#!/bin/bash
+# Read the current commit message from stdin
+msg=$(cat)
+
+# Extract the upstream hash from "(cherry picked from commit <hash>)"
+upstream_hash=$(echo "$msg" | grep -oP '(?<=cherry picked from commit )[0-9a-f]+' | head -1)
+
+if [[ -z "$upstream_hash" ]]; then
+    # No cherry-pick marker - pass through unchanged
+    echo "$msg"
+    exit 0
+fi
+
+# Get the subject (first non-empty line of the message)
+subject=$(echo "$msg" | head -1)
+
+# Get the full upstream commit log
+uplog=$(git -C "$UPSTREAM_REPO" log -1 "$upstream_hash" 2>/dev/null)
+if [[ -z "$uplog" ]]; then
+    # Can't find upstream commit - pass through with basic formatting
+    echo "$msg"
+    exit 0
+fi
+
+# Build the new commit message
+echo "$subject"
+echo ""
+if [[ -n "$JIRA_URL" ]]; then
+    echo "JIRA: $JIRA_URL"
+fi
+echo "Upstream status: $UPSTREAM_STATUS"
+echo ""
+echo "$uplog"
+echo ""
+echo "Signed-off-by: $MAINTAINER_NAME <$MAINTAINER_EMAIL>"
+FILTER_EOF
+chmod +x "$filter_script"
+
+export UPSTREAM_REPO="$upstream_repo"
+export UPSTREAM_STATUS="$upstream_status"
+export JIRA_URL="$jira"
+export MAINTAINER_NAME="$maintainer_name"
+export MAINTAINER_EMAIL="$maintainer_email"
+
+# Use git filter-branch to rewrite the messages
+echo "Running git filter-branch..."
+git filter-branch -f --msg-filter "bash $filter_script" "$base_commit"..HEAD
+
+rm -f "$filter_script"
+
+echo ""
+echo "Done. $count commits reformatted."
+echo "Verify with: git log --oneline -5"
