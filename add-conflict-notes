@@ -1,0 +1,75 @@
+#!/bin/bash
+#
+# add-conflict-notes - Add conflict resolution notes to backport commits
+#
+# Amends commit messages for commits that had conflicts during backporting,
+# adding explanations required by patchreview.
+#
+# Usage: add-conflict-notes BASE_COMMIT
+#
+
+set -e
+
+declare base_commit="${1:-}"
+[[ -z "$base_commit" ]] && { echo "Usage: $(basename "$0") BASE_COMMIT"; exit 1; }
+
+# Conflict resolution details keyed by upstream hash
+# Format: upstream_hash|note
+declare -a CONFLICT_NOTES=(
+"bb7e36119156|[Conflict: MAINTAINERS - context drift from downstream-only entries. Took upstream version.]"
+"56f2399f0e90|[Conflict: Documentation/nvme/nvme-pci-endpoint-target.rst - file not present in downstream; trivially resolved (no conflict markers after cherry-pick).]"
+"05e8d261a34e|[Conflict: drivers/input/joystick/magellan.c - context drift from prior downstream changes. Took upstream version; build verified.]"
+"fb506e31b3d5|[Conflict: drivers/misc/c2port/core.c, drivers/power/supply/olpc_battery.c, drivers/virt/coco/guest/tsm-mr.c - treewide bin_attrs conversion, context drift in non-input files. Took upstream for conflicting files; build verified.]"
+"3bdbd0858df6|[Conflict: drivers/input/keyboard/adp5589-keys.c - trivially resolved (no conflict markers); file content matched after adp5589 removal.]"
+"d9d87d90cc0b|[Conflict: 23 files in drivers/gpio/, drivers/iio/, drivers/pinctrl/ etc. - treewide GPIO .set_rv rename applied via substitute patch for input files only. Non-input files took upstream version; build verified.]"
+"d655a684c24d|[Conflict: drivers/input/misc/aw86927.c - trivially resolved (no conflict markers after cherry-pick).]"
+"bcc357c8e061|[Conflict: 3 DT binding files (display, interrupt-controller, media) - files not present in downstream; trivially resolved (no conflict markers).]"
+"0b2333183ade|[Conflict: 14 DT binding files - treewide blank line removal, context drift from files not in downstream. Took upstream for conflicting files; build verified.]"
+"ae8966b7b5bd|[Conflict: drivers/hid/hid-haptic.c - file not present in downstream; trivially resolved (no conflict markers).]"
+"54de247a0efa|[Conflict: 4 DT binding files (interrupt-controller, net/dsa, timer) - trivially resolved (no conflict markers); files updated or absent downstream.]"
+"24c776355f40|[Conflict: arch/s390/kernel/alternative.c, drivers/net/netconsole.c, drivers/s390/crypto/ap_bus.c, security/keys/trusted-keys/trusted_tpm1.c - treewide hex.h inclusion, context drift from downstream patches. Took upstream; build verified.]"
+"a592a36e4937|[Conflict: 17 Documentation index.rst files - treewide index link boilerplate, context drift from docs not present downstream. Took upstream for all conflicting files; build verified.]"
+)
+
+export FILTER_BRANCH_SQUELCH_WARNING=1
+
+# Build a sed-compatible replacement map
+filter_script=$(mktemp)
+cat > "$filter_script" << 'FILTER_INNER'
+#!/bin/bash
+msg=$(cat)
+
+# Check if this commit mentions any of our conflicted upstream hashes
+MATCHED_NOTE=""
+while IFS='|' read -r uphash note; do
+    [[ -z "$uphash" ]] && continue
+    if echo "$msg" | grep -q "commit ${uphash}"; then
+        MATCHED_NOTE="$note"
+        break
+    fi
+done <<< "$CONFLICT_NOTES_DATA"
+
+if [[ -n "$MATCHED_NOTE" ]]; then
+    # Insert the note before "Signed-off-by: Tony"
+    echo "$msg" | sed "/^Signed-off-by: Tony Camuso/i\\
+\\
+$MATCHED_NOTE\\
+"
+else
+    echo "$msg"
+fi
+FILTER_INNER
+chmod +x "$filter_script"
+
+# Export the notes data for the filter script
+notes_data=""
+for entry in "${CONFLICT_NOTES[@]}"; do
+    notes_data+="$entry"$'\n'
+done
+export CONFLICT_NOTES_DATA="$notes_data"
+
+echo "Adding conflict resolution notes to 13 commits..."
+git filter-branch -f --msg-filter "bash $filter_script" "$base_commit"..HEAD
+
+rm -f "$filter_script"
+echo "Done. Conflict notes added."
