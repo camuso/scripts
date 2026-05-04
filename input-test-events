@@ -74,12 +74,15 @@ def create_uinput(name, ev_types):
             for c in codes:
                 fcntl.ioctl(fd, UI_SET_RELBIT, c)
 
-    # Write uinput_user_dev struct
+    # Write uinput_user_dev struct:
+    #   char name[80]; struct input_id {u16*4}; u32 ff_effects_max;
+    #   s32 absmax[64]; s32 absmin[64]; s32 absfuzz[64]; s32 absflat[64]
+    ABS_CNT = 64
     uinput_user_dev = struct.pack(
-        str(UINPUT_MAX_NAME_SIZE) + "sHHHHi" + "i" * 64 + "i" * 64 + "i" * 64 + "i" * 64,
-        name.encode("utf-8").ljust(UINPUT_MAX_NAME_SIZE, b'\0'),
+        "80sHHHHI" + "i" * (ABS_CNT * 4),
+        name.encode("utf-8").ljust(80, b'\0'),
         0x03, 0x1234, 0x5678, 1, 0,
-        *([0] * 64), *([0] * 64), *([0] * 64), *([0] * 64)
+        *([0] * ABS_CNT * 4),
     )
     os.write(fd, uinput_user_dev)
     fcntl.ioctl(fd, UI_DEV_CREATE)

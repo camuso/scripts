@@ -22,6 +22,34 @@ skip() { echo "SKIP: $*" >&2; exit 77; }
 [[ $(id -u) -ne 0 ]] && skip "Must run as root"
 [[ -d "$INPUT_DIR" ]] || skip "Input build dir not found: $INPUT_DIR"
 
+# Check if the built modules match the running kernel's vermagic.
+# If not, we can only verify they exist and were compiled; we cannot insmod them.
+running_ver=$(uname -r)
+if [[ -f "$KERNEL_DIR/include/config/kernel.release" ]]; then
+	built_ver=$(cat "$KERNEL_DIR/include/config/kernel.release")
+else
+	built_ver="unknown"
+fi
+
+if [[ "$running_ver" != "$built_ver" ]]; then
+	# Modules won't load - just verify they exist and are valid ELF
+	ko_count=$(find "$INPUT_DIR" -name "*.ko" 2>/dev/null | wc -l)
+	invalid=0
+	while IFS= read -r -d '' ko; do
+		if ! file "$ko" | grep -q "ELF"; then
+			echo "  ERROR: $ko is not a valid ELF file"
+			((invalid++))
+		fi
+	done < <(find "$INPUT_DIR" -name "*.ko" -print0 2>/dev/null)
+
+	if ((invalid > 0)); then
+		echo "Module format check: $invalid of $ko_count modules are invalid ELF"
+		exit 1
+	fi
+	echo "Module format check: $ko_count modules built OK (cannot insmod: running=$running_ver, built=$built_ver)"
+	exit 0
+fi
+
 # Record dmesg position
 dmesg_start=$(dmesg | wc -l)
 

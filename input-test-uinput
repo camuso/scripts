@@ -101,29 +101,21 @@ class UinputDevice:
                 for code in codes:
                     fcntl.ioctl(self.fd, UI_SET_ABSBIT, code)
 
-        # Setup device info using uinput_setup struct
-        setup = struct.pack(
-            "HHHi" + str(UINPUT_MAX_NAME_SIZE) + "sI",
-            0x03,    # BUS_VIRTUAL (id.bustype)
-            0x1234,  # id.vendor
-            0x5678,  # id.product
-            1,       # id.version
-            name.encode("utf-8").ljust(UINPUT_MAX_NAME_SIZE, b'\0'),
-            0        # ff_effects_max
+        # Write uinput_user_dev struct:
+        #   char name[80]; struct input_id {u16*4}; u32 ff_effects_max;
+        #   s32 absmax[64]; s32 absmin[64]; s32 absfuzz[64]; s32 absflat[64]
+        ABS_CNT = 64
+        uinput_user_dev = struct.pack(
+            "80sHHHHI" + "i" * (ABS_CNT * 4),
+            name.encode("utf-8").ljust(80, b'\0'),
+            0x03,    # BUS_VIRTUAL
+            0x1234,  # vendor
+            0x5678,  # product
+            1,       # version
+            0,       # ff_effects_max
+            *([0] * ABS_CNT * 4),  # absmax, absmin, absfuzz, absflat
         )
-
-        try:
-            os.write(self.fd, setup[:struct.calcsize("HHHi" + str(UINPUT_MAX_NAME_SIZE) + "sI")])
-        except OSError:
-            # Fallback: write uinput_user_dev directly
-            uinput_user_dev = struct.pack(
-                str(UINPUT_MAX_NAME_SIZE) + "sHHHHi" + "i" * 64 + "i" * 64 + "i" * 64 + "i" * 64,
-                name.encode("utf-8").ljust(UINPUT_MAX_NAME_SIZE, b'\0'),
-                0x03, 0x1234, 0x5678, 1, 0,
-                *([0] * 64), *([0] * 64), *([1024] * 64), *([0] * 64)
-            )
-            os.lseek(self.fd, 0, os.SEEK_SET)
-            os.write(self.fd, uinput_user_dev)
+        os.write(self.fd, uinput_user_dev)
 
         fcntl.ioctl(self.fd, UI_DEV_CREATE)
         time.sleep(0.3)
