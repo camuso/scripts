@@ -1,0 +1,29 @@
+#!/bin/bash
+#
+# git-commit-clean - git commit wrapper that removes Cursor attribution
+#
+# Usage: git-commit-clean [git commit options]
+#
+# This script runs git commit with all provided arguments, then removes
+# any "Made-with: Cursor" or "Co-authored-by: Cursor" lines from the
+# commit message using filter-branch.
+#
+
+# Run git commit with all arguments
+git commit "$@"
+rc=$?
+
+# If commit failed, exit with same code
+if [[ $rc -ne 0 ]]; then
+    exit $rc
+fi
+
+# Check if the last commit has Cursor attribution
+if git log -1 --format='%B' | grep -qE '(Made-with|Co-authored-by):.*[Cc]ursor'; then
+    # Clean it up silently
+    FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f \
+        --msg-filter 'sed -e "/Made-with:.*[Cc]ursor/d" -e "/Co-authored-by:.*[Cc]ursor/d"' \
+        HEAD~1..HEAD 2>/dev/null
+fi
+
+exit 0

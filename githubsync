@@ -1,0 +1,129 @@
+#!/bin/bash
+#
+# githubsync
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(readlink -f "$0")")"
+}
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")
+\0
+EOF
+)"
+
+#** usage: print info and instructions to screen
+#
+# Global
+# 	usagestr
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#
+# Global
+#   CTLC_EXIT - bash environment variable
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exit $CTLC_EXIT
+}
+
+#** exitme
+#
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	echo -e "$msg"
+	usage
+	exit "$code"
+}
+
+#** main
+#*
+main() {
+        # Trap for control-c
+        trap control_c SIGINT
+
+	## The following is courtesy of CoPilot
+	##
+	##
+	# --- CONFIG ---
+	API="https://api.github.com/user/keys"
+	TITLE="$(hostname)-$(date +%Y%m%d)"
+	KEYFILE=""
+	LOG="/tmp/githubsync.log"
+
+	# --- TOKEN CHECK ---
+	if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+	  echo "❌ GITHUB_TOKEN not set. Aborting." | tee -a "$LOG"
+	  exit 1
+	fi
+
+	# --- KEY DETECTION ---
+	if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+	  KEYFILE=~/.ssh/id_ed25519.pub
+	elif [[ -f ~/.ssh/id_rsa.pub ]]; then
+	  KEYFILE=~/.ssh/id_rsa.pub
+	else
+	  echo "❌ No SSH public key found." | tee -a "$LOG"
+	  exit 1
+	fi
+
+	PUBKEY=$(<"$KEYFILE")
+	LOCAL_FP=$(ssh-keygen -lf "$KEYFILE" | awk '{print $2}')
+
+	# --- FETCH EXISTING KEYS ---
+	EXISTING=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API")
+
+	# --- FINGERPRINT MATCH ---
+	if echo "$EXISTING" | jq -r '.[].key' \
+	   | ssh-keygen -lf /dev/stdin 2>/dev/null \
+	   | awk '{print $2}' | grep -q "$LOCAL_FP"; then
+	  echo "✅ Key already exists on GitHub (fingerprint $LOCAL_FP)." | tee -a "$LOG"
+	else
+	  echo "⬆️  Uploading SSH key to GitHub..." | tee -a "$LOG"
+	  RESP=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+	    -H "Authorization: token $GITHUB_TOKEN" \
+	    -H "Accept: application/vnd.github+json" \
+	    -d "{\"title\":\"${TITLE}\",\"key\":\"${PUBKEY}\"}" \
+	    "$API")
+
+	  if [[ "$RESP" == "201" ]]; then
+	    echo "✅ Key uploaded successfully." | tee -a "$LOG"
+	  elif [[ "$RESP" == "422" ]]; then
+	    echo "ℹ️  Key already exists (GitHub returned 422)." | tee -a "$LOG"
+	  else
+	    echo "❌ Upload failed (HTTP $RESP). See /tmp/resp.json." | tee -a "$LOG"
+	    cat /tmp/resp.json >> "$LOG"
+	    exit 1
+	  fi
+	fi
+
+	# --- CONFIGURE GIT ---
+	git config --global url."git@github.com:".insteadOf "https://github.com/"
+	echo "✅ Git configured to use SSH for GitHub repos." | tee -a "$LOG"
+
+	# --- TEST CONNECTION ---
+	echo "🔍 Testing SSH connection to GitHub..." | tee -a "$LOG"
+	ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+
+	# --- CLEANUP ---
+	unset GITHUB_TOKEN
+
+	exitme 0
+}
+
+main "$@"

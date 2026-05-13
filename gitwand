@@ -1,0 +1,11 @@
+#!/bin/bash
+# GitWand wrapper - works from host or toolbox
+if [ -x /usr/bin/node ]; then
+    exec /usr/bin/node /usr/local/lib/node_modules/@gitwand/cli/dist/index.js "$@"
+elif [ -x /run/host/usr/bin/node ]; then
+    export LD_LIBRARY_PATH=/run/host/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    exec /run/host/usr/bin/node /run/host/usr/local/lib/node_modules/@gitwand/cli/dist/index.js "$@"
+else
+    echo '{"error":"node not found"}' >&2
+    exit 1
+fi
