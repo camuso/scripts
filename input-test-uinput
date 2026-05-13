@@ -158,30 +158,32 @@ class UinputDevice:
             self.fd = None
 
 
-def read_events(evdev_path, timeout=0.5):
-    """Read input events from an evdev node."""
-    events = []
+def open_evdev(evdev_path):
+    """Open an evdev node for reading. Must be called before injecting events."""
     try:
-        fd = os.open(evdev_path, os.O_RDONLY | os.O_NONBLOCK)
+        return os.open(evdev_path, os.O_RDONLY | os.O_NONBLOCK)
     except (PermissionError, FileNotFoundError):
-        return events
+        return None
 
-    try:
-        end_time = time.time() + timeout
-        while time.time() < end_time:
-            ready, _, _ = select.select([fd], [], [], 0.1)
-            if ready:
-                try:
-                    data = os.read(fd, INPUT_EVENT_SIZE * 64)
-                    for i in range(0, len(data), INPUT_EVENT_SIZE):
-                        chunk = data[i:i + INPUT_EVENT_SIZE]
-                        if len(chunk) == INPUT_EVENT_SIZE:
-                            ev = struct.unpack(INPUT_EVENT_FORMAT, chunk)
-                            events.append(ev)
-                except OSError:
-                    break
-    finally:
-        os.close(fd)
+
+def drain_events(fd, timeout=0.5):
+    """Read all pending events from an already-open evdev fd."""
+    events = []
+    if fd is None:
+        return events
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        ready, _, _ = select.select([fd], [], [], 0.1)
+        if ready:
+            try:
+                data = os.read(fd, INPUT_EVENT_SIZE * 64)
+                for i in range(0, len(data), INPUT_EVENT_SIZE):
+                    chunk = data[i:i + INPUT_EVENT_SIZE]
+                    if len(chunk) == INPUT_EVENT_SIZE:
+                        ev = struct.unpack(INPUT_EVENT_FORMAT, chunk)
+                        events.append(ev)
+            except OSError:
+                break
     return events
 
 
@@ -195,13 +197,17 @@ def test_keyboard():
         if dev.evdev_path is None:
             fail("Virtual keyboard device not found in /dev/input/")
 
-        # Inject key press and release
+        rfd = open_evdev(dev.evdev_path)
+        if rfd is None:
+            fail(f"Cannot open {dev.evdev_path} for reading")
+
         dev.write_event(EV_KEY, KEY_A, 1)
         dev.syn()
         dev.write_event(EV_KEY, KEY_A, 0)
         dev.syn()
 
-        events = read_events(dev.evdev_path)
+        events = drain_events(rfd)
+        os.close(rfd)
         key_events = [e for e in events if e[2] == EV_KEY]
 
         if len(key_events) < 2:
@@ -228,12 +234,16 @@ def test_mouse():
         if dev.evdev_path is None:
             fail("Virtual mouse device not found in /dev/input/")
 
-        # Inject relative motion
+        rfd = open_evdev(dev.evdev_path)
+        if rfd is None:
+            fail(f"Cannot open {dev.evdev_path} for reading")
+
         dev.write_event(EV_REL, REL_X, 10)
         dev.write_event(EV_REL, REL_Y, -5)
         dev.syn()
 
-        events = read_events(dev.evdev_path)
+        events = drain_events(rfd)
+        os.close(rfd)
         rel_events = [e for e in events if e[2] == EV_REL]
 
         if len(rel_events) < 2:

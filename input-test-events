@@ -61,7 +61,7 @@ def fail(msg):
 def create_uinput(name, ev_types):
     """Create a uinput device with given capabilities."""
     try:
-        fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        fd = os.open("/dev/uinput", os.O_WRONLY)
     except (PermissionError, FileNotFoundError):
         skip("Cannot open /dev/uinput")
 
@@ -114,29 +114,29 @@ def write_event(fd, ev_type, code, value):
     os.write(fd, event)
 
 
-def read_all_events(evdev_path, timeout=0.5):
-    """Read all pending events from evdev."""
-    events = []
+def open_evdev(evdev_path):
+    """Open evdev for reading. Must be called BEFORE injecting events."""
     try:
-        fd = os.open(evdev_path, os.O_RDONLY | os.O_NONBLOCK)
+        return os.open(evdev_path, os.O_RDONLY | os.O_NONBLOCK)
     except (PermissionError, FileNotFoundError) as e:
         fail(f"Cannot open {evdev_path}: {e}")
 
-    try:
-        end_time = time.time() + timeout
-        while time.time() < end_time:
-            ready, _, _ = select.select([fd], [], [], 0.1)
-            if ready:
-                try:
-                    data = os.read(fd, INPUT_EVENT_SIZE * 256)
-                    for i in range(0, len(data), INPUT_EVENT_SIZE):
-                        chunk = data[i:i + INPUT_EVENT_SIZE]
-                        if len(chunk) == INPUT_EVENT_SIZE:
-                            events.append(struct.unpack(INPUT_EVENT_FORMAT, chunk))
-                except OSError:
-                    break
-    finally:
-        os.close(fd)
+
+def drain_events(rfd, timeout=0.5):
+    """Read all pending events from an already-open evdev fd."""
+    events = []
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        ready, _, _ = select.select([rfd], [], [], 0.1)
+        if ready:
+            try:
+                data = os.read(rfd, INPUT_EVENT_SIZE * 256)
+                for i in range(0, len(data), INPUT_EVENT_SIZE):
+                    chunk = data[i:i + INPUT_EVENT_SIZE]
+                    if len(chunk) == INPUT_EVENT_SIZE:
+                        events.append(struct.unpack(INPUT_EVENT_FORMAT, chunk))
+            except OSError:
+                break
     return events
 
 
@@ -150,7 +150,8 @@ def test_timestamp_ordering():
         if evdev is None:
             fail("Could not find evdev for timestamp test device")
 
-        # Send a burst of events
+        rfd = open_evdev(evdev)
+
         for key in [KEY_A, KEY_B, KEY_C]:
             write_event(fd, EV_KEY, key, 1)
         write_event(fd, EV_SYN, SYN_REPORT, 0)
@@ -158,11 +159,11 @@ def test_timestamp_ordering():
             write_event(fd, EV_KEY, key, 0)
         write_event(fd, EV_SYN, SYN_REPORT, 0)
 
-        events = read_all_events(evdev)
+        events = drain_events(rfd)
+        os.close(rfd)
         if not events:
             fail("No events received in timestamp test")
 
-        # Verify monotonic timestamps
         prev_time = 0
         for ev in events:
             ev_time = ev[0] * 1_000_000 + ev[1]
@@ -187,26 +188,23 @@ def test_syn_report_boundaries():
         if evdev is None:
             fail("Could not find evdev for syn test device")
 
-        # Packet 1: key press
+        rfd = open_evdev(evdev)
+
         write_event(fd, EV_KEY, KEY_A, 1)
         write_event(fd, EV_SYN, SYN_REPORT, 0)
-
-        # Packet 2: mouse move
         write_event(fd, EV_REL, REL_X, 42)
         write_event(fd, EV_REL, REL_Y, -17)
         write_event(fd, EV_SYN, SYN_REPORT, 0)
-
-        # Packet 3: key release
         write_event(fd, EV_KEY, KEY_A, 0)
         write_event(fd, EV_SYN, SYN_REPORT, 0)
 
-        events = read_all_events(evdev)
+        events = drain_events(rfd)
+        os.close(rfd)
         syn_events = [e for e in events if e[2] == EV_SYN and e[3] == SYN_REPORT]
 
         if len(syn_events) < 3:
             fail(f"Expected 3 SYN_REPORT events, got {len(syn_events)}")
 
-        # Verify event content between syn boundaries
         key_press = [e for e in events if e[2] == EV_KEY and e[4] == 1]
         rel_events = [e for e in events if e[2] == EV_REL]
         key_release = [e for e in events if e[2] == EV_KEY and e[4] == 0]
@@ -218,7 +216,6 @@ def test_syn_report_boundaries():
         if not key_release:
             fail("Missing key release event")
 
-        # Verify REL values
         rel_x = [e for e in rel_events if e[3] == REL_X]
         rel_y = [e for e in rel_events if e[3] == REL_Y]
         if not rel_x or rel_x[0][4] != 42:
@@ -242,12 +239,14 @@ def test_event_ordering():
         if evdev is None:
             fail("Could not find evdev for ordering test device")
 
-        # Send keys in order A, B, C
+        rfd = open_evdev(evdev)
+
         for key in [KEY_A, KEY_B, KEY_C]:
             write_event(fd, EV_KEY, key, 1)
             write_event(fd, EV_SYN, SYN_REPORT, 0)
 
-        events = read_all_events(evdev)
+        events = drain_events(rfd)
+        os.close(rfd)
         key_events = [e for e in events if e[2] == EV_KEY]
 
         if len(key_events) < 3:
@@ -275,13 +274,19 @@ def test_rapid_events():
         if evdev is None:
             fail("Could not find evdev for rapid event test device")
 
-        num_packets = 100
+        rfd = open_evdev(evdev)
+
+        # 20 packets = 60 events, fits in the default evdev client buffer (64)
+        num_packets = 20
         for i in range(num_packets):
-            write_event(fd, EV_REL, REL_X, i % 50)
-            write_event(fd, EV_REL, REL_Y, -(i % 50))
+            write_event(fd, EV_REL, REL_X, i + 1)
+            write_event(fd, EV_REL, REL_Y, -(i + 1))
             write_event(fd, EV_SYN, SYN_REPORT, 0)
 
-        events = read_all_events(evdev, timeout=2.0)
+        time.sleep(0.2)
+
+        events = drain_events(rfd, timeout=2.0)
+        os.close(rfd)
         rel_x_events = [e for e in events if e[2] == EV_REL and e[3] == REL_X]
 
         if len(rel_x_events) < num_packets:

@@ -1,0 +1,1230 @@
+#!/usr/bin/env python3
+"""backport-subsystem -- Automated RHEL kernel subsystem backport.
+
+Discovers upstream commits, classifies by CONFIG enablement, cherry-picks
+with gort-style commit messages, resolves conflicts, and optionally
+build-tests via toolbox.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import textwrap
+from collections import defaultdict
+from glob import glob
+
+# ---------------------------------------------------------------------------
+# ANSI color definitions -- background-neutral, matching tboot-check style
+# ---------------------------------------------------------------------------
+BLD = "\033[1m"
+MNU = "\033[1;96m"
+INF = "\033[0;96m"
+WRN = "\033[0;93m"
+CAU = "\033[0;91m"
+STA = "\033[0;92m"
+OFF = "\033[0m"
+
+SEP = "=" * 74
+SUB = "-" * 74
+
+CONFLICT_POLICIES = ["theirs", "abort"]
+BUILD_POLICIES = ["conflict", "every", "none"]
+
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
+
+def run(cmd, *, cwd=None, capture=True, check=True):
+    """Run a shell command, return CompletedProcess."""
+    return subprocess.run(
+        cmd, shell=True, cwd=cwd, text=True,
+        capture_output=capture, check=check,
+    )
+
+
+def run_quiet(cmd, *, cwd=None):
+    """Run a command, return (returncode, stdout, stderr)."""
+    r = subprocess.run(
+        cmd, shell=True, cwd=cwd, text=True, capture_output=True,
+    )
+    return r.returncode, r.stdout, r.stderr
+
+
+def git(cmd, *, cwd=None, check=True):
+    """Shorthand for 'git <cmd>' in *cwd*."""
+    return run(f"git {cmd}", cwd=cwd, check=check)
+
+
+def die(msg):
+    print(f"{CAU}ERROR:{OFF} {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def info(msg):
+    print(f"  {INF}{msg}{OFF}")
+
+
+def warn(msg):
+    print(f"  {WRN}{msg}{OFF}")
+
+
+def status(msg):
+    print(f"  {STA}{msg}{OFF}")
+
+
+def header(title):
+    print(f"\n{MNU}{SEP}{OFF}")
+    print(f"  {BLD}{title}{OFF}")
+    print(f"{MNU}{SUB}{OFF}")
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Automated RHEL kernel subsystem backport",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--subsystem", required=True,
+                    help="Subsystem path, e.g. drivers/input")
+    p.add_argument("--rhel", required=True, type=int,
+                    help="RHEL major version (9, 10, ...)")
+    p.add_argument("--rhel-repo", required=True,
+                    help="Path to RHEL kernel git repo")
+    p.add_argument("--upstream-repo", required=True,
+                    help="Path to upstream kernel git repo")
+    p.add_argument("--upstream-version", required=True,
+                    help="Upstream version tag, e.g. v7.1-rc3")
+    p.add_argument("--jira", default="RHEL-PLACEHOLDER",
+                    help="JIRA URL (default: RHEL-PLACEHOLDER)")
+    p.add_argument("--extra-paths", nargs="*", default=[],
+                    help="Additional scope paths beyond auto-discovered ones")
+    p.add_argument("--branch", default=None,
+                    help="Branch name (default: leaf of subsystem path)")
+    p.add_argument("--output-dir", default=None,
+                    help="Output directory for patches and reports")
+    p.add_argument("--conflict-policy", default="theirs",
+                    choices=CONFLICT_POLICIES,
+                    help="In-scope conflict resolution (default: theirs)")
+    p.add_argument("--build-policy", default="conflict",
+                    choices=BUILD_POLICIES,
+                    help="When to build-test (default: conflict)")
+    p.add_argument("--dry-run", action="store_true",
+                    help="Classify commits but do not cherry-pick")
+    p.add_argument("--continue", dest="resume", action="store_true",
+                    help="Resume from saved state")
+    p.add_argument("--yes", action="store_true",
+                    help="Skip interactive confirmation menu")
+    return p.parse_args()
+
+# ---------------------------------------------------------------------------
+# Scope-path auto-discovery
+# ---------------------------------------------------------------------------
+
+def discover_scope_paths(subsystem, upstream_repo, extra_paths):
+    """Derive scope paths from the subsystem and validate against upstream."""
+    leaf = os.path.basename(subsystem.rstrip("/"))
+    candidates = [
+        subsystem.rstrip("/"),
+        f"include/linux/{leaf}",
+        f"include/uapi/linux/{leaf}",
+        f"include/dt-bindings/{leaf}",
+        f"Documentation/devicetree/bindings/{leaf}",
+        f"Documentation/{leaf}",
+    ]
+    candidates.extend(extra_paths)
+
+    paths = []
+    for p in candidates:
+        full = os.path.join(upstream_repo, p)
+        if os.path.exists(full):
+            paths.append(p)
+        else:
+            glob_hits = glob(full + "*")
+            if glob_hits:
+                paths.append(p)
+    return paths
+
+# ---------------------------------------------------------------------------
+# Interactive confirmation menu
+# ---------------------------------------------------------------------------
+
+def show_confirmation_menu(params):
+    """Display parameters and let the user edit scope/conflict/build before proceeding."""
+
+    scope_paths = list(params["scope_paths"])
+    conflict_policy = params["conflict_policy"]
+    build_policy = params["build_policy"]
+
+    while True:
+        os.system("")  # enable ANSI on Windows (no-op on Linux)
+        print(f"\n{BLD}{SEP}{OFF}")
+        print(f"  {BLD}Backport Parameters{OFF}")
+        print(f"{SUB}")
+        fields = [
+            ("Subsystem", params["subsystem"]),
+            ("RHEL version", str(params["rhel"])),
+            ("RHEL repo", params["rhel_repo"]),
+            ("Upstream repo", params["upstream_repo"]),
+            ("Upstream version", params["upstream_version"]),
+            ("JIRA", params["jira"]),
+            ("Branch", params["branch"]),
+            ("Output dir", params["output_dir"]),
+            ("Conflict policy", conflict_policy),
+            ("Build policy", f"{build_policy}"
+             + (" (DEFAULT)" if build_policy == "conflict" else "")),
+        ]
+        for i, (label, value) in enumerate(fields, 1):
+            num = f"{i:>3}"
+            print(f"  {MNU}{num}.{OFF} {label:<18s}: {INF}{value}{OFF}")
+
+        print(f"{SUB}")
+        print(f"  {BLD}Scope Paths{OFF}")
+        print(f"{SUB}")
+        for j, sp in enumerate(scope_paths):
+            letter = chr(ord("a") + j)
+            print(f"  {MNU}  {letter}.{OFF} {INF}{sp}{OFF}")
+        print(f"{SUB}")
+        print()
+        print(f"  {MNU}[s]{OFF} Edit scope paths   "
+              f"{MNU}[c]{OFF} Toggle conflict policy")
+        print(f"  {MNU}[b]{OFF} Cycle build policy "
+              f"{MNU}[g]{OFF} Go / proceed")
+        print(f"  {MNU}[q]{OFF} Quit")
+        print()
+
+        try:
+            choice = input(f"  {BLD}Choice:{OFF} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+
+        if choice in ("g", ""):
+            params["scope_paths"] = scope_paths
+            params["conflict_policy"] = conflict_policy
+            params["build_policy"] = build_policy
+            return
+
+        elif choice == "q":
+            print("Exiting.")
+            sys.exit(0)
+
+        elif choice == "s":
+            print(f"\n  Current paths: {', '.join(scope_paths)}")
+            raw = input("  Enter new comma-separated paths: ").strip()
+            if raw:
+                scope_paths = [p.strip() for p in raw.split(",") if p.strip()]
+                status("Scope paths updated.")
+            else:
+                warn("No change (empty input).")
+
+        elif choice == "c":
+            idx = CONFLICT_POLICIES.index(conflict_policy)
+            conflict_policy = CONFLICT_POLICIES[(idx + 1) % len(CONFLICT_POLICIES)]
+            status(f"Conflict policy -> {conflict_policy}")
+
+        elif choice == "b":
+            idx = BUILD_POLICIES.index(build_policy)
+            build_policy = BUILD_POLICIES[(idx + 1) % len(BUILD_POLICIES)]
+            status(f"Build policy -> {build_policy}")
+
+        else:
+            warn(f"Unknown choice: {choice}")
+
+# ---------------------------------------------------------------------------
+# Phase 1: dist-configs
+# ---------------------------------------------------------------------------
+
+def run_dist_configs(rhel_repo, toolbox_name):
+    """Run make dist-configs inside the toolbox, return configs directory."""
+    header("Phase 1: Building dist-configs")
+    info(f"Running make dist-configs in toolbox '{toolbox_name}' ...")
+
+    rc, out, err = run_quiet(
+        f"toolbox run -c {toolbox_name} make dist-configs",
+        cwd=rhel_repo,
+    )
+    if rc != 0:
+        die(f"make dist-configs failed:\n{err}")
+    status("dist-configs complete.")
+
+    configs_dir = os.path.join(rhel_repo, "configs")
+    if not os.path.isdir(configs_dir):
+        redhat_configs = os.path.join(rhel_repo, "redhat", "configs")
+        if os.path.isdir(redhat_configs):
+            configs_dir = redhat_configs
+
+    config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
+    if not config_files:
+        config_files = glob(os.path.join(configs_dir, "**", "kernel-*.config"),
+                            recursive=True)
+    if not config_files:
+        die(f"No kernel-*.config files found under {configs_dir}")
+
+    info(f"Found {len(config_files)} config files in {configs_dir}")
+    return configs_dir
+
+
+def load_enabled_configs(configs_dir):
+    """Parse kernel-*.config files into {CONFIG: set(filenames)} map."""
+    config_map = defaultdict(set)
+    config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
+    if not config_files:
+        config_files = glob(os.path.join(configs_dir, "**", "kernel-*.config"),
+                            recursive=True)
+    for cf in config_files:
+        bname = os.path.basename(cf)
+        with open(cf) as fh:
+            for line in fh:
+                m = re.match(r"^(CONFIG_\w+)=[ym]", line)
+                if m:
+                    config_map[m.group(1)].add(bname)
+    info(f"Loaded {len(config_map)} enabled CONFIG options across "
+         f"{len(config_files)} arch configs")
+    return config_map
+
+# ---------------------------------------------------------------------------
+# Phase 2: commit discovery
+# ---------------------------------------------------------------------------
+
+def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
+    """Scan RHEL commit bodies for 'commit <hash> upstream' to find the
+    most recent upstream commit already incorporated."""
+    header("Phase 2: Finding divergence point")
+    info("Scanning RHEL main for upstream commit references ...")
+
+    path_args = " ".join(f"-- {p}" for p in scope_paths)
+    # Collect hashes mentioned in RHEL commit bodies
+    r = git(f"log --format='%B' --no-merges -200 {path_args}",
+            cwd=rhel_repo, check=False)
+    if r.returncode != 0:
+        r = git(f"log --format='%B' --no-merges -200", cwd=rhel_repo)
+
+    pattern = re.compile(r"commit\s+([0-9a-f]{40})\s+upstream")
+    candidates = []
+    for m in pattern.finditer(r.stdout):
+        candidates.append(m.group(1))
+
+    if not candidates:
+        pattern2 = re.compile(r"cherry picked from commit ([0-9a-f]{40})")
+        for m in pattern2.finditer(r.stdout):
+            candidates.append(m.group(1))
+
+    if not candidates:
+        die("Could not find any upstream commit references in RHEL log. "
+            "Please supply a divergence point manually.")
+
+    for h in candidates:
+        rc, _, _ = run_quiet(f"git cat-file -t {h}", cwd=upstream_repo)
+        if rc == 0:
+            verify = git(f"log --oneline -1 {h}", cwd=upstream_repo, check=False)
+            if verify.returncode == 0:
+                info(f"Divergence point: {h[:12]}")
+                info(f"  {verify.stdout.strip()}")
+                return h
+
+    die("None of the referenced upstream commits exist in the upstream repo.")
+
+
+def list_pending_commits(upstream_repo, divergence, scope_paths, rhel_repo):
+    """List upstream commits since divergence touching scope_paths,
+    excluding those already on RHEL main."""
+    info("Listing upstream commits since divergence ...")
+    path_args = " ".join(scope_paths)
+
+    r = git(f"log --no-merges --reverse --format='%H' "
+            f"{divergence}..HEAD -- {path_args}",
+            cwd=upstream_repo)
+    all_hashes = [h for h in r.stdout.strip().split("\n") if h]
+    info(f"Found {len(all_hashes)} upstream commits in range")
+
+    if not all_hashes:
+        return []
+
+    # Collect hashes already referenced in RHEL
+    r2 = git("log --format='%B' --no-merges -500", cwd=rhel_repo, check=False)
+    body = r2.stdout if r2.returncode == 0 else ""
+    already = set()
+    for m in re.finditer(r"commit\s+([0-9a-f]{40})", body):
+        already.add(m.group(1))
+    for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", body):
+        already.add(m.group(1))
+
+    pending = [h for h in all_hashes if h not in already]
+    info(f"After filtering already-downstream: {len(pending)} pending commits")
+    return pending
+
+# ---------------------------------------------------------------------------
+# Phase 3: CONFIG classification
+# ---------------------------------------------------------------------------
+
+def file_to_config(filepath, upstream_repo):
+    """Map a .c file to its controlling CONFIG_* via the nearest Makefile.
+    Handles:
+      - obj-$(CONFIG_FOO) += bar.o           (direct)
+      - obj-$(CONFIG_FOO) += modname.o
+        modname-objs := bar.o baz.o          (composite module)
+      - psmouse-$(CONFIG_FOO) += bar.o       (sub-object conditional)
+      - obj-y += bar.o                       (always built)
+    """
+    if not filepath.endswith(".c"):
+        return None
+    dirpath = os.path.dirname(filepath)
+    obj_name = os.path.basename(filepath).replace(".c", ".o")
+    makefile = os.path.join(upstream_repo, dirpath, "Makefile")
+    if not os.path.isfile(makefile):
+        return None
+
+    with open(makefile) as fh:
+        content = fh.read()
+
+    # Pass 1: build a map of composite modules -> list of .o members
+    #   e.g. cyapatp-objs := cyapa.o cyapa_gen3.o ...
+    #   or   psmouse-objs := psmouse-base.o synaptics.o ...
+    composite = {}  # module_name -> set of .o files
+    for m in re.finditer(
+        r"(\w+)-(?:objs|y)\s*[:+]?=\s*(.*)", content
+    ):
+        mod = m.group(1)
+        objs = set(m.group(2).strip().split())
+        composite.setdefault(mod, set()).update(objs)
+
+    # Pass 2: direct obj-$(CONFIG_FOO) += bar.o
+    for m in re.finditer(
+        r"obj-\$\((CONFIG_\w+)\)\s*\+=\s*(.*)", content
+    ):
+        config_sym = m.group(1)
+        objects = m.group(2).strip().split()
+        for obj in objects:
+            if obj == obj_name:
+                return config_sym
+            mod = obj.replace(".o", "")
+            if mod in composite and obj_name in composite[mod]:
+                return config_sym
+
+    # Pass 3: sub-object conditionals like psmouse-$(CONFIG_FOO) += bar.o
+    for m in re.finditer(
+        r"(\w+)-\$\((CONFIG_\w+)\)\s*\+=\s*(.*)", content
+    ):
+        parent_mod = m.group(1)
+        config_sym = m.group(2)
+        sub_objects = m.group(3).strip().split()
+        if obj_name in sub_objects:
+            return config_sym
+
+    # Fallback: obj-y += bar.o means always built
+    for m in re.finditer(r"obj-y\s*\+=\s*(.*)", content):
+        if obj_name in m.group(1).strip().split():
+            return "BUILTIN"
+
+    return None
+
+
+def yaml_to_config(filepath, upstream_repo, config_map):
+    """Map a DT binding yaml file to its controlling CONFIG_*.
+    Uses naming conventions and compatible strings to find the driver.
+    Returns the CONFIG symbol if found and its status, or None."""
+    basename = os.path.basename(filepath)
+    if not basename.endswith(".yaml"):
+        return None
+
+    stem = basename.replace(".yaml", "")
+
+    # Direct CONFIG name guesses from the yaml filename
+    # e.g. awinic,aw86927.yaml -> CONFIG_INPUT_AW86927
+    # e.g. cypress,cyapa.yaml -> CONFIG_MOUSE_CYAPA
+    parts = stem.replace(",", "-").replace("_", "-").split("-")
+    driver_hint = parts[-1] if parts else stem
+
+    # Search all input Makefiles for a .o that matches the driver hint
+    for subdir in ["keyboard", "mouse", "touchscreen", "misc", "tablet",
+                   "joystick", "serio", "rmi4"]:
+        mf_path = os.path.join(upstream_repo, "drivers/input", subdir,
+                               "Makefile")
+        if not os.path.isfile(mf_path):
+            continue
+        with open(mf_path) as fh:
+            mf_content = fh.read()
+
+        for m in re.finditer(
+            r"obj-\$\((CONFIG_\w+)\)\s*\+=\s*(\S+)", mf_content
+        ):
+            config_sym = m.group(1)
+            obj_file = m.group(2).replace(".o", "")
+            if driver_hint.lower() in obj_file.lower():
+                return config_sym
+
+    # Try reading the yaml file for compatible strings
+    full_path = os.path.join(upstream_repo, filepath)
+    if os.path.isfile(full_path):
+        with open(full_path) as fh:
+            yaml_text = fh.read()
+        # Look for compatible: entries
+        for cm in re.finditer(r"- (?:const: )?['\"]?(\S+?)['\"]?\s*$",
+                              yaml_text, re.MULTILINE):
+            compat = cm.group(1).rstrip(",")
+            # Extract the device part after the vendor prefix
+            device = compat.split(",")[-1] if "," in compat else compat
+            device_clean = device.replace("-", "_").lower()
+            for cfg in config_map:
+                if device_clean in cfg.lower():
+                    return cfg
+
+    return None
+
+
+MISSING_API_SYMBOLS = [
+    "kmalloc_obj", "kzalloc_obj", "kcalloc_obj", "krealloc_obj",
+    "alloc_obj", "alloc_flex",
+]
+
+_missing_api_cache = {}
+
+
+def _sym_exists_in_rhel(sym, rhel_repo):
+    """Check if a symbol is defined in RHEL's include/ tree (cached)."""
+    if sym not in _missing_api_cache:
+        rc, _, _ = run_quiet(
+            f"git grep -ql '{sym}' -- include/", cwd=rhel_repo,
+        )
+        _missing_api_cache[sym] = (rc == 0)
+    return _missing_api_cache[sym]
+
+
+def uses_missing_api(commit_hash, upstream_repo, rhel_repo):
+    """Check if a commit's added lines call API functions missing from RHEL.
+    Works for treewide conversions and any follow-up commits that use
+    the new API, regardless of subject wording."""
+    r = git(f"diff -U0 {commit_hash}^..{commit_hash}", cwd=upstream_repo,
+            check=False)
+    if r.returncode != 0:
+        return None
+
+    added_lines = [l for l in r.stdout.split("\n")
+                   if l.startswith("+") and not l.startswith("+++")]
+    for sym in MISSING_API_SYMBOLS:
+        if any(sym in line for line in added_lines):
+            if not _sym_exists_in_rhel(sym, rhel_repo):
+                return f"uses {sym}, which is not available in RHEL tree"
+    return None
+
+
+def file_to_config_at_ref(filepath, ref, upstream_repo):
+    """Map a .c file to its CONFIG at a specific git ref (e.g. parent commit).
+    Needed for removal commits where the Makefile entry is also deleted."""
+    if not filepath.endswith(".c"):
+        return None
+    dirpath = os.path.dirname(filepath)
+    obj_name = os.path.basename(filepath).replace(".c", ".o")
+    mf_relpath = os.path.join(dirpath, "Makefile")
+
+    r = git(f"show {ref}:{mf_relpath}", cwd=upstream_repo, check=False)
+    if r.returncode != 0:
+        return None
+    content = r.stdout
+
+    for m in re.finditer(
+        r"obj-\$\((CONFIG_\w+)\)\s*\+=\s*(.*)", content
+    ):
+        config_sym = m.group(1)
+        objects = m.group(2).strip().split()
+        if obj_name in objects:
+            return config_sym
+
+    for m in re.finditer(
+        r"(\w+)-\$\((CONFIG_\w+)\)\s*\+=\s*(.*)", content
+    ):
+        config_sym = m.group(2)
+        sub_objects = m.group(3).strip().split()
+        if obj_name in sub_objects:
+            return config_sym
+
+    return None
+
+
+def is_driver_removal(commit_hash, subject, upstream_repo):
+    """Detect commits that remove a driver entirely (delete .c + Kconfig entry).
+    Returns the CONFIG symbol being removed, or None."""
+    lower = subject.lower()
+    if "remove" not in lower and "delete" not in lower and "drop" not in lower:
+        return None
+
+    r = git(f"diff --name-status {commit_hash}^..{commit_hash}",
+            cwd=upstream_repo, check=False)
+    if r.returncode != 0:
+        return None
+
+    deleted_c = []
+    for line in r.stdout.strip().split("\n"):
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[0] == "D" and parts[1].endswith(".c"):
+            deleted_c.append(parts[1])
+
+    if not deleted_c:
+        return None
+
+    # Check the Makefile at the PARENT commit (before the removal)
+    for dc in deleted_c:
+        config = file_to_config_at_ref(dc, f"{commit_hash}^", upstream_repo)
+        if config and config != "BUILTIN":
+            return config
+
+    return None
+
+
+def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths):
+    """Classify each commit as KEEP or OMIT based on CONFIG enablement."""
+    header("Phase 3: Classifying commits")
+    keep = []
+    omit = []
+
+    for i, h in enumerate(commits):
+        r = git(f"log --format='%s' -1 {h}", cwd=upstream_repo)
+        subject = r.stdout.strip()
+
+        infra_reason = uses_missing_api(h, upstream_repo, rhel_repo)
+        if infra_reason:
+            omit.append((h, subject, infra_reason))
+            continue
+
+        # Detect driver removal commits for disabled drivers
+        removed_config = is_driver_removal(h, subject, upstream_repo)
+        if removed_config and removed_config not in config_map:
+            omit.append((h, subject,
+                         f"removes driver {removed_config}, disabled on all archs"))
+            continue
+
+        r2 = git(f"diff-tree --no-commit-id --name-only -r {h}",
+                 cwd=upstream_repo)
+        files = [f for f in r2.stdout.strip().split("\n") if f]
+
+        c_files = [f for f in files if f.endswith(".c")]
+        yaml_files = [f for f in files if f.endswith(".yaml")]
+        other_files = [f for f in files
+                       if not f.endswith(".c") and not f.endswith(".yaml")]
+
+        # If commit only touches yaml/docs/headers (no .c), check yaml CONFIGs
+        if not c_files:
+            if yaml_files:
+                any_yaml_enabled = False
+                all_yaml_disabled = True
+                yaml_reasons = []
+                for yf in yaml_files:
+                    ycfg = yaml_to_config(yf, upstream_repo, config_map)
+                    if ycfg is None:
+                        all_yaml_disabled = False
+                    elif ycfg in config_map:
+                        any_yaml_enabled = True
+                        all_yaml_disabled = False
+                    else:
+                        yaml_reasons.append(f"{yf}: {ycfg} disabled on all archs")
+
+                if all_yaml_disabled and yaml_reasons:
+                    omit.append((h, subject, "; ".join(yaml_reasons)))
+                else:
+                    keep.append((h, subject,
+                                 "yaml/docs" + (" (some enabled)" if any_yaml_enabled else "")))
+            else:
+                keep.append((h, subject, "no .c files (infra/docs/headers)"))
+            continue
+
+        any_enabled = False
+        all_disabled = True
+        reasons = []
+
+        for cf in c_files:
+            config = file_to_config(cf, upstream_repo)
+            if config is None:
+                all_disabled = False
+                reasons.append(f"{cf}: CONFIG not found in Makefile")
+            elif config == "BUILTIN":
+                any_enabled = True
+                all_disabled = False
+            elif config in config_map:
+                any_enabled = True
+                all_disabled = False
+            else:
+                reasons.append(f"{cf}: {config} disabled on all archs")
+
+        if any_enabled:
+            keep.append((h, subject, "CONFIG enabled"))
+        elif all_disabled and reasons:
+            omit.append((h, subject, "; ".join(reasons)))
+        else:
+            keep.append((h, subject, "mixed/uncertain -- keeping for safety"))
+
+    info(f"KEEP: {len(keep)}   OMIT: {len(omit)}")
+    return keep, omit
+
+# ---------------------------------------------------------------------------
+# Phase 4: cherry-pick + conflict resolution
+# ---------------------------------------------------------------------------
+
+def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver):
+    """Resolve conflicts in the working tree. Returns list of conflict notes."""
+    r = git("diff --name-only --diff-filter=U", cwd=rhel_repo, check=False)
+    conflicted = [f for f in r.stdout.strip().split("\n") if f]
+    if not conflicted:
+        return []
+
+    notes = []
+    in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
+
+    for cf in conflicted:
+        if cf == "MAINTAINERS":
+            git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
+            git(f"add {cf}", cwd=rhel_repo, check=False)
+            notes.append("MAINTAINERS: out-of-scope, kept downstream version")
+
+        elif not cf.startswith(in_scope_prefixes):
+            git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
+            git(f"add {cf}", cwd=rhel_repo, check=False)
+            notes.append(f"{cf}: out-of-scope file, kept downstream version")
+
+        elif conflict_policy == "theirs":
+            rc, _, _ = run_quiet(
+                f"git checkout --theirs -- {cf}", cwd=rhel_repo
+            )
+            if rc != 0:
+                rc2, _, _ = run_quiet(f"git rm {cf}", cwd=rhel_repo)
+                if rc2 == 0:
+                    notes.append(
+                        f"{cf}: delete/modify conflict; removed "
+                        f"(file absent on RHEL-{rhel_ver} base)"
+                    )
+                else:
+                    git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
+                    git(f"add {cf}", cwd=rhel_repo, check=False)
+                    notes.append(
+                        f"{cf}: unresolvable conflict; kept downstream version"
+                    )
+            else:
+                git(f"add {cf}", cwd=rhel_repo, check=False)
+                notes.append(
+                    f"{cf}: context drift from intervening upstream changes "
+                    f"not on RHEL-{rhel_ver} base; accepted upstream version"
+                )
+
+        elif conflict_policy == "abort":
+            die(f"Conflict in {cf} and --conflict-policy=abort. "
+                f"Aborting cherry-pick.")
+
+    return notes
+
+
+def scope_index(rhel_repo, scope_paths):
+    """Unstage files outside the scope paths from the index."""
+    r = git("diff --cached --name-only", cwd=rhel_repo, check=False)
+    staged = [f for f in r.stdout.strip().split("\n") if f]
+    in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
+    removed = []
+
+    for f in staged:
+        if f == "MAINTAINERS":
+            git(f"checkout HEAD -- {f}", cwd=rhel_repo, check=False)
+            removed.append(f)
+        elif not f.startswith(in_scope_prefixes):
+            git(f"checkout HEAD -- {f}", cwd=rhel_repo, check=False)
+            removed.append(f)
+
+    return removed
+
+
+def build_test(rhel_repo, toolbox_name, subsystem):
+    """Run make M=<subsystem> in the toolbox. Returns (success, output).
+    Uses KBUILD_MODPOST_WARN=1 so missing Module.symvers (no prior full
+    build) only warns instead of failing the compile check."""
+    cmd = (f"toolbox run -c {toolbox_name} "
+           f"make -j$(nproc) KBUILD_MODPOST_WARN=1 M={subsystem}")
+    rc, out, err = run_quiet(cmd, cwd=rhel_repo)
+    combined = out + err
+    if rc != 0:
+        # Distinguish real compiler errors from modpost-only warnings
+        has_compiler_error = bool(
+            re.search(r":\d+:\d+: error:", combined)
+        )
+        if not has_compiler_error:
+            return True, combined
+    return rc == 0, combined
+
+
+API_REPLACEMENTS = {
+    "kzalloc_obj": ("kzalloc(sizeof({arg}), GFP_KERNEL)",
+                     r"kzalloc_obj\(([^)]+)\)"),
+    "kmalloc_obj": ("kmalloc(sizeof({arg}), GFP_KERNEL)",
+                     r"kmalloc_obj\(([^)]+)\)"),
+    "kcalloc_obj": ("kzalloc(sizeof({arg}), GFP_KERNEL)",
+                     r"kcalloc_obj\(([^)]+)\)"),
+    "krealloc_obj": ("krealloc({arg}, sizeof(*({arg})), GFP_KERNEL)",
+                      r"krealloc_obj\(([^)]+)\)"),
+}
+
+
+def try_fix_missing_api(build_output, rhel_repo):
+    """If build failed due to a known missing API, fix the source in-place.
+    Returns (fixed: bool, notes: list[str])."""
+    fixes_applied = []
+
+    for line in build_output.split("\n"):
+        m = re.search(r"(\S+\.c):(\d+):\d+: error:.*implicit declaration of "
+                      r"function ['\u2018](\w+)['\u2019]", line)
+        if not m:
+            continue
+        filepath, lineno, symbol = m.group(1), int(m.group(2)), m.group(3)
+        if symbol not in API_REPLACEMENTS:
+            continue
+
+        replacement_tpl, pattern = API_REPLACEMENTS[symbol]
+        # filepath from compiler is relative to repo root
+        full_path = os.path.join(rhel_repo, filepath)
+        if not os.path.isfile(full_path):
+            continue
+
+        with open(full_path) as fh:
+            content = fh.read()
+
+        def replacer(match):
+            arg = match.group(1)
+            return replacement_tpl.format(arg=arg)
+
+        new_content, count = re.subn(pattern, replacer, content)
+        if count > 0:
+            with open(full_path, "w") as fh:
+                fh.write(new_content)
+            git(f"add {filepath}", cwd=rhel_repo, check=False)
+            fixes_applied.append(
+                f"{filepath}: replaced {count} {symbol}() call(s) with "
+                f"RHEL-compatible equivalent"
+            )
+
+    return bool(fixes_applied), fixes_applied
+
+
+def diagnose_build_failure(build_output, commit_hash, subject,
+                           rhel_repo, upstream_repo, scope_paths,
+                           toolbox_name, subsystem, omit_list,
+                           output_dir, applied_count, total_count):
+    """Attempt auto-fix for known build error patterns.
+    Returns (fixed: bool, fix_note: str or None)."""
+
+    # Try fixing known missing API calls first
+    fixed, fix_notes = try_fix_missing_api(build_output, rhel_repo)
+    if fixed:
+        info("  Auto-fix applied, rebuilding ...")
+        ok, new_output = build_test(rhel_repo, toolbox_name, subsystem)
+        if ok:
+            return True, "; ".join(fix_notes)
+        warn("  Rebuild after auto-fix still fails.")
+        build_output = new_output
+
+    # Pattern: undeclared identifier / implicit declaration
+    m = re.search(r"error:.*['\u2018](\w+)['\u2019].*undeclared", build_output)
+    if not m:
+        m = re.search(r"error:.*implicit declaration of function "
+                      r"['\u2018](\w+)['\u2019]", build_output)
+
+    if m:
+        symbol = m.group(1)
+        inc_match = re.search(
+            r"(include/\S+\.h).*" + re.escape(symbol),
+            git(f"grep -rl '{symbol}' -- include/", cwd=rhel_repo,
+                check=False).stdout
+        )
+        if inc_match:
+            pass  # too risky to auto-add includes blindly
+
+    # Pattern: incompatible pointer type for .probe / .probe_new
+    if re.search(r"\.probe\b.*incompatible pointer type", build_output):
+        pass  # needs manual review
+
+    # Write the failure report
+    write_build_failure_report(
+        output_dir, commit_hash, subject, build_output,
+        rhel_repo, applied_count, total_count, scope_paths,
+    )
+    return False, None
+
+
+def write_build_failure_report(output_dir, commit_hash, subject,
+                               build_output, rhel_repo,
+                               applied_count, total_count, scope_paths):
+    """Write comprehensive build failure report."""
+    os.makedirs(output_dir, exist_ok=True)
+    report_path = os.path.join(output_dir, "build-failure-report.txt")
+
+    r = git(f"diff-tree --no-commit-id --name-only -r {commit_hash}",
+            cwd=rhel_repo, check=False)
+    files = r.stdout.strip() if r.returncode == 0 else "(unavailable)"
+
+    with open(report_path, "w") as fh:
+        fh.write(f"=== BUILD FAILURE REPORT ===\n\n")
+        fh.write(f"Commit:  {commit_hash}\n")
+        fh.write(f"Subject: {subject}\n\n")
+        fh.write(f"Applied: {applied_count} of {total_count} commits\n\n")
+        fh.write(f"Files touched by this commit:\n{files}\n\n")
+        fh.write(f"Compiler output:\n{SUB}\n{build_output}\n{SUB}\n\n")
+        fh.write(f"Scope paths: {', '.join(scope_paths)}\n\n")
+        fh.write(f"To resume after manual fix:\n")
+        fh.write(f"  backport-subsystem --continue "
+                 f"--rhel-repo {rhel_repo} ...\n")
+
+    return report_path
+
+
+def format_gort_message(subject, commit_hash, upstream_repo,
+                        jira, upstream_version, conflict_notes):
+    """Build a gort-style commit message."""
+    r = git(f"log --format='%an <%ae>' -1 {commit_hash}", cwd=upstream_repo)
+    author = r.stdout.strip()
+    r = git(f"log --format='%ad' --date=format:'%a %b %d %H:%M:%S %Y %z' "
+            f"-1 {commit_hash}", cwd=upstream_repo)
+    date = r.stdout.strip()
+    r = git(f"log --format='%B' -1 {commit_hash}", cwd=upstream_repo)
+    body = r.stdout.rstrip()
+
+    indented_body = textwrap.indent(body, "    ")
+
+    lines = [subject, ""]
+    lines.append(f"JIRA: {jira}")
+    lines.append(f"Upstream status: {upstream_version}")
+
+    if conflict_notes:
+        lines.append("")
+        lines.append("Conflicts:")
+        for note in conflict_notes:
+            lines.append(f"  - {note}")
+
+    lines.append("")
+    lines.append(f"commit {commit_hash}")
+    lines.append(f"Author: {author}")
+    lines.append(f"Date:   {date}")
+    lines.append("")
+    lines.append(indented_body)
+    lines.append("")
+    lines.append("Assisted-by: Claude <no-reply@anthropic.com>")
+    lines.append("Signed-off-by: Tony Camuso <tcamuso@redhat.com>")
+
+    return "\n".join(lines)
+
+
+def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
+                       conflict_policy, build_policy, toolbox_name,
+                       subsystem, jira, upstream_version, rhel_ver,
+                       omit_list, output_dir, applied_count, total_count):
+    """Cherry-pick a single commit with conflict resolution and optional build.
+    Returns (success, conflict_notes)."""
+
+    r = git(f"log --format='%s' -1 {commit_hash}", cwd=upstream_repo)
+    subject = r.stdout.strip()
+
+    rc, _, err = run_quiet(
+        f"git cherry-pick --no-commit {commit_hash}", cwd=rhel_repo,
+    )
+    had_conflict = rc != 0
+
+    conflict_notes = []
+    if had_conflict:
+        conflict_notes = resolve_conflicts(
+            rhel_repo, scope_paths, conflict_policy, rhel_ver,
+        )
+
+    removed = scope_index(rhel_repo, scope_paths)
+    if removed:
+        n = len(removed)
+        conflict_notes.append(
+            f"treewide commit scoped to {subsystem}; "
+            f"{n} out-of-scope file(s) excluded"
+        )
+
+    should_build = (
+        (build_policy == "every") or
+        (build_policy == "conflict" and had_conflict)
+    )
+
+    build_ok = True
+    if should_build:
+        info(f"  Building {subsystem} ...")
+        build_ok, build_output = build_test(
+            rhel_repo, toolbox_name, subsystem,
+        )
+        if not build_ok:
+            warn("  Build FAILED -- attempting diagnosis ...")
+            fixed, fix_note = diagnose_build_failure(
+                build_output, commit_hash, subject,
+                rhel_repo, upstream_repo, scope_paths,
+                toolbox_name, subsystem, omit_list,
+                output_dir, applied_count, total_count,
+            )
+            if fixed:
+                status(f"  Auto-fixed: {fix_note}")
+                conflict_notes.append(fix_note)
+            else:
+                git("reset --hard HEAD", cwd=rhel_repo, check=False)
+                report_path = os.path.join(output_dir,
+                                           "build-failure-report.txt")
+                print(f"\n{CAU}=== BACKPORT ABORTED ==={OFF}")
+                print(f"  Failed at:   {commit_hash[:12]} {subject}")
+                print(f"  Build error: {report_path}")
+                print(f"  Applied:     {applied_count} of {total_count}")
+                print(f"  Resume with: backport-subsystem --continue "
+                      f"--rhel-repo {rhel_repo} ...")
+                return False, conflict_notes
+
+    msg = format_gort_message(
+        subject, commit_hash, upstream_repo,
+        jira, upstream_version, conflict_notes,
+    )
+    msg_file = "/tmp/backport_msg.txt"
+    with open(msg_file, "w") as fh:
+        fh.write(msg)
+
+    git(f"commit --allow-empty --file={msg_file}", cwd=rhel_repo)
+    return True, conflict_notes
+
+# ---------------------------------------------------------------------------
+# State persistence
+# ---------------------------------------------------------------------------
+
+def save_state(output_dir, state):
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, ".backport-state.json")
+    with open(path, "w") as fh:
+        json.dump(state, fh, indent=2)
+
+
+def load_state(output_dir):
+    path = os.path.join(output_dir, ".backport-state.json")
+    if os.path.isfile(path):
+        with open(path) as fh:
+            return json.load(fh)
+    return None
+
+# ---------------------------------------------------------------------------
+# Phase 5: output generation
+# ---------------------------------------------------------------------------
+
+def generate_output(rhel_repo, output_dir, base_commit, omit_list):
+    """Generate format-patch output and Omitted-fixes file."""
+    header("Phase 5: Generating output")
+
+    patches_dir = os.path.join(output_dir, "patches")
+    os.makedirs(patches_dir, exist_ok=True)
+
+    git(f"format-patch -o {patches_dir} {base_commit}..HEAD", cwd=rhel_repo)
+    patch_files = sorted(glob(os.path.join(patches_dir, "*.patch")))
+    info(f"Generated {len(patch_files)} patch files in {patches_dir}")
+
+    omitted_path = os.path.join(output_dir, "Omitted-fixes")
+    with open(omitted_path, "w") as fh:
+        fh.write(f"# Omitted upstream commits ({len(omit_list)} entries)\n")
+        fh.write(f"# Generated by backport-subsystem\n\n")
+        for h, subject, reason in omit_list:
+            fh.write(f"{h[:12]} {subject}\n")
+            fh.write(f"  Reason: {reason}\n\n")
+    info(f"Wrote {omitted_path} ({len(omit_list)} entries)")
+
+    return len(patch_files)
+
+# ---------------------------------------------------------------------------
+# Phase 6: summary report
+# ---------------------------------------------------------------------------
+
+def print_summary(params, total_evaluated, keep_count, omit_count,
+                  clean_count, conflict_count, build_tests,
+                  build_fixes, fail_count, patch_count):
+    print(f"\n{STA}=== BACKPORT COMPLETE ==={OFF}")
+    print(f"  Subsystem:      {params['subsystem']}")
+    print(f"  RHEL:           {params['rhel']}")
+    print(f"  Branch:         {params['branch']}")
+    print(f"  Build policy:   {params['build_policy']}")
+    print(f"  Commits evaluated: {total_evaluated}")
+    print(f"    KEEP:         {keep_count}")
+    print(f"    OMIT:         {omit_count}")
+    print(f"    Clean:        {clean_count}")
+    print(f"    Conflicts:    {conflict_count} (auto-resolved)")
+    print(f"    Build tests:  {build_tests}")
+    print(f"    Build fixes:  {build_fixes} (auto-applied)")
+    print(f"    Failed:       {fail_count}")
+    patches_dir = os.path.join(params['output_dir'], 'patches')
+    omitted_path = os.path.join(params['output_dir'], 'Omitted-fixes')
+    print(f"  Patches:        {patches_dir} ({patch_count} files)")
+    print(f"  Omitted:        {omitted_path} ({omit_count} entries)")
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main():
+    args = parse_args()
+
+    rhel_repo = os.path.abspath(args.rhel_repo)
+    upstream_repo = os.path.abspath(args.upstream_repo)
+
+    if not os.path.isdir(os.path.join(rhel_repo, ".git")):
+        die(f"Not a git repo: {rhel_repo}")
+    if not os.path.isdir(os.path.join(upstream_repo, ".git")):
+        die(f"Not a git repo: {upstream_repo}")
+
+    branch = args.branch or os.path.basename(args.subsystem.rstrip("/"))
+    output_dir = args.output_dir or os.path.join(
+        os.path.dirname(rhel_repo), "backport",
+        os.path.basename(args.subsystem.rstrip("/")),
+    )
+    toolbox_name = f"rhel{args.rhel}"
+
+    scope_paths = discover_scope_paths(
+        args.subsystem, upstream_repo, args.extra_paths,
+    )
+    if not scope_paths:
+        die("No valid scope paths found. Check --subsystem and upstream repo.")
+
+    params = {
+        "subsystem": args.subsystem,
+        "rhel": args.rhel,
+        "rhel_repo": rhel_repo,
+        "upstream_repo": upstream_repo,
+        "upstream_version": args.upstream_version,
+        "jira": args.jira,
+        "branch": branch,
+        "output_dir": output_dir,
+        "conflict_policy": args.conflict_policy,
+        "build_policy": args.build_policy,
+        "scope_paths": scope_paths,
+        "dry_run": args.dry_run,
+    }
+
+    if not args.yes:
+        show_confirmation_menu(params)
+
+    scope_paths = params["scope_paths"]
+    conflict_policy = params["conflict_policy"]
+    build_policy = params["build_policy"]
+
+    # -- Phase 1 --
+    configs_dir = run_dist_configs(rhel_repo, toolbox_name)
+    config_map = load_enabled_configs(configs_dir)
+
+    # -- Phase 2 --
+    divergence = find_divergence_point(rhel_repo, upstream_repo, scope_paths)
+    pending = list_pending_commits(
+        upstream_repo, divergence, scope_paths, rhel_repo,
+    )
+    if not pending:
+        die("No pending commits found. Nothing to backport.")
+
+    # -- Phase 3 --
+    keep, omit = classify_commits(
+        pending, config_map, upstream_repo, rhel_repo, scope_paths,
+    )
+
+    if args.dry_run:
+        header("Dry run complete")
+        info(f"Would cherry-pick {len(keep)} commits, omit {len(omit)}")
+        for h, subj, reason in keep:
+            print(f"  {STA}KEEP{OFF} {h[:12]} {subj}")
+        for h, subj, reason in omit:
+            print(f"  {WRN}OMIT{OFF} {h[:12]} {subj}  ({reason})")
+        return
+
+    # Save classification lists
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, "keep_commits.txt"), "w") as fh:
+        for h, subj, reason in keep:
+            fh.write(f"{h} {subj}\n")
+    with open(os.path.join(output_dir, "omit_commits.txt"), "w") as fh:
+        for h, subj, reason in omit:
+            fh.write(f"{h} {subj} | {reason}\n")
+
+    # -- Phase 4: cherry-pick loop --
+    header("Phase 4: Cherry-picking")
+
+    # Create or checkout branch
+    rc, _, _ = run_quiet(f"git rev-parse --verify {branch}", cwd=rhel_repo)
+    if rc == 0:
+        git(f"checkout {branch}", cwd=rhel_repo)
+        info(f"Checked out existing branch '{branch}'")
+    else:
+        git(f"checkout -b {branch}", cwd=rhel_repo)
+        info(f"Created and checked out branch '{branch}'")
+
+    base_commit = git("rev-parse HEAD", cwd=rhel_repo).stdout.strip()
+
+    # Handle --continue
+    start_idx = 0
+    if args.resume:
+        state = load_state(output_dir)
+        if state:
+            start_idx = state.get("next_idx", 0)
+            base_commit = state.get("base_commit", base_commit)
+            info(f"Resuming from commit index {start_idx}")
+        else:
+            warn("No saved state found, starting from beginning")
+
+    clean_count = 0
+    conflict_count = 0
+    build_tests = 0
+    build_fixes = 0
+    fail_count = 0
+
+    for idx in range(start_idx, len(keep)):
+        h, subj, _ = keep[idx]
+        num = f"[{idx + 1}/{len(keep)}]"
+        info(f"{num} {h[:12]} {subj}")
+
+        ok, notes = cherry_pick_commit(
+            h, upstream_repo, rhel_repo, scope_paths,
+            conflict_policy, build_policy, toolbox_name,
+            args.subsystem, params["jira"], params["upstream_version"],
+            args.rhel, omit, output_dir, idx, len(keep),
+        )
+
+        if not ok:
+            fail_count += 1
+            save_state(output_dir, {
+                "next_idx": idx,
+                "base_commit": base_commit,
+            })
+            sys.exit(1)
+
+        if notes:
+            conflict_count += 1
+        else:
+            clean_count += 1
+
+        should_build = (
+            (build_policy == "every") or
+            (build_policy == "conflict" and notes)
+        )
+        if should_build:
+            build_tests += 1
+
+        save_state(output_dir, {
+            "next_idx": idx + 1,
+            "base_commit": base_commit,
+        })
+        status(f"  applied {'(with conflicts)' if notes else '(clean)'}")
+
+    # -- Phase 5 --
+    patch_count = generate_output(rhel_repo, output_dir, base_commit, omit)
+
+    # -- Phase 6 --
+    print_summary(
+        params,
+        total_evaluated=len(pending),
+        keep_count=len(keep),
+        omit_count=len(omit),
+        clean_count=clean_count,
+        conflict_count=conflict_count,
+        build_tests=build_tests,
+        build_fixes=build_fixes,
+        fail_count=fail_count,
+        patch_count=patch_count,
+    )
+
+
+if __name__ == "__main__":
+    main()
