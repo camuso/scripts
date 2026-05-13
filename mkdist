@@ -1,6 +1,16 @@
 #!/bin/bash
 #
-# mkdist
+# mkdist - Build a kernel RPM set, using a toolbox when available.
+#
+# Must be run from the root of a RHEL/CentOS kernel tree.
+# Auto-detects the RHEL version from redhat/Makefile.variables and
+# selects the matching toolbox container for the build.
+#
+# Toolbox container naming convention:
+#   .el9  -> rhel9       (or c9s)
+#   .el10 -> c10s        (or rhel10)
+#
+# Override with: TOOLBOX=<name> mkdist
 #
 
 [ -n "$MYDIR" ] || {
@@ -11,36 +21,31 @@
 declare usagestr="$(
 cat <<EOF
 
-$(basename "$0")
-\0
+$(basename "$0") [OPTIONS]
+
+Build a RHEL kernel RPM set (base only, no debug/perf/tools/RT).
+Must be run from the root of a kernel tree.
+
+OPTIONS
+    -t NAME   Toolbox container name (overrides auto-detect)
+    -n        No toolbox -- run the build directly on the host
+    -h        Show this help
+
+ENVIRONMENT
+    TOOLBOX   Same as -t (command-line flag takes precedence)
+
 EOF
 )"
 
-#** usage: print info and instructions to screen
-#
-# Global
-# 	usagestr
-#*
 usage() {
 	echo -e "$usagestr"
 }
 
-#** control_c: control-c trap
-#
-# Global
-#   CTLC_EXIT - bash environment variable
-#*
 control_c() {
 	echo -e "\nCtrl-c detected\nCleaning up and exiting."
 	exit $CTLC_EXIT
 }
 
-#** exitme
-#
-# Arguments
-#   $1 - exit code
-#   $2 - optional message
-#*
 exitme() {
 	local -i code="$1"
 	local msg="$2"
@@ -51,43 +56,134 @@ exitme() {
 	exit "$code"
 }
 
-#** main
-#*
-main() {
-	local mkstart
-	local mkend
-	local mkdiff
-	local etmins
-	local etsecs
+# Detect the RHEL version from the kernel tree and pick a toolbox.
+# Sets global: toolbox_name
+detect_toolbox() {
+	local dist
+	local el_ver
 
-        # Trap for control-c
-        trap control_c SIGINT
+	if [[ ! -f redhat/Makefile.variables ]]; then
+		echo "Warning: redhat/Makefile.variables not found."
+		echo "         Are you in a RHEL kernel tree?"
+		toolbox_name=""
+		return 1
+	fi
+
+	dist=$(grep -oP '(?<=DIST \?= )\.el\d+' redhat/Makefile.variables 2>/dev/null)
+	el_ver=${dist#.el}
+
+	if [[ -z "$el_ver" ]]; then
+		echo "Warning: could not determine RHEL version from DIST."
+		toolbox_name=""
+		return 1
+	fi
+
+	# Try container names in preference order
+	local -a candidates
+	case "$el_ver" in
+		9)  candidates=(c9s rhel9) ;;
+		10) candidates=(c10s rhel10) ;;
+		*)  candidates=("c${el_ver}s" "rhel${el_ver}") ;;
+	esac
+
+	local name
+	for name in "${candidates[@]}"; do
+		if toolbox list -c 2>/dev/null | grep -qw "$name"; then
+			toolbox_name="$name"
+			return 0
+		fi
+	done
+
+	echo "Warning: no toolbox container found for RHEL-${el_ver}."
+	echo "         Looked for: ${candidates[*]}"
+	toolbox_name=""
+	return 1
+}
+
+main() {
+	local mkstart mkend mkdiff etmins etsecs
+	local use_toolbox=true
+	local toolbox_name="${TOOLBOX:-}"
+
+	while getopts "t:nh" opt; do
+		case "$opt" in
+			t) toolbox_name="$OPTARG" ;;
+			n) use_toolbox=false ;;
+			h) usage; exit 0 ;;
+			*) exitme 1 "" ;;
+		esac
+	done
+
+	if [[ ! -f Makefile ]] || ! grep -q 'dist-rpm-baseonly' redhat/Makefile 2>/dev/null; then
+		exitme 1 "Error: not in a RHEL kernel tree root."
+	fi
+
+	if $use_toolbox && [[ -z "$toolbox_name" ]]; then
+		detect_toolbox || use_toolbox=false
+	fi
+
+	# Validate the toolbox exists if specified
+	if $use_toolbox && [[ -n "$toolbox_name" ]]; then
+		if ! toolbox list -c 2>/dev/null | grep -qw "$toolbox_name"; then
+			exitme 1 "Error: toolbox container '$toolbox_name' not found."
+		fi
+	fi
+
+	trap control_c SIGINT
+
+	local build_cmd
+	build_cmd="make dist-rpm-baseonly \
+RPMBUILDOPTS=\"--target \$(uname -m) \
+--without debug \
+--without debuginfo \
+--without vdso_install \
+--without bpftool \
+--without perf \
+--without libperf \
+--without tools \
+--without selftests \
+--without realtime \
+--without doc \
+--without cross_headers \
+-bb\""
 
 	mkstart=$(date +%s)
-	make dist-rpm-baseonly \
-	RPMBUILDOPTS="--target $(uname -m) \
-        --without debug \
-        --without debuginfo \
-        --without vdso_install \
-	--without bpftool \
-        --without perf \
-	--without libperf \
-        --without tools \
-        --without selftests \
-        --without realtime \
-        --without doc \
-        --without cross_headers \
-        -bb"
 
+	if $use_toolbox; then
+		local here
+		here="$(pwd)"
+		echo "Building in toolbox: $toolbox_name"
+		echo "Kernel tree: $here"
+		echo ""
+		toolbox run -c "$toolbox_name" \
+			bash -c "cd /run/host${here} && ${build_cmd}"
+	else
+		echo "Building on host (no toolbox)"
+		echo ""
+		eval "$build_cmd"
+	fi
+
+	local -i rc=$?
 	mkend=$(date +%s)
-
 	mkdiff=$((mkend - mkstart))
 	etmins=$((mkdiff / 60))
 	etsecs=$((mkdiff % 60))
 
-	echo "Elapsed time: $etmins : $etsecs"
+	echo ""
+	echo "Elapsed time: ${etmins}m ${etsecs}s"
 
-	exitme 0
+	if ((rc == 0)); then
+		local rpmdir="redhat/rpm/RPMS/$(uname -m)"
+		if [[ -d "$rpmdir" ]]; then
+			echo ""
+			echo "RPMs:"
+			ls -1 "$rpmdir"/*.rpm 2>/dev/null
+		fi
+	else
+		echo "Build FAILED (exit code $rc)"
+	fi
+
+	exit $rc
 }
 
 main "$@"

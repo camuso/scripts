@@ -8,8 +8,7 @@
 # Exit codes: 0=pass, 1=fail, 77=skip
 #
 
-KERNEL_DIR="${KERNEL_DIR:-/work/c10s/kernel}"
-INPUT_DIR="$KERNEL_DIR/drivers/input"
+KERNEL_DIR="${KERNEL_DIR:-}"
 
 declare -i LOADED=0
 declare -i FAILED=0
@@ -20,35 +19,44 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 skip() { echo "SKIP: $*" >&2; exit 77; }
 
 [[ $(id -u) -ne 0 ]] && skip "Must run as root"
-[[ -d "$INPUT_DIR" ]] || skip "Input build dir not found: $INPUT_DIR"
 
-# Check if the built modules match the running kernel's vermagic.
-# If not, we can only verify they exist and were compiled; we cannot insmod them.
-running_ver=$(uname -r)
-if [[ -f "$KERNEL_DIR/include/config/kernel.release" ]]; then
-	built_ver=$(cat "$KERNEL_DIR/include/config/kernel.release")
-else
-	built_ver="unknown"
-fi
+# Determine where to find input modules:
+#   1. If KERNEL_DIR is set and has a build tree, use drivers/input/*.ko
+#   2. Otherwise, use installed modules under /lib/modules/$(uname -r)
+use_modprobe=false
+if [[ -n "$KERNEL_DIR" && -d "$KERNEL_DIR/drivers/input" ]]; then
+	INPUT_DIR="$KERNEL_DIR/drivers/input"
 
-if [[ "$running_ver" != "$built_ver" ]]; then
-	# Modules won't load - just verify they exist and are valid ELF
-	ko_count=$(find "$INPUT_DIR" -name "*.ko" 2>/dev/null | wc -l)
-	invalid=0
-	while IFS= read -r -d '' ko; do
-		if ! file "$ko" | grep -q "ELF"; then
-			echo "  ERROR: $ko is not a valid ELF file"
-			((invalid++))
-		fi
-	done < <(find "$INPUT_DIR" -name "*.ko" -print0 2>/dev/null)
-
-	if ((invalid > 0)); then
-		echo "Module format check: $invalid of $ko_count modules are invalid ELF"
-		exit 1
+	running_ver=$(uname -r)
+	if [[ -f "$KERNEL_DIR/include/config/kernel.release" ]]; then
+		built_ver=$(cat "$KERNEL_DIR/include/config/kernel.release")
+	else
+		built_ver="unknown"
 	fi
-	echo "Module format check: $ko_count modules built OK (cannot insmod: running=$running_ver, built=$built_ver)"
-	exit 0
+
+	if [[ "$running_ver" != "$built_ver" ]]; then
+		ko_count=$(find "$INPUT_DIR" -name "*.ko" 2>/dev/null | wc -l)
+		invalid=0
+		while IFS= read -r -d '' ko; do
+			if ! file "$ko" | grep -q "ELF"; then
+				echo "  ERROR: $ko is not a valid ELF file"
+				((invalid++))
+			fi
+		done < <(find "$INPUT_DIR" -name "*.ko" -print0 2>/dev/null)
+
+		if ((invalid > 0)); then
+			echo "Module format check: $invalid of $ko_count modules are invalid ELF"
+			exit 1
+		fi
+		echo "Module format check: $ko_count modules built OK (cannot insmod: running=$running_ver, built=$built_ver)"
+		exit 0
+	fi
+else
+	INPUT_DIR="/lib/modules/$(uname -r)/kernel/drivers/input"
+	use_modprobe=true
 fi
+
+[[ -d "$INPUT_DIR" ]] || skip "Input module dir not found: $INPUT_DIR"
 
 # Record dmesg position
 dmesg_start=$(dmesg | wc -l)
@@ -57,13 +65,23 @@ test_module() {
 	local ko="$1"
 	local modname
 	modname=$(basename "$ko" .ko)
+	modname="${modname%.xz}"
+	modname="${modname%.zst}"
 
-	# Skip test module (handled by kunit test)
 	[[ "$modname" == "input_test" ]] && return
 
-	# Try to load
-	if insmod "$ko" 2>/dev/null; then
-		# Check dmesg for errors during load
+	local load_ok=false
+	if $use_modprobe; then
+		if modprobe "$modname" 2>/dev/null; then
+			load_ok=true
+		fi
+	else
+		if insmod "$ko" 2>/dev/null; then
+			load_ok=true
+		fi
+	fi
+
+	if $load_ok; then
 		local new_msgs
 		new_msgs=$(dmesg | tail -n +$((dmesg_start + 1)) | grep -i "error\|bug\|oops\|panic" | grep -iv "error_report\|error\.c\|error_code")
 
@@ -74,32 +92,31 @@ test_module() {
 			((LOADED++))
 		fi
 
-		# Unload
-		rmmod "$modname" 2>/dev/null
+		modprobe -r "$modname" 2>/dev/null || rmmod "$modname" 2>/dev/null
 		dmesg_start=$(dmesg | wc -l)
 	else
-		# Distinguish hardware-missing (expected) from code errors
 		local load_err
-		load_err=$(insmod "$ko" 2>&1)
+		if $use_modprobe; then
+			load_err=$(modprobe "$modname" 2>&1)
+		else
+			load_err=$(insmod "$ko" 2>&1)
+		fi
 
 		if echo "$load_err" | grep -qE "No such device|not found|Resource busy"; then
 			((SKIPPED++))
+		elif echo "$load_err" | grep -qE "Unknown symbol|disagrees about"; then
+			((SKIPPED++))
 		else
-			# Check if it's a dependency issue
-			if echo "$load_err" | grep -qE "Unknown symbol|disagrees about"; then
-				((SKIPPED++))
-			else
-				FAILURES+=("$modname: load failed: $load_err")
-				((FAILED++))
-			fi
+			FAILURES+=("$modname: load failed: $load_err")
+			((FAILED++))
 		fi
 	fi
 }
 
-# Find all built .ko files under drivers/input
+# Find .ko/.ko.xz/.ko.zst files under the input directory
 while IFS= read -r -d '' ko; do
 	test_module "$ko"
-done < <(find "$INPUT_DIR" -name "*.ko" -print0 2>/dev/null)
+done < <(find "$INPUT_DIR" -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.zst" -print0 2>/dev/null | sort -z)
 
 echo "Module smoke test: $LOADED loaded OK, $SKIPPED skipped (no hw), $FAILED failed"
 

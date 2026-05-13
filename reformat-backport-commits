@@ -15,6 +15,7 @@
 #
 #       <original commit message body>
 #
+#   Assisted-by: Claude <no-reply@anthropic.com>
 #   Signed-off-by: <maintainer>
 #
 # Usage: reformat-backport-commits -u UPSTREAM_REPO -s STATUS [-j JIRA] [-n COUNT] BASE_COMMIT
@@ -120,6 +121,7 @@ echo "Upstream status: $UPSTREAM_STATUS"
 echo ""
 echo "$uplog"
 echo ""
+echo "Assisted-by: Claude <no-reply@anthropic.com>"
 echo "Signed-off-by: $MAINTAINER_NAME <$MAINTAINER_EMAIL>"
 FILTER_EOF
 chmod +x "$filter_script"

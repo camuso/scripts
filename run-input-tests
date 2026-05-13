@@ -10,7 +10,7 @@
 
 set -o pipefail
 
-declare KERNEL_DIR="/work/c10s/kernel"
+declare KERNEL_DIR="${KERNEL_DIR:-}"
 declare -i VERBOSE=0
 declare -i PASS=0
 declare -i FAIL=0
@@ -21,7 +21,7 @@ MYDIR="$(dirname "$(readlink -f "$0")")"
 
 usage() {
 	echo "Usage: $(basename "$0") [-k KERNEL_BUILD_DIR] [-v]"
-	echo "  -k DIR   Path to kernel build tree (default: /work/c10s/kernel)"
+	echo "  -k DIR   Path to kernel build tree (optional; uses installed modules if omitted)"
 	echo "  -v       Verbose output"
 	exit 0
 }
@@ -36,10 +36,13 @@ while getopts "k:vh" opt; do
 done
 
 [[ $(id -u) -ne 0 ]] && { echo "ERROR: Must run as root"; exit 1; }
-[[ -d "$KERNEL_DIR/drivers/input" ]] || {
-	echo "ERROR: $KERNEL_DIR does not look like a kernel build tree"
-	exit 1
-}
+
+if [[ -n "$KERNEL_DIR" ]]; then
+	if [[ ! -d "$KERNEL_DIR/drivers/input" && ! -f "$KERNEL_DIR/input_test.ko" ]]; then
+		echo "ERROR: $KERNEL_DIR has no drivers/input/ dir or input_test.ko"
+		exit 1
+	fi
+fi
 
 export KERNEL_DIR VERBOSE
 
