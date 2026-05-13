@@ -1,0 +1,20 @@
+#!/bin/bash
+# Update Cursor IDE on Fedora
+
+set -euo pipefail
+
+# Temporary download directory
+TMPDIR=$(mktemp -d)
+
+# Go to temp dir
+cd "$TMPDIR"
+
+# Download latest RPM (replace URL with official Cursor download link)
+curl -L -o cursor-latest.rpm "https://downloads.cursor.com/production/45fd70f3fe72037444ba35c9e51ce86a1977ac11/linux/x64/rpm/x86_64/cursor-2.0.34.el8.x86_64.rpm"
+
+# Install/upgrade
+sudo dnf install -y ./cursor-latest.rpm
+
+# Clean up
+cd /
+rm -rf "$TMPDIR"

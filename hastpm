@@ -1,0 +1,6 @@
+#!/bin/bash
+
+bkr system-details "$1" | grep -iw tpm > /dev/null 2>&1
+if (( $? == 0 )); then
+	echo "$1 has TPM"
+fi
