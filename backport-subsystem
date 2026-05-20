@@ -665,25 +665,37 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
 # ---------------------------------------------------------------------------
 
 def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver):
-    """Resolve conflicts in the working tree. Returns list of conflict notes."""
+    """Resolve conflicts in the working tree.
+
+    Returns (notes, oos_count) where notes is a list of conflict note strings
+    for in-scope files, and oos_count is the number of out-of-scope files
+    that were excluded (conflicted or newly added).
+    """
     r = git("diff --name-only --diff-filter=U", cwd=rhel_repo, check=False)
     conflicted = [f for f in r.stdout.strip().split("\n") if f]
     if not conflicted:
-        return []
+        return [], 0
 
     notes = []
+    oos_excluded = []
     in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
 
     for cf in conflicted:
         if cf == "MAINTAINERS":
             git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
             git(f"add {cf}", cwd=rhel_repo, check=False)
-            notes.append("MAINTAINERS: out-of-scope, kept downstream version")
+            oos_excluded.append(cf)
 
         elif not cf.startswith(in_scope_prefixes):
-            git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
-            git(f"add {cf}", cwd=rhel_repo, check=False)
-            notes.append(f"{cf}: out-of-scope file, kept downstream version")
+            exists_in_head = git(
+                f"cat-file -e HEAD:{cf}", cwd=rhel_repo, check=False
+            ).returncode == 0
+            if exists_in_head:
+                git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
+                git(f"add {cf}", cwd=rhel_repo, check=False)
+            else:
+                git(f"rm -f {cf}", cwd=rhel_repo, check=False)
+            oos_excluded.append(cf)
 
         elif conflict_policy == "theirs":
             rc, _, _ = run_quiet(
@@ -713,22 +725,121 @@ def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver):
             die(f"Conflict in {cf} and --conflict-policy=abort. "
                 f"Aborting cherry-pick.")
 
-    return notes
+    return notes, len(oos_excluded)
+
+
+def check_duplicate_definitions(rhel_repo):
+    """Detect duplicate struct/union/enum definitions in staged header files.
+
+    After conflict resolution, both sides of a conflict can survive --
+    e.g. a forward declaration replaced by a full definition while the
+    original full definition remains further down.  GCC may accept this
+    silently (non-debug) or error under -Werror (debug configs).
+
+    Returns a list of (filepath, type_kind, name, kept_line, removed_lines)
+    tuples for any duplicates found and auto-fixed.
+    """
+    r = git("diff --cached --name-only", cwd=rhel_repo, check=False)
+    staged = [f for f in r.stdout.strip().split("\n") if f]
+    headers = [f for f in staged if f.endswith(".h")]
+    if not headers:
+        return []
+
+    defn_re = re.compile(
+        r"^(struct|union|enum)\s+(\w+)\s*\{", re.MULTILINE,
+    )
+
+    fixes = []
+    for hdr in headers:
+        fullpath = os.path.join(rhel_repo, hdr)
+        if not os.path.isfile(fullpath):
+            continue
+        with open(fullpath) as fh:
+            content = fh.read()
+        lines = content.splitlines(keepends=True)
+
+        seen = {}
+        dups = []
+        for i, line in enumerate(lines):
+            m = defn_re.match(line)
+            if not m:
+                continue
+            kind, name = m.group(1), m.group(2)
+            key = (kind, name)
+            if key in seen:
+                dups.append((key, seen[key], i))
+            else:
+                seen[key] = i
+
+        if not dups:
+            continue
+
+        for (kind, name), first_line, dup_line in dups:
+            brace_depth = 0
+            end_first = first_line
+            for j in range(first_line, len(lines)):
+                brace_depth += lines[j].count("{") - lines[j].count("}")
+                if brace_depth == 0:
+                    end_first = j
+                    break
+
+            brace_depth = 0
+            end_dup = dup_line
+            for j in range(dup_line, len(lines)):
+                brace_depth += lines[j].count("{") - lines[j].count("}")
+                if brace_depth == 0:
+                    end_dup = j
+                    break
+
+            first_body = "".join(lines[first_line:end_first + 1])
+            dup_body = "".join(lines[dup_line:end_dup + 1])
+
+            if first_body.strip() == dup_body.strip():
+                del lines[dup_line:end_dup + 1]
+                with open(fullpath, "w") as fh:
+                    fh.writelines(lines)
+                git(f"add {hdr}", cwd=rhel_repo, check=False)
+                fixes.append((
+                    hdr, kind, name, first_line + 1,
+                    list(range(dup_line + 1, end_dup + 2)),
+                ))
+                warn(
+                    f"  Auto-fixed: duplicate {kind} {name} "
+                    f"in {hdr} (removed lines "
+                    f"{dup_line + 1}-{end_dup + 1}, "
+                    f"kept definition at line {first_line + 1})"
+                )
+            else:
+                warn(
+                    f"  WARNING: {hdr} has divergent duplicate "
+                    f"{kind} {name} at lines {first_line + 1} "
+                    f"and {dup_line + 1} -- manual review needed"
+                )
+
+    return fixes
 
 
 def scope_index(rhel_repo, scope_paths):
-    """Unstage files outside the scope paths from the index."""
+    """Unstage files outside the scope paths from the index.
+
+    Handles two cases for out-of-scope files:
+      1. Modified files that exist in HEAD: restore with checkout HEAD --
+      2. Newly added files (not in HEAD): remove with git rm -f
+    """
     r = git("diff --cached --name-only", cwd=rhel_repo, check=False)
     staged = [f for f in r.stdout.strip().split("\n") if f]
     in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
     removed = []
 
     for f in staged:
-        if f == "MAINTAINERS":
-            git(f"checkout HEAD -- {f}", cwd=rhel_repo, check=False)
-            removed.append(f)
-        elif not f.startswith(in_scope_prefixes):
-            git(f"checkout HEAD -- {f}", cwd=rhel_repo, check=False)
+        if f == "MAINTAINERS" or not f.startswith(in_scope_prefixes):
+            exists_in_head = git(
+                f"cat-file -e HEAD:{f}", cwd=rhel_repo, check=False
+            ).returncode == 0
+            if exists_in_head:
+                git(f"checkout HEAD -- {f}", cwd=rhel_repo, check=False)
+            else:
+                git(f"rm -f {f}", cwd=rhel_repo, check=False)
             removed.append(f)
 
     return removed
@@ -896,7 +1007,21 @@ def format_gort_message(subject, commit_hash, upstream_repo,
         lines.append("")
         lines.append("Conflicts:")
         for note in conflict_notes:
-            lines.append(f"  - {note}")
+            prefix = f"  - {note}"
+            if len(prefix) <= 80:
+                lines.append(prefix)
+            else:
+                m = re.match(r'^(  - \S+:)\s+(.+)$', prefix)
+                if m:
+                    lines.append(m.group(1))
+                    explanation = m.group(2)
+                    for wl in textwrap.wrap(explanation,
+                                            width=76,
+                                            break_long_words=False,
+                                            break_on_hyphens=False):
+                        lines.append(f"    {wl}")
+                else:
+                    lines.append(prefix)
 
     lines.append("")
     lines.append(f"commit {commit_hash}")
@@ -927,17 +1052,42 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
     had_conflict = rc != 0
 
     conflict_notes = []
+    oos_conflict_count = 0
     if had_conflict:
-        conflict_notes = resolve_conflicts(
+        conflict_notes, oos_conflict_count = resolve_conflicts(
             rhel_repo, scope_paths, conflict_policy, rhel_ver,
         )
 
     removed = scope_index(rhel_repo, scope_paths)
-    if removed:
-        n = len(removed)
+    total_oos = len(removed) + oos_conflict_count
+    if total_oos:
         conflict_notes.append(
             f"treewide commit scoped to {subsystem}; "
-            f"{n} out-of-scope file(s) excluded"
+            f"{total_oos} out-of-scope file(s) excluded"
+        )
+
+    # Annotate in-scope new files (not present in HEAD before this commit)
+    r = git("diff --cached --name-only --diff-filter=A", cwd=rhel_repo,
+            check=False)
+    new_files = [f for f in r.stdout.strip().split("\n") if f]
+    for nf in new_files:
+        conflict_notes.append(f"{nf}: new upstream file, included")
+
+    # Annotate in-scope deleted files
+    r = git("diff --cached --name-only --diff-filter=D", cwd=rhel_repo,
+            check=False)
+    del_files = [f for f in r.stdout.strip().split("\n") if f]
+    if del_files:
+        n = len(del_files)
+        conflict_notes.append(
+            f"{n} in-scope file(s) removed per upstream"
+        )
+
+    dup_fixes = check_duplicate_definitions(rhel_repo)
+    for hdr, kind, name, kept, _ in dup_fixes:
+        conflict_notes.append(
+            f"{hdr}: removed duplicate {kind} {name} "
+            f"definition (artifact of conflict resolution)"
         )
 
     should_build = (

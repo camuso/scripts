@@ -23,10 +23,13 @@ cat <<EOF
 
 $(basename "$0") [OPTIONS]
 
-Build a RHEL kernel RPM set (base only, no debug/perf/tools/RT).
-Must be run from the root of a kernel tree.
+Build a RHEL kernel RPM set.  By default builds the base (non-debug)
+kernel only, skipping perf/tools/RT.  Must be run from the root of a
+kernel tree.
 
 OPTIONS
+    -d        Build the debug kernel instead of the base kernel
+              (enables PROVE_LOCKING/lockdep, KASAN, DEBUG_OBJECTS, etc.)
     -t NAME   Toolbox container name (overrides auto-detect)
     -n        No toolbox -- run the build directly on the host
     -h        Show this help
@@ -103,10 +106,12 @@ detect_toolbox() {
 main() {
 	local mkstart mkend mkdiff etmins etsecs
 	local use_toolbox=true
+	local build_debug=false
 	local toolbox_name="${TOOLBOX:-}"
 
-	while getopts "t:nh" opt; do
+	while getopts "dt:nh" opt; do
 		case "$opt" in
+			d) build_debug=true ;;
 			t) toolbox_name="$OPTARG" ;;
 			n) use_toolbox=false ;;
 			h) usage; exit 0 ;;
@@ -131,11 +136,21 @@ main() {
 
 	trap control_c SIGINT
 
+	local flavor_opts
+	if $build_debug; then
+		# --with dbgonly: skip base kernel, build only debug variant
+		flavor_opts="--with dbgonly --without debuginfo"
+		echo "Build flavor: DEBUG (lockdep, KASAN, DEBUG_OBJECTS)"
+	else
+		# Build only the base kernel (skip debug)
+		flavor_opts="--without debug --without debuginfo"
+		echo "Build flavor: base"
+	fi
+
 	local build_cmd
 	build_cmd="make dist-rpm-baseonly \
 RPMBUILDOPTS=\"--target \$(uname -m) \
---without debug \
---without debuginfo \
+${flavor_opts} \
 --without vdso_install \
 --without bpftool \
 --without perf \

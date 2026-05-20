@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""
+input-test-ff - Force-feedback tests for uinput subsystem.
+
+Exercises the FF upload/play/erase path through uinput to verify:
+- No circular locking dependency between ff-core and uinput
+- Event lock is correctly held when submitting FF request events
+
+On a debug kernel (CONFIG_PROVE_LOCKING), lockdep will report any
+lock ordering violations triggered by these paths.  On any kernel,
+a deadlock in the FF path will be caught by SIGALRM timeout.
+
+Exit codes: 0=pass, 1=fail, 77=skip
+"""
+
+import errno
+import fcntl
+import os
+import select
+import signal
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+EV_SYN = 0x00
+EV_FF = 0x15
+EV_UINPUT = 0x0101
+SYN_REPORT = 0x00
+FF_RUMBLE = 0x50
+UI_FF_UPLOAD = 1
+UI_FF_ERASE = 2
+
+UI_SET_EVBIT = 0x40045564
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+
+if struct.calcsize("l") == 8:
+    INPUT_EVENT_FORMAT = "llHHi"
+else:
+    INPUT_EVENT_FORMAT = "iiHHi"
+INPUT_EVENT_SIZE = struct.calcsize(INPUT_EVENT_FORMAT)
+
+
+def _IOC(d, t, nr, sz):
+    return (d << 30) | (sz << 16) | (t << 8) | nr
+
+
+PTR_SIZE = struct.calcsize("P")
+if PTR_SIZE == 8:
+    FF_EFFECT_SIZE = 48
+    FF_UPLOAD_SIZE = 104
+else:
+    FF_EFFECT_SIZE = 44
+    FF_UPLOAD_SIZE = 96
+
+FF_ERASE_SIZE = 12
+FF_UNION_OFFSET = 16
+
+UI_SET_FFBIT = _IOC(1, 0x55, 107, 4)
+EVIOCSFF = _IOC(1, 0x45, 0x80, FF_EFFECT_SIZE)
+EVIOCRMFF = _IOC(1, 0x45, 0x81, 4)
+UI_BEGIN_FF_UPLOAD = _IOC(3, 0x55, 200, FF_UPLOAD_SIZE)
+UI_END_FF_UPLOAD = _IOC(1, 0x55, 201, FF_UPLOAD_SIZE)
+UI_BEGIN_FF_ERASE = _IOC(3, 0x55, 202, FF_ERASE_SIZE)
+UI_END_FF_ERASE = _IOC(1, 0x55, 203, FF_ERASE_SIZE)
+
+
+def skip(msg):
+    print(f"SKIP: {msg}", file=sys.stderr)
+    sys.exit(77)
+
+
+def fail(msg):
+    print(f"FAIL: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def write_event(fd, ev_type, code, value):
+    now = time.time()
+    sec = int(now)
+    usec = int((now - sec) * 1_000_000)
+    os.write(fd, struct.pack(INPUT_EVENT_FORMAT, sec, usec,
+                             ev_type, code, value))
+
+
+def find_evdev(name):
+    for entry in os.listdir("/sys/class/input"):
+        if not entry.startswith("event"):
+            continue
+        try:
+            with open(f"/sys/class/input/{entry}/device/name") as f:
+                if f.read().strip() == name:
+                    return f"/dev/input/{entry}"
+        except (FileNotFoundError, PermissionError):
+            continue
+    return None
+
+
+def create_ff_device(dev_name, ff_max=16):
+    """Create a uinput device with FF_RUMBLE support.  Returns the uinput fd."""
+    try:
+        ufd = os.open("/dev/uinput", os.O_RDWR)
+    except PermissionError:
+        skip("Cannot open /dev/uinput (permission denied)")
+    except FileNotFoundError:
+        skip("/dev/uinput not found")
+
+    fcntl.ioctl(ufd, UI_SET_EVBIT, EV_FF)
+    fcntl.ioctl(ufd, UI_SET_FFBIT, FF_RUMBLE)
+
+    ABS_CNT = 64
+    blob = struct.pack(
+        "80sHHHHI" + "i" * (ABS_CNT * 4),
+        dev_name.encode().ljust(80, b'\0'),
+        0x03, 0x1234, 0x5678, 1,
+        ff_max,
+        *([0] * ABS_CNT * 4),
+    )
+    os.write(ufd, blob)
+    fcntl.ioctl(ufd, UI_DEV_CREATE)
+    time.sleep(0.3)
+    return ufd
+
+
+def ff_request_handler(uinput_fd, stop_event, errors):
+    """Read and complete FF upload/erase requests from the kernel."""
+    while not stop_event.is_set():
+        try:
+            ready, _, _ = select.select([uinput_fd], [], [], 0.1)
+        except (OSError, ValueError):
+            break
+        if not ready:
+            continue
+
+        try:
+            data = os.read(uinput_fd, INPUT_EVENT_SIZE)
+        except OSError:
+            break
+        if len(data) < INPUT_EVENT_SIZE:
+            continue
+
+        ev = struct.unpack(INPUT_EVENT_FORMAT, data)
+        ev_type, ev_code, ev_value = ev[2], ev[3], ev[4]
+
+        try:
+            if ev_type == EV_UINPUT and ev_code == UI_FF_UPLOAD:
+                buf = bytearray(FF_UPLOAD_SIZE)
+                struct.pack_into("<I", buf, 0, ev_value)
+                fcntl.ioctl(uinput_fd, UI_BEGIN_FF_UPLOAD, buf, True)
+                struct.pack_into("<i", buf, 4, 0)
+                fcntl.ioctl(uinput_fd, UI_END_FF_UPLOAD, buf, True)
+            elif ev_type == EV_UINPUT and ev_code == UI_FF_ERASE:
+                buf = bytearray(FF_ERASE_SIZE)
+                struct.pack_into("<I", buf, 0, ev_value)
+                fcntl.ioctl(uinput_fd, UI_BEGIN_FF_ERASE, buf, True)
+                struct.pack_into("<i", buf, 4, 0)
+                fcntl.ioctl(uinput_fd, UI_END_FF_ERASE, buf, True)
+        except OSError as e:
+            errors.append(f"request {ev_code} id={ev_value}: {e}")
+
+
+def do_ff_cycle(evfd):
+    """Upload, play, stop, and erase one FF_RUMBLE effect.  Returns effect_id."""
+    buf = bytearray(FF_EFFECT_SIZE)
+    struct.pack_into("<HhHHHHH", buf, 0,
+                     FF_RUMBLE, -1, 0, 0, 0, 500, 0)
+    struct.pack_into("<HH", buf, FF_UNION_OFFSET, 0xC000, 0x8000)
+
+    fcntl.ioctl(evfd, EVIOCSFF, buf, True)
+    eid = struct.unpack_from("<h", buf, 2)[0]
+    if eid < 0:
+        fail(f"FF upload got negative id: {eid}")
+
+    write_event(evfd, EV_FF, eid, 1)
+    write_event(evfd, EV_SYN, SYN_REPORT, 0)
+    time.sleep(0.02)
+    write_event(evfd, EV_FF, eid, 0)
+    write_event(evfd, EV_SYN, SYN_REPORT, 0)
+
+    fcntl.ioctl(evfd, EVIOCRMFF, eid)
+    return eid
+
+
+def run_with_handler(dev_name, body_fn):
+    """Create an FF device, spin up its request handler, run body_fn(evdev_fd)."""
+    ufd = create_ff_device(dev_name)
+    evdev = find_evdev(dev_name)
+    if not evdev:
+        try:
+            fcntl.ioctl(ufd, UI_DEV_DESTROY)
+        except OSError:
+            pass
+        os.close(ufd)
+        fail(f"Cannot find evdev for {dev_name}")
+
+    handler_errors = []
+    stop = threading.Event()
+    handler = threading.Thread(target=ff_request_handler,
+                               args=(ufd, stop, handler_errors),
+                               daemon=True)
+    handler.start()
+
+    try:
+        evfd = os.open(evdev, os.O_RDWR)
+        try:
+            body_fn(evfd)
+        finally:
+            os.close(evfd)
+
+        if handler_errors:
+            fail(f"Handler errors: {'; '.join(handler_errors)}")
+    finally:
+        stop.set()
+        handler.join(timeout=3)
+        try:
+            fcntl.ioctl(ufd, UI_DEV_DESTROY)
+        except OSError:
+            pass
+        os.close(ufd)
+
+
+def test_ff_rumble():
+    """Single upload/play/erase cycle."""
+    def body(evfd):
+        do_ff_cycle(evfd)
+    run_with_handler("bkport-test-ff", body)
+    print("  ff_rumble: upload/play/stop/erase OK")
+
+
+def test_ff_stress():
+    """Repeated cycles to stress the lock ordering path."""
+    iterations = 20
+
+    def body(evfd):
+        for _ in range(iterations):
+            do_ff_cycle(evfd)
+
+    run_with_handler("bkport-test-ff-stress", body)
+    print(f"  ff_stress: {iterations} upload/play/erase cycles OK")
+
+
+def check_dmesg_lockdep():
+    """Scan recent dmesg for lockdep warnings related to uinput/FF."""
+    try:
+        out = subprocess.run(["dmesg"], capture_output=True, text=True).stdout
+        for line in out.strip().split('\n')[-300:]:
+            low = line.lower()
+            if ('circular locking' in low or 'possible unsafe locking' in low) \
+               and ('uinput' in low or 'ff_' in low or 'input' in low):
+                fail(f"lockdep warning: {line.strip()}")
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+    print("  dmesg: no lockdep warnings detected")
+
+
+def main():
+    if os.geteuid() != 0:
+        skip("Must run as root")
+
+    if not os.path.exists("/dev/uinput"):
+        os.system("modprobe uinput 2>/dev/null")
+        time.sleep(0.5)
+        if not os.path.exists("/dev/uinput"):
+            skip("/dev/uinput not available")
+
+    def alarm_handler(signum, frame):
+        fail("DEADLOCK: FF test hung (possible circular locking dependency)")
+
+    old_handler = signal.signal(signal.SIGALRM, alarm_handler)
+    signal.alarm(30)
+
+    try:
+        print("Force-feedback locking tests:")
+        test_ff_rumble()
+        test_ff_stress()
+        check_dmesg_lockdep()
+        print("All FF tests passed")
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+if __name__ == "__main__":
+    main()

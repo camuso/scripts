@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# input-test-gpiokeys - gpio_keys probe and sysfs validation
+#
+# Verifies that gpio_keys devices probed correctly, checking the
+# platform_get_irq() fallback for interrupt-only keys.
+#
+# Skip (exit 77) when no gpio-keys hardware is present.
+#
+# Exit codes: 0=pass, 1=fail, 77=skip
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+skip() { echo "SKIP: $*" >&2; exit 77; }
+
+[[ $(id -u) -ne 0 ]] && skip "Must run as root"
+
+# Ensure the driver is loaded if available
+if ! lsmod | grep -q gpio_keys; then
+	modprobe gpio_keys 2>/dev/null || true
+fi
+
+# Look for a gpio-keys input device in sysfs
+gpio_dev=""
+for dev_dir in /sys/class/input/input*; do
+	[[ -d "$dev_dir" ]] || continue
+	name=$(cat "$dev_dir/name" 2>/dev/null)
+	case "$name" in
+		*[Gg]pio*[Kk]ey*|*gpio_keys*)
+			gpio_dev="$dev_dir"
+			break
+			;;
+	esac
+done
+
+# Also check platform bus for bound devices
+if [[ -z "$gpio_dev" ]]; then
+	drv_dir="/sys/bus/platform/drivers/gpio-keys"
+	if [[ ! -d "$drv_dir" ]]; then
+		skip "gpio-keys driver not present"
+	fi
+
+	bound=""
+	for entry in "$drv_dir"/*; do
+		base=$(basename "$entry")
+		case "$base" in
+			bind|unbind|uevent|module) continue ;;
+		esac
+		[[ -d "$entry" ]] && { bound="$base"; break; }
+	done
+
+	[[ -z "$bound" ]] && skip "No gpio-keys devices bound (no hardware)"
+fi
+
+echo "gpio_keys validation:"
+
+if [[ -n "$gpio_dev" ]]; then
+	devname=$(basename "$gpio_dev")
+	readable_name=$(cat "$gpio_dev/name" 2>/dev/null)
+	echo "  found device: $readable_name ($devname)"
+
+	ev_caps=$(cat "$gpio_dev/capabilities/ev" 2>/dev/null)
+	[[ -z "$ev_caps" ]] && fail "$devname: cannot read event capabilities"
+	echo "  capabilities: ev=$ev_caps"
+
+	ev_node=""
+	for ev_dir in "$gpio_dev"/event*; do
+		[[ -d "$ev_dir" ]] || continue
+		ev_node="/dev/input/$(basename "$ev_dir")"
+		break
+	done
+
+	[[ -z "$ev_node" ]] && fail "$devname: no event node"
+	[[ -c "$ev_node" ]] || fail "$devname: $ev_node is not a character device"
+	echo "  event node: $ev_node (accessible)"
+else
+	echo "  gpio-keys driver bound, no input device registered"
+	echo "  (may use interrupt-only keys with platform_get_irq fallback)"
+fi
+
+# Check dmesg for gpio_keys errors during probe
+if dmesg 2>/dev/null | grep -i "gpio.keys" | grep -qi "error\|fail"; then
+	echo "  WARNING: gpio_keys probe errors in dmesg:"
+	dmesg | grep -i "gpio.keys" | grep -i "error\|fail" | tail -5
+	fail "gpio_keys probe errors"
+fi
+
+echo "  gpio_keys: probe and sysfs OK"
+exit 0

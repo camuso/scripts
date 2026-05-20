@@ -1,0 +1,19 @@
+#!/bin/sh
+
+DISPLAY_NUM=:1
+GEOM=1920x1080
+
+Xvnc $DISPLAY_NUM \
+  -geometry $GEOM \
+  -rfbauth $HOME/.config/tigervnc/passwd \
+  -localhost no \
+  -SecurityTypes=VncAuth \
+  -pn \
+  -fp /usr/share/fonts &
+
+# Give Xvnc a moment to come up
+sleep 2
+
+# Start Cinnamon on that display
+DISPLAY=$DISPLAY_NUM /usr/bin/cinnamon-session &
+

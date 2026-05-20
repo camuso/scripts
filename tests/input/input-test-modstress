@@ -1,0 +1,77 @@
+#!/bin/bash
+#
+# input-test-modstress - Module load/unload stress test
+#
+# Rapidly loads and unloads input modules that had race-condition or
+# use-after-free fixes to trigger regressions.  On debug kernels with
+# KASAN/lockdep, this surfaces memory-safety and locking bugs.  On
+# production kernels, gross oopses and panics will still be caught.
+#
+# Target modules and the bugs they exercise:
+#   alps           - use-after-free in dev3_register_work
+#   appletouch     - race between resume and open
+#   synaptics_i2c  - polling restart race in resume
+#   bcm5974        - failed mode-switch recovery
+#
+# Exit codes: 0=pass, 1=fail, 77=skip
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+skip() { echo "SKIP: $*" >&2; exit 77; }
+
+[[ $(id -u) -ne 0 ]] && skip "Must run as root"
+
+MODULES=(alps appletouch synaptics_i2c bcm5974)
+ITERATIONS=50
+declare -i TESTED=0
+declare -i SKIPPED_MODS=0
+
+dmesg_baseline=$(dmesg | wc -l)
+
+echo "Module load/unload stress test:"
+
+for mod in "${MODULES[@]}"; do
+	if ! modinfo "$mod" &>/dev/null; then
+		echo "  $mod: module not available, skipping"
+		((SKIPPED_MODS++))
+		continue
+	fi
+
+	if ! modprobe "$mod" 2>/dev/null; then
+		echo "  $mod: cannot load (deps or no hw), skipping"
+		((SKIPPED_MODS++))
+		continue
+	fi
+	modprobe -r "$mod" 2>/dev/null || rmmod "$mod" 2>/dev/null
+
+	echo -n "  $mod: ${ITERATIONS} cycles..."
+	for ((i = 0; i < ITERATIONS; i++)); do
+		modprobe "$mod" 2>/dev/null
+		modprobe -r "$mod" 2>/dev/null || rmmod "$mod" 2>/dev/null
+	done
+	echo " done"
+	((TESTED++))
+done
+
+if ((TESTED == 0)); then
+	skip "No target modules loadable on this system"
+fi
+
+# Scan new dmesg for kernel issues
+problems=""
+while IFS= read -r line; do
+	case "$line" in
+		*BUG:*|*WARNING:*|*"RIP:"*|*Oops:*|*"use-after-free"*|\
+		*KASAN*|*"circular locking"*|*"possible unsafe locking"*)
+			problems+="  $line"$'\n'
+			;;
+	esac
+done < <(dmesg | tail -n +$((dmesg_baseline + 1)))
+
+if [[ -n "$problems" ]]; then
+	echo "  KERNEL ISSUES DETECTED:"
+	printf '%s' "$problems"
+	fail "Kernel issues found during module stress test"
+fi
+
+echo "  ${TESTED} module(s) stressed, ${SKIPPED_MODS} skipped, no kernel issues"
+exit 0

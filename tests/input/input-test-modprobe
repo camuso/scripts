@@ -60,6 +60,7 @@ fi
 
 # Record dmesg position
 dmesg_start=$(dmesg | wc -l)
+dmesg_start_orig=$dmesg_start
 
 test_module() {
 	local ko="$1"
@@ -117,6 +118,15 @@ test_module() {
 while IFS= read -r -d '' ko; do
 	test_module "$ko"
 done < <(find "$INPUT_DIR" -name "*.ko" -o -name "*.ko.xz" -o -name "*.ko.zst" -print0 2>/dev/null | sort -z)
+
+# Post-test: bcm5974 mode-switch recovery check
+bcm_msgs=$(dmesg | tail -n +$((dmesg_start_orig + 1)) | grep -i "bcm5974" | grep -i "mode\|switch")
+if [[ -n "$bcm_msgs" ]]; then
+	if echo "$bcm_msgs" | grep -qi "error\|fail\|unable\|oops"; then
+		FAILURES+=("bcm5974: mode switch error detected in dmesg")
+		((FAILED++))
+	fi
+fi
 
 echo "Module smoke test: $LOADED loaded OK, $SKIPPED skipped (no hw), $FAILED failed"
 

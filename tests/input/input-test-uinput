@@ -306,6 +306,48 @@ def test_device_cleanup():
     print("  cleanup: device removed after destroy OK")
 
 
+def test_atkbd_scancode_validation():
+    """Verify atkbd rejects out-of-range scancodes (conditional on hardware)."""
+    EVIOCSKEYCODE = 0x40084504  # _IOW('E', 0x04, unsigned int[2])
+
+    atkbd_evdev = None
+    for entry in os.listdir("/sys/class/input"):
+        if not entry.startswith("event"):
+            continue
+        try:
+            with open(f"/sys/class/input/{entry}/device/name") as f:
+                if f.read().strip() == "AT Translated Set 2 keyboard":
+                    atkbd_evdev = f"/dev/input/{entry}"
+                    break
+        except (FileNotFoundError, PermissionError):
+            continue
+
+    if atkbd_evdev is None:
+        print("  atkbd_keycode: skipped (no AT keyboard)")
+        return
+
+    try:
+        fd = os.open(atkbd_evdev, os.O_RDWR)
+    except (PermissionError, FileNotFoundError):
+        print("  atkbd_keycode: skipped (cannot open evdev)")
+        return
+
+    # ATKBD_KEYMAP_SIZE is 768; scancode 768 must be rejected
+    buf = struct.pack("<II", 768, KEY_A)
+    try:
+        fcntl.ioctl(fd, EVIOCSKEYCODE, buf)
+        os.close(fd)
+        fail("atkbd accepted out-of-range scancode 768 (expected EINVAL)")
+    except OSError as e:
+        os.close(fd)
+        if e.errno == errno.EINVAL:
+            print("  atkbd_keycode: out-of-range scancode correctly rejected")
+        elif e.errno == errno.EACCES:
+            print("  atkbd_keycode: skipped (EACCES on setkeycode)")
+        else:
+            fail(f"atkbd setkeycode: unexpected error {e.errno} ({e.strerror})")
+
+
 def main():
     if os.geteuid() != 0:
         skip("Must run as root")
@@ -322,6 +364,7 @@ def main():
     test_keyboard()
     test_mouse()
     test_device_cleanup()
+    test_atkbd_scancode_validation()
     print("All uinput tests passed")
 
 
