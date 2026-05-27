@@ -170,6 +170,7 @@ ${flavor_opts} \
 		echo "Building in toolbox: $toolbox_name"
 		echo "Kernel tree: $here"
 		echo ""
+		cd "$HOME"
 		toolbox run -c "$toolbox_name" \
 			bash -c "cd /run/host${here} && ${build_cmd}"
 	else
