@@ -85,5 +85,3 @@ echo -e "$BLD\0CPU model:$OFF $cpumodelstr " | tee -a $outfile
 tbootverstr=$(rpm -qa | grep -w tboot)
 echo -e "$BLD\0tboot Version:$OFF $tbootverstr" | tee -a $outfile
 echo
-[ -d "/sys/firmware/efi" ] && echo -e "\niBoot installed with UEFI. tboot is not supported on UEFI systems.\n"  | tee -a $outfile
-
