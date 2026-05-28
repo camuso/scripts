@@ -1011,17 +1011,31 @@ def format_gort_message(subject, commit_hash, upstream_repo,
             if len(prefix) <= 80:
                 lines.append(prefix)
             else:
+                # Try splitting after "filepath:" first
                 m = re.match(r'^(  - \S+:)\s+(.+)$', prefix)
                 if m:
                     lines.append(m.group(1))
-                    explanation = m.group(2)
-                    for wl in textwrap.wrap(explanation,
+                    rest = m.group(2)
+                else:
+                    # No filepath — split after first semicolon or wrap
+                    m2 = re.match(r'^(  - [^;]+;)\s+(.+)$', prefix)
+                    if m2:
+                        lines.append(m2.group(1))
+                        rest = m2.group(2)
+                    else:
+                        rest = None
+                        for wl in textwrap.wrap(prefix, width=80,
+                                                initial_indent="",
+                                                subsequent_indent="    ",
+                                                break_long_words=False,
+                                                break_on_hyphens=False):
+                            lines.append(wl)
+                if rest:
+                    for wl in textwrap.wrap(rest,
                                             width=76,
                                             break_long_words=False,
                                             break_on_hyphens=False):
                         lines.append(f"    {wl}")
-                else:
-                    lines.append(prefix)
 
     lines.append("")
     lines.append(f"commit {commit_hash}")
@@ -1061,10 +1075,16 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
     removed = scope_index(rhel_repo, scope_paths)
     total_oos = len(removed) + oos_conflict_count
     if total_oos:
-        conflict_notes.append(
-            f"treewide commit scoped to {subsystem}; "
-            f"{total_oos} out-of-scope file(s) excluded"
-        )
+        is_treewide = bool(re.search(r'tree[\s-]?wide', subject, re.I))
+        if is_treewide:
+            conflict_notes.append(
+                f"treewide commit scoped to {subsystem}; "
+                f"{total_oos} out-of-scope file(s) excluded"
+            )
+        else:
+            conflict_notes.append(
+                f"{total_oos} out-of-scope file(s) excluded"
+            )
 
     # Annotate in-scope new files (not present in HEAD before this commit)
     r = git("diff --cached --name-only --diff-filter=A", cwd=rhel_repo,
