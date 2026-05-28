@@ -1,6 +1,10 @@
 #!/bin/bash
 #
-# g2-next
+# g2-next - Select a kernel for the next boot (boot-once).
+#
+# Displays main BLS kernels (from grubby) and any submenu entries
+# found in grub.cfg. Uses grub2-reboot so the selection applies only
+# to the next boot, preventing boot loops on crashes.
 #
 
 [ -n "$MYDIR" ] || {
@@ -19,7 +23,12 @@ declare -i termbkgnd=
 declare usagestr="$(
 cat <<EOF
 
-$(basename "$0")\0
+$(basename "$0") - Select a kernel for the next boot (boot-once).
+
+Displays main kernels and any submenu entries from grub.cfg.
+Uses grub2-reboot so the selection applies only to the next boot,
+preventing boot loops on crashes.
+\0
 EOF
 )"
 
@@ -27,26 +36,11 @@ usage() {
 	echo -e "$usagestr"
 }
 
-# control_c: run if user hits control-c
-#
-# Global
-#   CTLC_EXIT - bash environment variable
-#
 control_c() {
 	echo -e "\nCtrl-c detected\nCleaning up and exiting."
 	exit $CTLC_EXIT
 }
 
-# exitme
-#
-# Globals
-#   ui exit codes - see lib/ui.source
-#   ui_err_msg array
-#
-# Arguments
-#   $1 - exit code
-#   $2 - optional string to precede cli message
-#
 exitme() {
 	local -i code=$1
 	local str="$2"
@@ -57,53 +51,141 @@ exitme() {
 	exit "$code"
 }
 
-# init
+# Parallel arrays: display text and the grub2-reboot argument for each entry
+declare -a menu_display=()
+declare -a menu_g2arg=()
+
+# populate_main_entries
+#   Collect BLS-managed entries from grubby.
+#   grub2-reboot is called with the BLS id for these.
 #
-# GLOBALS
+populate_main_entries() {
+	local g2raw idx title id
+
+	g2raw="$(grubby --info=ALL)"
+
+	while IFS= read -r line; do
+		if [[ "$line" =~ ^index=([0-9]+) ]]; then
+			idx="${BASH_REMATCH[1]}"
+			title="" ; id=""
+		elif [[ "$line" =~ ^title=\"(.*)\" ]]; then
+			title="${BASH_REMATCH[1]}"
+		elif [[ "$line" =~ ^id=\"(.*)\" ]]; then
+			id="${BASH_REMATCH[1]}"
+			menu_display+=("$title")
+			menu_g2arg+=("$id")
+		fi
+	done <<< "$g2raw"
+}
+
+# populate_submenu_entries
+#   Parse grub.cfg for submenu blocks and their menuentry children.
+#   grub2-reboot uses the "submenu_title>entry_title" format for these.
 #
+populate_submenu_entries() {
+	local grub_cfg="$1"
+	local line submenu_title="" entry_title
+	local in_submenu=false
+	local -i brace_depth=0
+
+	[ -r "$grub_cfg" ] || return 1
+
+	while IFS= read -r line; do
+		if [[ "$line" =~ ^[[:space:]]*submenu[[:space:]]+[\"\']([^\"\']+)[\"\'] ]]; then
+			submenu_title="${BASH_REMATCH[1]}"
+			in_submenu=true
+			brace_depth=0
+			local tmp="${line//[^\{]/}"
+			((brace_depth += ${#tmp}))
+			tmp="${line//[^\}]/}"
+			((brace_depth -= ${#tmp}))
+			continue
+		fi
+
+		if $in_submenu; then
+			local open="${line//[^\{]/}"
+			local close="${line//[^\}]/}"
+			((brace_depth += ${#open} - ${#close}))
+
+			if [[ "$line" =~ ^[[:space:]]*menuentry[[:space:]]+[\"\']([^\"\']+)[\"\'] ]]; then
+				entry_title="${BASH_REMATCH[1]}"
+				menu_display+=("  [$submenu_title] $entry_title")
+				menu_g2arg+=("${submenu_title}>${entry_title}")
+			fi
+
+			((brace_depth <= 0)) && in_submenu=false
+		fi
+	done < "$grub_cfg"
+}
+
 init() {
 	ui_setbg termbkgnd
-
-	echo "b_color: $b_color"
 }
 
 choose_kernel() {
-	local gstr="$1"
+	local -i total=${#menu_display[@]}
+	local -i nwidth=${#total}
 	local choice
-	local kstr
-	local -i idx=1
-	local -i total
-	local -i nwidth
+	local b_has_sub=false
+	local b_sub_hdr=false
 
-	total=$(wc -l < <(grep index <<< "$g2raw"))
-	nwidth=${#total}
+	for item in "${menu_g2arg[@]}"; do
+		[[ "$item" == *">"* ]] && { b_has_sub=true; break; }
+	done
 
-	echo -e "${MNU}Choose one of these kernels for next boot$OFF"
-	while read line; do
-		grep -q '^kernel' <<< "$line" || continue
-		kstr=$(cut -d= -f2 <<< "$line")
+	echo -e "\n${MNU}Choose a kernel for next boot (boot-once)$OFF"
+	$b_has_sub && echo -e "${STA}  Main entries:$OFF"
+
+	for ((i = 0; i < total; i++)); do
+		if $b_has_sub && ! $b_sub_hdr && [[ "${menu_g2arg[i]}" == *">"* ]]; then
+			echo -e "${STA}  Submenu entries:$OFF"
+			b_sub_hdr=true
+		fi
 		echo -en "  $MNU"
-		ui_padfield "$idx. " " " "$nwidth"
-		echo -e "$OFF$kstr"
-		let ++idx
-	done <<< "$gstr"
+		ui_padfield "$((i + 1)). " " " "$((nwidth + 2))"
+		echo -e "$OFF${menu_display[i]}"
+	done
 
+	echo
 	loop_range 1 "$total" choice
-	grub2-reboot "$((choice -1 ))"
 
+	local g2arg="${menu_g2arg[$((choice - 1))]}"
+	echo -e "${INF}Setting next boot to:$STA ${menu_display[$((choice - 1))]}$OFF"
+	grub2-reboot "$g2arg"
+
+	local next_entry saved_entry
+	next_entry="$(grub2-editenv list | grep '^next_entry=' | cut -d= -f2-)"
+	saved_entry="$(grub2-editenv list | grep '^saved_entry=' | cut -d= -f2-)"
+
+	echo
+	if [ -n "$next_entry" ]; then
+		echo -e "${STA}Verified (boot-once):$OFF"
+		echo -e "  ${INF}next_entry :$MNU $next_entry$OFF"
+		echo -e "  ${INF}saved_entry:$MNU $saved_entry$OFF"
+		echo -e "  ${INF}After one reboot, default reverts to saved_entry.$OFF"
+	else
+		echo -e "${WRN}WARNING: next_entry not set in grub environment.$OFF"
+		echo -e "${WRN}grub2-reboot may have failed.$OFF"
+	fi
 }
 
 main() {
-	local g2raw
-	local kern
+	local grub_cfg="/boot/grub2/grub.cfg"
+	[ -r "$grub_cfg" ] || grub_cfg="/boot/grub/grub.cfg"
 
-        # Trap for control-c
-        trap control_c SIGINT
+	trap control_c SIGINT
 
 	init
 
-	g2raw="$(grubby --info=ALL | grep -A1 index)"
-	choose_kernel "$g2raw" kern
+	populate_main_entries
+	populate_submenu_entries "$grub_cfg"
+
+	if ((${#menu_display[@]} == 0)); then
+		echo -e "${WRN}No boot entries found.$OFF"
+		exitme $ui_err_nofiles "No boot entries"
+	fi
+
+	choose_kernel
 
 	exitme $ui_exit_ok
 }
