@@ -15,6 +15,8 @@
 #   mkstatus -s 2026-04-07      # Report since a specific date
 #   mkstatus -o 2026-04-10      # Add an off-day
 #   mkstatus -o 2026-04-10 -o 2026-04-11  # Multiple off-days
+#   mkstatus -p 2026-05-22 -p 2026-05-27  # Specific PTO days
+#   mkstatus -P 2026-05-19 2026-05-23     # PTO date range (inclusive)
 #   mkstatus -f output.txt      # Write to specific file
 #   mkstatus -e                 # Open in $EDITOR after generating
 #
@@ -27,6 +29,7 @@ declare -r STATUS_DIR="$HOME/status"
 declare since_date=""
 declare report_date=""
 declare -a off_days=()
+declare -a pto_days=()
 declare output_file=""
 declare calendar_zip=""
 declare b_edit=false
@@ -44,6 +47,8 @@ OPTIONS
     -s DATE     Report since date (default: 7 days ago) (YYYY-MM-DD)
     -d DATE     Report date header (default: today) (YYYYMMDD)
     -o DATE     Off-day to note (repeatable) (YYYY-MM-DD or YYYYMMDD)
+    -p DATE     PTO day to note (repeatable) (YYYY-MM-DD)
+    -P START END  PTO date range, inclusive (YYYY-MM-DD YYYY-MM-DD)
     -z FILE     Calendar zip file (extracts .ics to ~/status/calendar.ics)
     -f FILE     Output file (default: ~/status/Status-YYYY-MM-DD.txt)
     -e          Open in \$EDITOR after generating
@@ -128,6 +133,20 @@ parse_args() {
             -s) since_date="$2"; shift 2 ;;
             -d) report_date="$2"; shift 2 ;;
             -o) off_days+=("$2"); shift 2 ;;
+            -p) pto_days+=("$2"); shift 2 ;;
+            -P) local range_start="$2" range_end="$3"
+                if [[ -z "$range_start" || -z "$range_end" ]]; then
+                    echo "Error: -P requires two dates: -P START END" >&2
+                    exit 1
+                fi
+                local cur
+                cur="$range_start"
+                while [[ "$cur" < "$range_end" || "$cur" == "$range_end" ]]; do
+                    pto_days+=("$cur")
+                    cur=$(date -d "$cur + 1 day" +%Y-%m-%d)
+                done
+                shift 3
+                ;;
             -z) calendar_zip="$2"; shift 2 ;;
             -f) output_file="$2"; shift 2 ;;
             -e) b_edit=true; shift ;;
@@ -166,6 +185,9 @@ generate_header() {
     emit "$report_date"
     for day in "${off_days[@]}"; do
         emit "$day - off"
+    done
+    for day in "${pto_days[@]}"; do
+        emit "$day - PTO"
     done
 }
 
