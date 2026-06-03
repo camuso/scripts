@@ -1,0 +1,233 @@
+#!/bin/bash
+#
+# deploy-kernel - Deploy built kernel RPMs to a remote host for testing.
+#
+# Automates the rsync -> install -> reboot -> test cycle for kernel
+# development.  Handles same-NVR reinstalls (rpm --force --nodeps)
+# and fresh installs (dnf install).
+#
+# Must be run from the root of a RHEL kernel tree (or use -k).
+#
+
+[ -n "$MYDIR" ] || {
+	declare MYDIR=
+	MYDIR="$(dirname "$(readlink -f "$0")")"
+}
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0") [OPTIONS] HOST
+
+Deploy kernel RPMs to a remote test host.
+
+OPTIONS
+    -k DIR    Kernel tree root (default: cwd)
+    -d        Deploy debug kernel (set as default boot entry)
+    -b        Deploy base kernel (set as default boot entry)
+    -r        Reboot after install
+    -t CMD    Run test command on host after reboot completes
+    -u USER   SSH user (default: tcamuso)
+    -w SECS   Seconds to wait for host after reboot (default: 180)
+    -h        Show this help
+
+EXAMPLES
+    deploy-kernel -d -r -t 'sudo /home/tcamuso/bin/run-input-tests' per230
+    deploy-kernel -b per230
+    deploy-kernel -d -r per230
+
+EOF
+)"
+
+usage() {
+	echo -e "$usagestr"
+}
+
+die() {
+	echo "ERROR: $1" >&2
+	exit 1
+}
+
+info() {
+	echo "  [INFO] $1"
+}
+
+main() {
+	local kernel_tree="."
+	local deploy_debug=false
+	local deploy_base=false
+	local do_reboot=false
+	local test_cmd=""
+	local ssh_user="tcamuso"
+	local -i wait_secs=180
+	local host=""
+
+	while getopts "k:dbrt:u:w:h" opt; do
+		case "$opt" in
+			k) kernel_tree="$OPTARG" ;;
+			d) deploy_debug=true ;;
+			b) deploy_base=true ;;
+			r) do_reboot=true ;;
+			t) test_cmd="$OPTARG" ;;
+			u) ssh_user="$OPTARG" ;;
+			w) wait_secs="$OPTARG" ;;
+			h) usage; exit 0 ;;
+			*) usage; exit 1 ;;
+		esac
+	done
+	shift $((OPTIND - 1))
+
+	host="${1:-}"
+	[[ -z "$host" ]] && die "HOST argument required"
+
+	# Default: deploy both if neither specified
+	if ! $deploy_debug && ! $deploy_base; then
+		deploy_base=true
+	fi
+
+	# Find RPMs
+	local rpmdir="${kernel_tree}/redhat/rpm/RPMS/$(uname -m)"
+	[[ -d "$rpmdir" ]] || die "RPM directory not found: $rpmdir"
+
+	# Find the latest kernel version built
+	local latest_core
+	latest_core=$(ls -t "$rpmdir"/kernel-core-*.rpm 2>/dev/null | head -1)
+	[[ -z "$latest_core" ]] && die "No kernel-core RPM found in $rpmdir"
+
+	# Extract NVR from the filename
+	local nvr
+	nvr=$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$latest_core" 2>/dev/null)
+	[[ -z "$nvr" ]] && die "Could not determine NVR from $latest_core"
+	local arch
+	arch=$(uname -m)
+
+	info "Kernel NVR: $nvr"
+	info "Target host: ${ssh_user}@${host}"
+
+	# Collect RPMs to deploy
+	local -a rpms=()
+	if $deploy_base; then
+		while IFS= read -r f; do
+			rpms+=("$f")
+		done < <(find "$rpmdir" -name "kernel-*${nvr}.${arch}.rpm" \
+			! -name "kernel-debug*" -type f 2>/dev/null)
+	fi
+	if $deploy_debug; then
+		while IFS= read -r f; do
+			rpms+=("$f")
+		done < <(find "$rpmdir" -name "kernel-debug*${nvr}.${arch}.rpm" \
+			-type f 2>/dev/null)
+		# Debug kernel also needs base modules-core
+		if ! $deploy_base; then
+			local mc="$rpmdir/kernel-modules-core-${nvr}.${arch}.rpm"
+			[[ -f "$mc" ]] && rpms+=("$mc")
+		fi
+	fi
+
+	if ((${#rpms[@]} == 0)); then
+		die "No matching RPMs found for NVR $nvr"
+	fi
+
+	info "Deploying ${#rpms[@]} RPM(s)"
+
+	# Step 1: rsync RPMs to host
+	echo ""
+	echo "=== Copying RPMs to ${host}:/tmp/ ==="
+	rsync -avP "${rpms[@]}" "${ssh_user}@${host}:/tmp/" || \
+		die "rsync failed"
+
+	# Step 2: Install on remote host
+	echo ""
+	echo "=== Installing RPMs ==="
+	local remote_rpms
+	remote_rpms=$(printf "/tmp/%s " "${rpms[@]##*/}")
+
+	# Try dnf install first; if "already installed", force with rpm
+	local install_out
+	install_out=$(ssh "${ssh_user}@${host}" \
+		"sudo dnf install -y $remote_rpms 2>&1")
+	local -i install_rc=$?
+
+	if echo "$install_out" | grep -q "already installed"; then
+		info "Same NVR already installed, forcing reinstall with rpm"
+		ssh "${ssh_user}@${host}" \
+			"sudo rpm -Uvh --force --nodeps $remote_rpms" || \
+			die "rpm --force install failed"
+	elif ((install_rc != 0)); then
+		echo "$install_out"
+		die "dnf install failed (exit code $install_rc)"
+	else
+		echo "$install_out" | tail -5
+	fi
+
+	# Step 3: Set default kernel via grubby
+	local boot_kernel=""
+	if $deploy_debug; then
+		boot_kernel="/boot/vmlinuz-${nvr}.${arch}+debug"
+	elif $deploy_base; then
+		boot_kernel="/boot/vmlinuz-${nvr}.${arch}"
+	fi
+
+	if [[ -n "$boot_kernel" ]]; then
+		echo ""
+		echo "=== Setting default boot kernel ==="
+		ssh "${ssh_user}@${host}" \
+			"sudo grubby --set-default=${boot_kernel}" || \
+			die "grubby --set-default failed"
+		local default_k
+		default_k=$(ssh "${ssh_user}@${host}" "sudo grubby --default-kernel")
+		info "Default kernel: $default_k"
+	fi
+
+	# Step 4: Reboot if requested
+	if $do_reboot; then
+		echo ""
+		echo "=== Rebooting ${host} ==="
+		ssh "${ssh_user}@${host}" "sudo reboot" 2>/dev/null || true
+		info "Reboot issued, waiting for host to come back (max ${wait_secs}s)..."
+
+		local -i elapsed=0
+		local -i interval=10
+		sleep 30  # initial grace period
+		elapsed=30
+
+		while ((elapsed < wait_secs)); do
+			if ssh -o ConnectTimeout=5 -o BatchMode=yes \
+				"${ssh_user}@${host}" "true" 2>/dev/null; then
+				break
+			fi
+			sleep "$interval"
+			elapsed=$((elapsed + interval))
+		done
+
+		if ((elapsed >= wait_secs)); then
+			die "Host did not come back within ${wait_secs}s"
+		fi
+
+		local running_kernel
+		running_kernel=$(ssh "${ssh_user}@${host}" "uname -r")
+		info "Host is up. Running kernel: $running_kernel"
+
+		# Step 5: Run test command if provided
+		if [[ -n "$test_cmd" ]]; then
+			echo ""
+			echo "=== Running tests ==="
+			info "Command: $test_cmd"
+			ssh "${ssh_user}@${host}" "$test_cmd"
+			local -i test_rc=$?
+			if ((test_rc == 0)); then
+				echo ""
+				echo "=== Tests PASSED ==="
+			else
+				echo ""
+				echo "=== Tests FAILED (exit code $test_rc) ==="
+				exit $test_rc
+			fi
+		fi
+	fi
+
+	echo ""
+	echo "=== Deploy complete ==="
+}
+
+main "$@"
