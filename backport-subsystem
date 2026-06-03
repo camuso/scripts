@@ -119,6 +119,11 @@ def parse_args():
                     help="Resume from saved state")
     p.add_argument("--yes", action="store_true",
                     help="Skip interactive confirmation menu")
+    p.add_argument("--assisted-by", default="",
+                    help="Assisted-by trailer (e.g. 'Claude <no-reply@anthropic.com>')")
+    p.add_argument("--divergence", default=None,
+                    help="Upstream commit hash to use as divergence point "
+                         "(skips auto-detection)")
     return p.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -292,31 +297,41 @@ def load_enabled_configs(configs_dir):
 # ---------------------------------------------------------------------------
 
 def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
-    """Scan RHEL commit bodies for 'commit <hash> upstream' to find the
-    most recent upstream commit already incorporated."""
+    """Scan RHEL commit bodies for upstream commit references to find the
+    most recent upstream commit already incorporated.
+
+    Recognizes these formats in commit messages:
+      - 'commit <40-hex>' on its own line (gort format)
+      - 'commit <40-hex> upstream'
+      - '(cherry picked from commit <40-hex>)'
+    """
     header("Phase 2: Finding divergence point")
     info("Scanning RHEL main for upstream commit references ...")
 
-    path_args = " ".join(f"-- {p}" for p in scope_paths)
-    # Collect hashes mentioned in RHEL commit bodies
+    path_args = "-- " + " ".join(scope_paths) if scope_paths else ""
     r = git(f"log --format='%B' --no-merges -200 {path_args}",
             cwd=rhel_repo, check=False)
     if r.returncode != 0:
         r = git(f"log --format='%B' --no-merges -200", cwd=rhel_repo)
 
-    pattern = re.compile(r"commit\s+([0-9a-f]{40})\s+upstream")
     candidates = []
-    for m in pattern.finditer(r.stdout):
+
+    # Pattern 1: 'commit <hash> upstream' (traditional format)
+    for m in re.finditer(r"commit\s+([0-9a-f]{40})\s+upstream", r.stdout):
         candidates.append(m.group(1))
 
+    # Pattern 2: 'cherry picked from commit <hash>'
+    for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", r.stdout):
+        candidates.append(m.group(1))
+
+    # Pattern 3: 'commit <hash>' on its own line (gort/backport-subsystem format)
     if not candidates:
-        pattern2 = re.compile(r"cherry picked from commit ([0-9a-f]{40})")
-        for m in pattern2.finditer(r.stdout):
+        for m in re.finditer(r"^commit\s+([0-9a-f]{40})\s*$", r.stdout, re.M):
             candidates.append(m.group(1))
 
     if not candidates:
-        die("Could not find any upstream commit references in RHEL log. "
-            "Please supply a divergence point manually.")
+        die("Could not find any upstream commit references in RHEL log.\n"
+            "       Use --divergence <upstream-hash> to supply one manually.")
 
     for h in candidates:
         rc, _, _ = run_quiet(f"git cat-file -t {h}", cwd=upstream_repo)
@@ -664,7 +679,226 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
 # Phase 4: cherry-pick + conflict resolution
 # ---------------------------------------------------------------------------
 
-def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver):
+CONFLICT_STRICT = "strict"
+CONFLICT_CONTEXT_DRIFT = "context_drift"
+CONFLICT_NEW_FILE = "new_file"
+CONFLICT_OOS_EXCLUDED = "oos_excluded"
+
+
+def extract_strict_lines(diff_text, filepath=None):
+    """Extract only +/- lines from a unified diff, scoped to a single file
+    if filepath is given.  Excludes --- and +++ path headers.
+    Matches patbatcmp -s -p behavior."""
+    lines = []
+    in_file = filepath is None
+    for line in diff_text.split("\n"):
+        if line.startswith("diff --git "):
+            if filepath:
+                in_file = filepath in line
+            continue
+        if not in_file:
+            continue
+        if line.startswith("--- ") or line.startswith("+++ "):
+            continue
+        if line.startswith("@@"):
+            continue
+        if line.startswith("+") or line.startswith("-"):
+            lines.append(line)
+    return lines
+
+
+def classify_file_conflict(filepath, commit_hash, rhel_repo, upstream_repo):
+    """Classify a resolved in-scope conflict for a single file.
+
+    Returns one of CONFLICT_STRICT, CONFLICT_CONTEXT_DRIFT, or
+    CONFLICT_NEW_FILE with a human-readable description string.
+    """
+    exists_in_head = git(
+        f"cat-file -e HEAD:{filepath}", cwd=rhel_repo, check=False
+    ).returncode == 0
+
+    if not exists_in_head:
+        return CONFLICT_NEW_FILE, (
+            f"{filepath}: absent in RHEL base; created with upstream content"
+        )
+
+    # Get upstream diff for this file
+    us_diff = git(
+        f"diff {commit_hash}^..{commit_hash} -- {filepath}",
+        cwd=upstream_repo, check=False,
+    )
+    upstream_lines = extract_strict_lines(us_diff.stdout) if us_diff.returncode == 0 else []
+
+    # Get our staged diff for this file
+    our_diff = git(f"diff --cached -- {filepath}", cwd=rhel_repo, check=False)
+    our_lines = extract_strict_lines(our_diff.stdout) if our_diff.returncode == 0 else []
+
+    # Compare sorted sets of +/- lines (order-independent, like check_possible_fp)
+    if sorted(our_lines) == sorted(upstream_lines):
+        return CONFLICT_CONTEXT_DRIFT, (
+            f"{filepath}: context drift from intervening upstream "
+            f"changes not on RHEL base"
+        )
+
+    return CONFLICT_STRICT, (
+        f"{filepath}: resolved conflict with upstream version "
+        f"(strict +/- differences from upstream patch)"
+    )
+
+
+def validate_patch_vs_upstream(commit_hash, upstream_repo, rhel_repo,
+                               scope_paths):
+    """Compare the just-committed RHEL patch against upstream.
+
+    Uses patbatcmp -s logic: only +/- lines are compared (paths and
+    hunk headers excluded).  Returns a dict of validation results:
+      {
+        "strict_diffs": [(file, description), ...],
+        "context_drift": [(file, description), ...],
+        "spurious_deletions": [(file, lines), ...],
+      }
+    """
+    results = {
+        "strict_diffs": [],
+        "context_drift": [],
+        "spurious_deletions": [],
+    }
+
+    r = git("diff-tree --no-commit-id --name-only -r HEAD", cwd=rhel_repo,
+            check=False)
+    if r.returncode != 0:
+        return results
+    our_files = [f for f in r.stdout.strip().split("\n") if f]
+
+    in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
+    in_scope_files = [f for f in our_files if f.startswith(in_scope_prefixes)]
+
+    our_full = git("diff HEAD^..HEAD", cwd=rhel_repo, check=False)
+    if our_full.returncode != 0:
+        return results
+
+    us_full = git(f"diff {commit_hash}^..{commit_hash}", cwd=upstream_repo,
+                  check=False)
+    if us_full.returncode != 0:
+        return results
+
+    for filepath in in_scope_files:
+        our_lines = extract_strict_lines(our_full.stdout, filepath)
+        us_lines = extract_strict_lines(us_full.stdout, filepath)
+
+        if not our_lines and not us_lines:
+            continue
+
+        if sorted(our_lines) != sorted(us_lines):
+            our_set = set(our_lines)
+            us_set = set(us_lines)
+            extra_in_ours = our_set - us_set
+            blank_deletions = [l for l in extra_in_ours if l.rstrip() == "-"]
+            if blank_deletions and len(extra_in_ours) == len(blank_deletions):
+                results["spurious_deletions"].append((
+                    filepath,
+                    f"has {len(blank_deletions)} blank-line deletion(s) "
+                    f"not in upstream patch"
+                ))
+            else:
+                results["strict_diffs"].append((
+                    filepath,
+                    f"strict +/- differences from upstream"
+                ))
+        else:
+            if our_lines != us_lines:
+                results["context_drift"].append((
+                    filepath,
+                    f"same changes but different line ordering (context drift)"
+                ))
+
+    return results
+
+
+def detect_spurious_hunks(commit_hash, upstream_repo, rhel_repo, scope_paths):
+    """Detect hunks that only delete blank lines not present in upstream.
+
+    After conflict resolution (before commit), compares staged hunks against
+    the upstream commit to find spurious blank-line deletions.
+
+    Returns a list of (filepath, hunk_description) for spurious hunks found.
+    """
+    spurious = []
+
+    us_diff = git(f"diff {commit_hash}^..{commit_hash}", cwd=upstream_repo,
+                  check=False)
+    if us_diff.returncode != 0:
+        return spurious
+
+    our_diff = git("diff --cached", cwd=rhel_repo, check=False)
+    if our_diff.returncode != 0:
+        return spurious
+
+    in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
+
+    current_file = None
+    current_hunk_lines = []
+    current_hunk_header = ""
+
+    for line in our_diff.stdout.split("\n"):
+        if line.startswith("diff --git "):
+            if current_file and current_hunk_lines:
+                _check_hunk(current_file, current_hunk_header,
+                            current_hunk_lines, us_diff.stdout,
+                            in_scope_prefixes, spurious)
+            m = re.match(r"diff --git a/(\S+) b/(\S+)", line)
+            current_file = m.group(2) if m else None
+            current_hunk_lines = []
+            current_hunk_header = ""
+        elif line.startswith("@@"):
+            if current_file and current_hunk_lines:
+                _check_hunk(current_file, current_hunk_header,
+                            current_hunk_lines, us_diff.stdout,
+                            in_scope_prefixes, spurious)
+            current_hunk_header = line
+            current_hunk_lines = []
+        elif current_file:
+            if line.startswith("+") or line.startswith("-"):
+                current_hunk_lines.append(line)
+
+    if current_file and current_hunk_lines:
+        _check_hunk(current_file, current_hunk_header,
+                    current_hunk_lines, us_diff.stdout,
+                    in_scope_prefixes, spurious)
+
+    return spurious
+
+
+def _check_hunk(filepath, hunk_header, hunk_lines, upstream_diff_text,
+                in_scope_prefixes, spurious_list):
+    """Check if a hunk is spurious (blank-line-only deletion not in upstream)."""
+    if not filepath.startswith(in_scope_prefixes):
+        return
+
+    real_changes = [l for l in hunk_lines
+                    if not l.startswith("--- ") and not l.startswith("+++ ")]
+    if not real_changes:
+        return
+
+    all_blank_deletions = all(
+        l.rstrip() == "-" for l in real_changes
+    )
+    if not all_blank_deletions:
+        return
+
+    us_lines = extract_strict_lines(upstream_diff_text, filepath)
+    blank_dels_in_upstream = sum(1 for l in us_lines if l.rstrip() == "-")
+
+    if blank_dels_in_upstream == 0:
+        spurious_list.append((
+            filepath,
+            f"hunk at {hunk_header.split('@@')[1].strip() if '@@' in hunk_header else '?'}: "
+            f"{len(real_changes)} blank-line deletion(s) not in upstream"
+        ))
+
+
+def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver,
+                      commit_hash=None, upstream_repo=None):
     """Resolve conflicts in the working tree.
 
     Returns (notes, oos_count) where notes is a list of conflict note strings
@@ -705,8 +939,8 @@ def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver):
                 rc2, _, _ = run_quiet(f"git rm {cf}", cwd=rhel_repo)
                 if rc2 == 0:
                     notes.append(
-                        f"{cf}: delete/modify conflict; removed "
-                        f"(file absent on RHEL-{rhel_ver} base)"
+                        f"{cf}: absent in RHEL-{rhel_ver} base; "
+                        f"removed (delete/modify conflict)"
                     )
                 else:
                     git(f"checkout --ours -- {cf}", cwd=rhel_repo, check=False)
@@ -716,10 +950,16 @@ def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver):
                     )
             else:
                 git(f"add {cf}", cwd=rhel_repo, check=False)
-                notes.append(
-                    f"{cf}: context drift from intervening upstream changes "
-                    f"not on RHEL-{rhel_ver} base; accepted upstream version"
-                )
+                if commit_hash and upstream_repo:
+                    ctype, note = classify_file_conflict(
+                        cf, commit_hash, rhel_repo, upstream_repo,
+                    )
+                    notes.append(note)
+                else:
+                    notes.append(
+                        f"{cf}: context drift from intervening upstream "
+                        f"changes not on RHEL-{rhel_ver} base"
+                    )
 
         elif conflict_policy == "abort":
             die(f"Conflict in {cf} and --conflict-policy=abort. "
@@ -986,8 +1226,42 @@ def write_build_failure_report(output_dir, commit_hash, subject,
     return report_path
 
 
+def _consolidate_conflict_notes(notes):
+    """Group and consolidate conflict notes for gort formatting.
+
+    When there are more than 3 'new upstream file' entries, group them
+    into a single consolidated note to avoid excessively long stanzas.
+    """
+    new_file_notes = []
+    other_notes = []
+
+    for note in notes:
+        if "absent in RHEL base" in note or "created with upstream content" in note:
+            new_file_notes.append(note)
+        else:
+            other_notes.append(note)
+
+    if len(new_file_notes) > 3:
+        paths = []
+        for note in new_file_notes:
+            m = re.match(r'^(\S+?):', note)
+            if m:
+                paths.append(m.group(1))
+        consolidated = (
+            f"{len(new_file_notes)} files absent in RHEL base; "
+            f"created with upstream content: "
+            + ", ".join(paths)
+        )
+        other_notes.append(consolidated)
+    else:
+        other_notes.extend(new_file_notes)
+
+    return other_notes
+
+
 def format_gort_message(subject, commit_hash, upstream_repo,
-                        jira, upstream_version, conflict_notes):
+                        jira, upstream_version, conflict_notes,
+                        assisted_by=""):
     """Build a gort-style commit message."""
     r = git(f"log --format='%an <%ae>' -1 {commit_hash}", cwd=upstream_repo)
     author = r.stdout.strip()
@@ -1004,20 +1278,19 @@ def format_gort_message(subject, commit_hash, upstream_repo,
     lines.append(f"Upstream status: {upstream_version}")
 
     if conflict_notes:
+        consolidated = _consolidate_conflict_notes(conflict_notes)
         lines.append("")
         lines.append("Conflicts:")
-        for note in conflict_notes:
+        for note in consolidated:
             prefix = f"  - {note}"
             if len(prefix) <= 80:
                 lines.append(prefix)
             else:
-                # Try splitting after "filepath:" first
                 m = re.match(r'^(  - \S+:)\s+(.+)$', prefix)
                 if m:
                     lines.append(m.group(1))
                     rest = m.group(2)
                 else:
-                    # No filepath — split after first semicolon or wrap
                     m2 = re.match(r'^(  - [^;]+;)\s+(.+)$', prefix)
                     if m2:
                         lines.append(m2.group(1))
@@ -1044,7 +1317,8 @@ def format_gort_message(subject, commit_hash, upstream_repo,
     lines.append("")
     lines.append(indented_body)
     lines.append("")
-    lines.append("Assisted-by: Claude <no-reply@anthropic.com>")
+    if assisted_by:
+        lines.append(f"Assisted-by: {assisted_by}")
     lines.append("Signed-off-by: Tony Camuso <tcamuso@redhat.com>")
 
     return "\n".join(lines)
@@ -1053,7 +1327,8 @@ def format_gort_message(subject, commit_hash, upstream_repo,
 def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
                        conflict_policy, build_policy, toolbox_name,
                        subsystem, jira, upstream_version, rhel_ver,
-                       omit_list, output_dir, applied_count, total_count):
+                       omit_list, output_dir, applied_count, total_count,
+                       assisted_by=""):
     """Cherry-pick a single commit with conflict resolution and optional build.
     Returns (success, conflict_notes)."""
 
@@ -1070,6 +1345,7 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
     if had_conflict:
         conflict_notes, oos_conflict_count = resolve_conflicts(
             rhel_repo, scope_paths, conflict_policy, rhel_ver,
+            commit_hash=commit_hash, upstream_repo=upstream_repo,
         )
 
     removed = scope_index(rhel_repo, scope_paths)
@@ -1144,15 +1420,43 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
                       f"--rhel-repo {rhel_repo} ...")
                 return False, conflict_notes
 
+    # Check for spurious blank-line hunks before commit
+    spurious = detect_spurious_hunks(
+        commit_hash, upstream_repo, rhel_repo, scope_paths,
+    )
+    if spurious:
+        warn("  Spurious blank-line deletion(s) detected:")
+        for filepath, desc in spurious:
+            warn(f"    {filepath}: {desc}")
+
     msg = format_gort_message(
         subject, commit_hash, upstream_repo,
         jira, upstream_version, conflict_notes,
+        assisted_by=assisted_by,
     )
     msg_file = "/tmp/backport_msg.txt"
     with open(msg_file, "w") as fh:
         fh.write(msg)
 
     git(f"commit --allow-empty --file={msg_file}", cwd=rhel_repo)
+
+    # Post-commit validation against upstream
+    validation = validate_patch_vs_upstream(
+        commit_hash, upstream_repo, rhel_repo, scope_paths,
+    )
+    if validation["strict_diffs"]:
+        warn("  Post-commit validation: strict +/- differences found:")
+        for filepath, desc in validation["strict_diffs"]:
+            warn(f"    {filepath}: {desc}")
+    if validation["spurious_deletions"]:
+        warn("  Post-commit validation: spurious blank-line deletions:")
+        for filepath, desc in validation["spurious_deletions"]:
+            warn(f"    {filepath}: {desc}")
+    if validation["context_drift"]:
+        info("  Post-commit validation: context drift (acceptable):")
+        for filepath, desc in validation["context_drift"]:
+            info(f"    {filepath}: {desc}")
+
     return True, conflict_notes
 
 # ---------------------------------------------------------------------------
@@ -1279,7 +1583,11 @@ def main():
     config_map = load_enabled_configs(configs_dir)
 
     # -- Phase 2 --
-    divergence = find_divergence_point(rhel_repo, upstream_repo, scope_paths)
+    if args.divergence:
+        divergence = args.divergence
+        info(f"Using user-supplied divergence point: {divergence[:12]}")
+    else:
+        divergence = find_divergence_point(rhel_repo, upstream_repo, scope_paths)
     pending = list_pending_commits(
         upstream_repo, divergence, scope_paths, rhel_repo,
     )
@@ -1350,6 +1658,7 @@ def main():
             conflict_policy, build_policy, toolbox_name,
             args.subsystem, params["jira"], params["upstream_version"],
             args.rhel, omit, output_dir, idx, len(keep),
+            assisted_by=args.assisted_by,
         )
 
         if not ok:
