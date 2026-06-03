@@ -1,0 +1,433 @@
+#!/bin/bash
+#
+# bkr-query - Interactive Beaker system query builder
+#
+# An interactive tool for building and executing Beaker system queries.
+# Generates XML filter queries for bkr system-list command.
+#
+# Features:
+#   - Interactive menu system for building queries
+#   - Support for CPU vendor, system owner, CPU flags filtering
+#   - Key/Value pair filtering (e.g., TPM)
+#   - Device driver filtering
+#   - Status filtering (FREE, AVAILABLE, ALL)
+#   - Fuzzy matching (case-insensitive contains)
+#   - Comma-separated list input for flags and key/values
+#
+# Usage:
+#   bkr-query              # Interactive mode
+#   bkr-query -h           # Show help
+#   bkr-query --help       # Show help
+#
+
+#######################################
+# Script-Level Variables
+#######################################
+
+declare MYDIR=
+MYDIR="$(dirname "$(readlink -f "$0")")"
+
+declare MYLIB=
+MYLIB="$MYDIR"/lib
+
+# Source ui library if available, otherwise define minimal colors
+if [[ -f "$MYLIB/ui.source" ]]; then
+	source "$MYLIB/ui.source"
+else
+	# Minimal color definitions
+	declare BLD="\e[1m"
+	declare OFF="\e[m"
+	declare MNU="\e[1;96m"
+	declare INF="\e[0;96m"
+	declare WRN="\e[0;93m"
+	declare CAU="\e[1;91m"
+	declare STA="\e[0;92m"
+fi
+
+# Query components
+declare cpu_vendor=""
+declare system_owner=""
+declare -a cpu_flags=()
+declare -a key_values=()
+declare -a device_drivers=()
+declare status_filter="free"  # free, available, all
+
+# Generated query
+declare xml_query=""
+declare -a bkr_args=()
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-h|--help]
+
+Interactive Beaker system query builder.
+
+Generates and executes bkr system-list queries with XML filters.
+
+Options:
+  -h, --help     Show this help message
+  help           Show this help message
+
+Menu Options:
+  v - Set CPU Vendor (e.g., intel, amd)
+  o - Set System Owner (e.g., kernel)
+  f - Set CPU Flags (comma-separated, e.g., shstk,ibt,smx)
+  k - Set Key/Values (comma-separated, e.g., TPM,SECUREBOOT)
+  d - Set Device Drivers (comma-separated, e.g., tpm,mei)
+  s - Set Status filter (FREE, AUTOMATED, ALL)
+  c - Clear all filters
+  b - Build and show query
+  r - Run query
+  q - Quit
+
+Fuzzy matching (case-insensitive contains) is used for vendor, owner,
+and device driver inputs.  CPU flags use exact match.
+
+Examples:
+  CPU Vendor: intel        -> matches "GenuineIntel"
+  CPU Flags: shstk,ibt,smx -> requires all three flags (exact match)
+  Device: tpm              -> matches "tpm_tis", "tpm_crb", etc.
+
+EOF
+)"
+
+#######################################
+# Functions
+#######################################
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected. Exiting."
+	exitme 0
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	exit "$code"
+}
+
+#** show_current_filters: display currently set filters
+#*
+show_current_filters() {
+	echo -e "\n${MNU}   Current Query Filters${OFF}\n"
+	echo -e "   ${INF}v${OFF}  CPU Vendor    : ${STA}${cpu_vendor:-<not set>}${OFF}"
+	echo -e "   ${INF}o${OFF}  System Owner  : ${STA}${system_owner:-<not set>}${OFF}"
+	echo -e "   ${INF}f${OFF}  CPU Flags     : ${STA}${cpu_flags[*]:-<not set>}${OFF}"
+	echo -e "   ${INF}k${OFF}  Key/Values    : ${STA}${key_values[*]:-<not set>}${OFF}"
+	echo -e "   ${INF}d${OFF}  Device Drivers: ${STA}${device_drivers[*]:-<not set>}${OFF}"
+	echo -e "   ${INF}s${OFF}  Status Filter : ${STA}${status_filter}${OFF}"
+	echo ""
+}
+
+#** show_menu: display the main menu
+#*
+show_menu() {
+	show_current_filters
+
+	echo -e "${MNU}   Actions${OFF}\n"
+	echo -e "   ${INF}c${OFF}  Clear all filters"
+	echo -e "   ${INF}b${OFF}  Build and show query"
+	echo -e "   ${INF}r${OFF}  Run query"
+	echo -e "   ${INF}h${OFF}  Help"
+	echo -e "   ${INF}q${OFF}  Quit"
+	echo ""
+}
+
+#** prompt_input: prompt user for input
+#*
+# Arguments
+#   $1 - prompt text
+#   $2 - variable name to store result
+#*
+prompt_input() {
+	local prompt="$1"
+	local -n result_var="$2"
+
+	echo -en "${INF}${prompt}: ${OFF}"
+	read -r result_var
+}
+
+#** parse_csv_input: parse comma-separated input into array
+#*
+# Arguments
+#   $1 - input string
+#   $2 - array name to store results
+#*
+parse_csv_input() {
+	local input="$1"
+	local -n arr="$2"
+
+	arr=()
+	IFS=',' read -ra arr <<< "$input"
+
+	# Trim whitespace from each element
+	local -i i
+	for i in "${!arr[@]}"; do
+		arr[$i]="${arr[$i]## }"
+		arr[$i]="${arr[$i]%% }"
+	done
+}
+
+#** set_cpu_vendor: prompt and set CPU vendor filter
+#*
+set_cpu_vendor() {
+	local input=""
+	prompt_input "Enter CPU Vendor (e.g., intel, amd)" input
+	cpu_vendor="$input"
+}
+
+#** set_system_owner: prompt and set system owner filter
+#*
+set_system_owner() {
+	local input=""
+	prompt_input "Enter System Owner (e.g., kernel)" input
+	system_owner="$input"
+}
+
+#** set_cpu_flags: prompt and set CPU flags filter
+#*
+set_cpu_flags() {
+	local input=""
+	echo -e "${INF}Enter CPU Flags (comma-separated)${OFF}"
+	echo -e "${WRN}Examples: shstk,ibt,smx${OFF}"
+	prompt_input "CPU Flags" input
+	parse_csv_input "$input" cpu_flags
+}
+
+#** set_key_values: prompt and set key/value filters
+#*
+# Note: Key names are uppercased automatically since Beaker uses uppercase keys
+#*
+set_key_values() {
+	local input=""
+	local -i i
+	echo -e "${INF}Enter Key/Values to search (comma-separated)${OFF}"
+	echo -e "${WRN}Examples: TPM,SECUREBOOT (case insensitive)${OFF}"
+	prompt_input "Key/Values" input
+	parse_csv_input "$input" key_values
+	# Uppercase all key names for Beaker compatibility
+	for i in "${!key_values[@]}"; do
+		key_values[$i]="${key_values[$i]^^}"
+	done
+}
+
+#** set_device_drivers: prompt and set device driver filters
+#*
+set_device_drivers() {
+	local input=""
+	echo -e "${INF}Enter Device Drivers (comma-separated)${OFF}"
+	echo -e "${WRN}Examples: tpm,mei,ipmi${OFF}"
+	prompt_input "Device Drivers" input
+	parse_csv_input "$input" device_drivers
+}
+
+#** set_status_filter: prompt and set status filter
+#*
+set_status_filter() {
+	echo -e "\n${MNU}   Status Filter Options${OFF}\n"
+	echo -e "   ${INF}1${OFF}  FREE      - Only show free/available systems"
+	echo -e "   ${INF}2${OFF}  AUTOMATED - Only show automated systems"
+	echo -e "   ${INF}3${OFF}  ALL       - Show all systems"
+	echo ""
+
+	local choice=""
+	prompt_input "Select status filter [1-3]" choice
+
+	case "$choice" in
+		1) status_filter="free" ;;
+		2) status_filter="automated" ;;
+		3) status_filter="all" ;;
+		*) echo -e "${WRN}Invalid choice, keeping current: ${status_filter}${OFF}" ;;
+	esac
+}
+
+#** clear_filters: reset all filters to defaults
+#*
+clear_filters() {
+	cpu_vendor=""
+	system_owner=""
+	cpu_flags=()
+	key_values=()
+	device_drivers=()
+	status_filter="free"
+	echo -e "${STA}All filters cleared.${OFF}"
+}
+
+#** build_query: construct the XML filter query
+#*
+build_query() {
+	local -a filters=()
+	local flag
+	local kv
+	local driver
+
+	# CPU Vendor
+	if [[ -n "$cpu_vendor" ]]; then
+		filters+=("<cpu><vendor op=\"like\" value=\"%${cpu_vendor}%\"/></cpu>")
+	fi
+
+	# System Owner
+	if [[ -n "$system_owner" ]]; then
+		filters+=("<system><owner op=\"like\" value=\"%${system_owner}%\"/></system>")
+	fi
+
+	# CPU Flags
+	for flag in "${cpu_flags[@]}"; do
+		[[ -n "$flag" ]] && filters+=("<cpu><flag op=\"=\" value=\"${flag}\"/></cpu>")
+	done
+
+	# Key/Values - use "like %" to match keys that exist with any value
+	for kv in "${key_values[@]}"; do
+		[[ -n "$kv" ]] && filters+=("<key_value key=\"${kv}\" op=\"like\" value=\"%\"/>")
+	done
+
+	# Device Drivers
+	for driver in "${device_drivers[@]}"; do
+		[[ -n "$driver" ]] && filters+=("<device><driver op=\"like\" value=\"%${driver}%\"/></device>")
+	done
+
+	# Status filter (add to filters before assembling XML)
+	if [[ "$status_filter" == "automated" ]]; then
+		filters+=("<system><status op=\"=\" value=\"Automated\"/></system>")
+	fi
+
+	# Build bkr arguments
+	bkr_args=("system-list")
+
+	case "$status_filter" in
+		free) bkr_args+=("--free") ;;
+		automated|all) : ;;
+	esac
+
+	# Build the XML query
+	if [[ ${#filters[@]} -eq 0 ]]; then
+		xml_query=""
+		return
+	fi
+
+	if [[ ${#filters[@]} -eq 1 ]]; then
+		xml_query="${filters[0]}"
+	else
+		xml_query="<and>"
+		for f in "${filters[@]}"; do
+			xml_query+="$f"
+		done
+		xml_query+="</and>"
+	fi
+
+	bkr_args+=("--xml-filter=$xml_query")
+}
+
+#** show_query: display the built query
+#*
+show_query() {
+	build_query
+
+	echo -e "\n${MNU}Generated Query:${OFF}\n"
+
+	if [[ -z "$xml_query" ]]; then
+		echo -e "${WRN}No filters set. Query will return all systems.${OFF}"
+	else
+		echo -e "${INF}XML Filter:${OFF}"
+		echo -e "${STA}$xml_query${OFF}"
+	fi
+
+	echo -e "\n${INF}Full Command:${OFF}"
+	echo -e "${STA}bkr ${bkr_args[*]}${OFF}\n"
+}
+
+#** run_query: execute the beaker query
+#*
+run_query() {
+	build_query
+
+	echo -e "\n${MNU}Executing Query...${OFF}\n"
+	echo -e "${INF}bkr ${bkr_args[*]}${OFF}\n"
+
+	if ! command -v bkr &>/dev/null; then
+		echo -e "${CAU}Error: bkr command not found. Is beaker-client installed?${OFF}"
+		return 1
+	fi
+
+	bkr "${bkr_args[@]}"
+}
+
+#** menu_parser: main menu loop
+#*
+menu_parser() {
+	local opt=""
+
+	while true; do
+		show_menu
+		echo -en "${MNU}   Enter option: ${OFF}"
+		read -r opt
+
+		case "$opt" in
+			v|V) set_cpu_vendor ;;
+			o|O) set_system_owner ;;
+			f|F) set_cpu_flags ;;
+			k|K) set_key_values ;;
+			d|D) set_device_drivers ;;
+			s|S) set_status_filter ;;
+			c|C) clear_filters ;;
+			b|B) show_query ;;
+			r|R) run_query ;;
+			h|H) usage ;;
+			q|Q) return 0 ;;
+			*)
+				echo -e "${WRN}Invalid option: $opt${OFF}"
+				;;
+		esac
+	done
+}
+
+#** main: main entry point
+#*
+main() {
+	trap control_c SIGINT
+
+	# Parse command line arguments
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			*)
+				echo -e "${CAU}Unknown option: $1${OFF}"
+				usage
+				exit 1
+				;;
+		esac
+		shift
+	done
+
+	# Check for bkr command
+	if ! command -v bkr &>/dev/null; then
+		echo -e "${WRN}Warning: bkr command not found. Install beaker-client to run queries.${OFF}"
+	fi
+
+	# Run interactive menu
+	menu_parser
+
+	echo -e "${STA}Goodbye.${OFF}"
+	exit 0
+}
+
+main "$@"
