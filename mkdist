@@ -162,6 +162,21 @@ ${flavor_opts} \
 --without cross_headers \
 -bb\""
 
+	# Validate any existing source tarball before building
+	local tarball
+	for tarball in redhat/rpm/SOURCES/linux-*.tar.xz; do
+		if [[ -f "$tarball" ]]; then
+			if ! xz -t "$tarball" 2>/dev/null; then
+				echo "WARNING: Corrupt tarball detected: $tarball"
+				echo "  Removing to force regeneration ..."
+				rm -f "$tarball"
+				# Also remove the hardlink in redhat/ if present
+				local base_tarball="redhat/$(basename "$tarball")"
+				[[ -f "$base_tarball" ]] && rm -f "$base_tarball"
+			fi
+		fi
+	done
+
 	mkstart=$(date +%s)
 
 	if $use_toolbox; then
