@@ -1,0 +1,194 @@
+#!/bin/bash
+#
+# pkglocal - Local RPM build mimicking 'centpkg local' / 'rhpkg local'.
+#
+# Must be run from a directory containing a .spec file and a 'sources'
+# file (i.e. a dist-git checkout).  Outputs source RPMs in the current
+# directory and binary RPMs under ./<arch>/, matching centpkg local
+# behavior.
+#
+# When run on the host, auto-detects a suitable toolbox (by .el<N> in
+# the spec Release tag) so the build uses the target distro's macros
+# and toolchain.
+#
+
+set -euo pipefail
+
+usage() {
+cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Local RPM build from a dist-git checkout (replaces centpkg/rhpkg local).
+
+Must be run from a directory containing a .spec file.
+
+OPTIONS
+    -t NAME   Toolbox container name (overrides auto-detect)
+    -n        No toolbox -- build directly on the host
+    -h        Show this help
+
+ENVIRONMENT
+    TOOLBOX   Same as -t (command-line flag takes precedence)
+
+EOF
+}
+
+find_spec() {
+	local specs
+	specs=(*.spec)
+	if [[ ${#specs[@]} -eq 0 || ! -f "${specs[0]}" ]]; then
+		echo "Error: no .spec file found in $(pwd)" >&2
+		return 1
+	fi
+	if [[ ${#specs[@]} -gt 1 ]]; then
+		echo "Error: multiple .spec files found: ${specs[*]}" >&2
+		return 1
+	fi
+	echo "${specs[0]}"
+}
+
+detect_el_version() {
+	local spec="$1"
+
+	# Try the Release tag for a literal .el<N>
+	local rel
+	rel=$(grep -m1 '^Release:' "$spec" 2>/dev/null || true)
+	if [[ "$rel" =~ \.el([0-9]+) ]]; then
+		echo "${BASH_REMATCH[1]}"
+		return
+	fi
+
+	# Try the sources file for .el<N> in tarball names
+	if [[ -f sources ]]; then
+		local src
+		src=$(cat sources)
+		if [[ "$src" =~ \.el([0-9]+) ]]; then
+			echo "${BASH_REMATCH[1]}"
+			return
+		fi
+	fi
+
+	# Fall back to git branch name (c9s, c10s, rhel-9-main, etc.)
+	local branch
+	branch=$(git branch --show-current 2>/dev/null || true)
+	if [[ "$branch" =~ c([0-9]+)s ]]; then
+		echo "${BASH_REMATCH[1]}"
+		return
+	elif [[ "$branch" =~ rhel-([0-9]+) ]]; then
+		echo "${BASH_REMATCH[1]}"
+		return
+	fi
+}
+
+detect_toolbox() {
+	local el_ver="$1"
+	local -a candidates
+	case "$el_ver" in
+		9)  candidates=(c9s rhel9) ;;
+		10) candidates=(c10s rhel10) ;;
+		*)  candidates=("c${el_ver}s" "rhel${el_ver}") ;;
+	esac
+
+	local name
+	for name in "${candidates[@]}"; do
+		if toolbox list -c 2>/dev/null | grep -qw "$name"; then
+			echo "$name"
+			return 0
+		fi
+	done
+	return 1
+}
+
+main() {
+	local use_toolbox=true
+	local toolbox_name="${TOOLBOX:-}"
+
+	while getopts "t:nh" opt; do
+		case "$opt" in
+			t) toolbox_name="$OPTARG" ;;
+			n) use_toolbox=false ;;
+			h) usage; exit 0 ;;
+			*) usage; exit 1 ;;
+		esac
+	done
+
+	local spec
+	spec=$(find_spec) || exit 1
+
+	if $use_toolbox && [[ -z "$toolbox_name" ]]; then
+		local el_ver
+		el_ver=$(detect_el_version "$spec")
+		if [[ -n "$el_ver" ]]; then
+			toolbox_name=$(detect_toolbox "$el_ver") || {
+				echo "Warning: no toolbox found for el${el_ver}, building on host." >&2
+				use_toolbox=false
+			}
+		else
+			echo "Warning: cannot determine el version from $spec, building on host." >&2
+			use_toolbox=false
+		fi
+	fi
+
+	if $use_toolbox && [[ -n "$toolbox_name" ]]; then
+		if ! toolbox list -c 2>/dev/null | grep -qw "$toolbox_name"; then
+			echo "Error: toolbox container '$toolbox_name' not found." >&2
+			exit 1
+		fi
+	fi
+
+	local here
+	here="$(pwd)"
+
+	local build_cmd="rpmbuild \
+--define \"_sourcedir ${here}\" \
+--define \"_builddir ${here}\" \
+--define \"_srcrpmdir ${here}\" \
+--define \"_rpmdir ${here}\" \
+--define \"_buildrootdir ${here}\" \
+--define \"debug_package %{nil}\" \
+-ba ${here}/${spec}"
+
+	local start elapsed mins secs rc=0
+
+	start=$(date +%s)
+
+	if $use_toolbox; then
+		echo "Building $spec in toolbox: $toolbox_name"
+		echo ""
+		local tb_here="/run/host${here}"
+		local tb_cmd="rpmbuild \
+--define \"_sourcedir ${tb_here}\" \
+--define \"_builddir ${tb_here}\" \
+--define \"_srcrpmdir ${tb_here}\" \
+--define \"_rpmdir ${tb_here}\" \
+--define \"_buildrootdir ${tb_here}\" \
+--define \"debug_package %{nil}\" \
+-ba ${tb_here}/${spec}"
+
+		cd "$HOME"
+		toolbox run -c "$toolbox_name" bash -c "$tb_cmd" || rc=$?
+	else
+		echo "Building $spec on host"
+		echo ""
+		eval "$build_cmd" || rc=$?
+	fi
+
+	elapsed=$(( $(date +%s) - start ))
+	mins=$(( elapsed / 60 ))
+	secs=$(( elapsed % 60 ))
+
+	echo ""
+	echo "Elapsed time: ${mins}m ${secs}s"
+
+	if (( rc == 0 )); then
+		echo ""
+		echo "RPMs:"
+		ls -1 "${here}"/*.src.rpm "${here}"/*//*.rpm 2>/dev/null
+	else
+		echo "Build FAILED (exit code $rc)"
+	fi
+
+	exit $rc
+}
+
+main "$@"
