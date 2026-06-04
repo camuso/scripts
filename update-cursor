@@ -1,0 +1,4 @@
+#!/bin/bash
+# Update Cursor IDE on Fedora via the official yum repo
+
+sudo dnf update -y cursor
