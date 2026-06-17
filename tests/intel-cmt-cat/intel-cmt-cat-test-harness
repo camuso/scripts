@@ -1,0 +1,116 @@
+#!/bin/bash
+set -euo pipefail
+
+LOGDIR="rdt_logs"
+mkdir -p "$LOGDIR"
+
+COS_MASKS=("0x0f" "0xf0" "0x33" "0xcc")
+
+SUMMARY_FILE="summary.csv"
+CSV_FILE=""
+RUN_SUMMARY=false
+WORKLOAD=""
+CORES="0"
+
+print_help() {
+    echo "Usage: $0 [--workload=TYPE] [--csv=FILE] [--summary]"
+    echo "  --workload: cyclictest | stress-ng | fio | iperf3"
+    echo "  --csv: CSV file with workload,cores,mask"
+    echo "  --summary: Generate summary after tests"
+}
+
+parse_args() {
+    for arg in "$@"; do
+        case $arg in
+            --workload=*)
+                WORKLOAD="${arg#*=}"
+                shift
+                ;;
+            --csv=*)
+                CSV_FILE="${arg#*=}"
+                shift
+                ;;
+            --summary)
+                RUN_SUMMARY=true
+                shift
+                ;;
+            *)
+                print_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+run_test() {
+    local wl="$1"
+    local core="$2"
+    local mask="$3"
+    local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
+
+    echo "Running $wl on core $core with COS mask $mask"
+
+    pqos -e "llc:1=${mask}" -a "llc:1=${core}"
+
+    case "$wl" in
+        cyclictest)
+            taskset -c $core cyclictest -p 99 -l 50000 > "$log"
+            ;;
+        stress-ng)
+            taskset -c $core stress-ng --cpu 1 --timeout 15s > "$log"
+            ;;
+        fio)
+            taskset -c $core fio --name=test --rw=randwrite --size=50M --runtime=15s > "$log"
+            ;;
+        iperf3)
+            iperf3 -c localhost -t 15 > "$log"
+            ;;
+    esac
+
+    if $RUN_SUMMARY; then
+        extract_metrics "$wl" "$log" "$core" "$mask"
+    fi
+}
+
+extract_metrics() {
+    local wl="$1"
+    local log="$2"
+    local core="$3"
+    local mask="$4"
+    local result=""
+
+    case "$wl" in
+        cyclictest)
+            result=$(grep "Min:" "$log" | awk '{print $2}')
+            ;;
+        fio)
+            result=$(grep "IOPS=" "$log" | awk -F'=' '{print $2}' | cut -d',' -f1)
+            ;;
+        iperf3)
+            result=$(grep "sender" "$log" | tail -1 | awk '{print $7 $8}')
+            ;;
+        stress-ng)
+            result=$(grep "successful run" "$log")
+            ;;
+    esac
+
+    echo "$wl,$core,$mask,$result" >> "$SUMMARY_FILE"
+}
+
+main_loop() {
+    if [[ -n "$CSV_FILE" ]]; then
+        while IFS=',' read -r wl core mask; do
+            run_test "$wl" "$core" "$mask"
+        done < "$CSV_FILE"
+    else
+        for mask in "${COS_MASKS[@]}"; do
+            run_test "$WORKLOAD" "$CORES" "$mask"
+        done
+    fi
+
+    pqos -R
+}
+
+parse_args "$@"
+main_loop
+
