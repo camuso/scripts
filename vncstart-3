@@ -1,0 +1,4 @@
+#vncserver -geometry 1800x1160 :2
+# vncserver -geometry 1900x1060 :3
+vncserver -geometry 1920x1080 :3
+
