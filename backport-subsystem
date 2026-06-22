@@ -119,6 +119,8 @@ def parse_args():
                     help="Resume from saved state")
     p.add_argument("--yes", action="store_true",
                     help="Skip interactive confirmation menu")
+    p.add_argument("-s", "--signed-off-by", required=True,
+                    help="Signed-off-by trailer (e.g. 'Name <email>')")
     p.add_argument("--assisted-by", default="",
                     help="Assisted-by trailer (e.g. 'Claude <no-reply@anthropic.com>')")
     p.add_argument("--divergence", default=None,
@@ -1263,7 +1265,7 @@ def _consolidate_conflict_notes(notes):
 
 def format_gort_message(subject, commit_hash, upstream_repo,
                         jira, upstream_version, conflict_notes,
-                        assisted_by=""):
+                        signed_off_by, assisted_by=""):
     """Build a gort-style commit message."""
     r = git(f"log --format='%an <%ae>' -1 {commit_hash}", cwd=upstream_repo)
     author = r.stdout.strip()
@@ -1321,7 +1323,7 @@ def format_gort_message(subject, commit_hash, upstream_repo,
     lines.append("")
     if assisted_by:
         lines.append(f"Assisted-by: {assisted_by}")
-    lines.append("Signed-off-by: Tony Camuso <tcamuso@redhat.com>")
+    lines.append(f"Signed-off-by: {signed_off_by}")
 
     return "\n".join(lines)
 
@@ -1330,7 +1332,7 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
                        conflict_policy, build_policy, toolbox_name,
                        subsystem, jira, upstream_version, rhel_ver,
                        omit_list, output_dir, applied_count, total_count,
-                       assisted_by=""):
+                       signed_off_by, assisted_by=""):
     """Cherry-pick a single commit with conflict resolution and optional build.
     Returns (success, conflict_notes)."""
 
@@ -1434,7 +1436,7 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
     msg = format_gort_message(
         subject, commit_hash, upstream_repo,
         jira, upstream_version, conflict_notes,
-        assisted_by=assisted_by,
+        signed_off_by, assisted_by=assisted_by,
     )
     msg_file = "/tmp/backport_msg.txt"
     with open(msg_file, "w") as fh:
@@ -1660,6 +1662,7 @@ def main():
             conflict_policy, build_policy, toolbox_name,
             args.subsystem, params["jira"], params["upstream_version"],
             args.rhel, omit, output_dir, idx, len(keep),
+            signed_off_by=args.signed_off_by,
             assisted_by=args.assisted_by,
         )
 
