@@ -124,6 +124,8 @@ def parse_args():
     p.add_argument("--divergence", default=None,
                     help="Upstream commit hash to use as divergence point "
                          "(skips auto-detection)")
+    p.add_argument("--toolbox", default=None,
+                    help="Toolbox container name (default: rhel<RHEL>)")
     return p.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -1548,7 +1550,7 @@ def main():
         os.path.dirname(rhel_repo), "backport",
         os.path.basename(args.subsystem.rstrip("/")),
     )
-    toolbox_name = f"rhel{args.rhel}"
+    toolbox_name = args.toolbox or f"rhel{args.rhel}"
 
     scope_paths = discover_scope_paths(
         args.subsystem, upstream_repo, args.extra_paths,
