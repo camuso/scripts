@@ -1,0 +1,189 @@
+#!/bin/bash
+
+declare script_name="$(basename "$0")"
+declare rhel_commit=""
+declare upstream_remote="upstream"
+declare -i stat_only=0
+
+declare usagestr="$(
+cat <<EOF
+$script_name [-h|--help|help] [-r <remote>] [-s|--stat] <rhel-commit>
+
+Extract the upstream commit referenced in a RHEL backport commit
+and vimdiff the two patches.
+
+The script searches the RHEL commit message for the upstream hash
+using these patterns (in priority order):
+  1. 'commit <hash>' on its own line (gort format)
+  2. 'commit <hash> upstream'
+  3. '(cherry picked from commit <hash>)'
+
+Arguments:
+  rhel-commit            RHEL commit hash (or any git rev)
+
+Options:
+  -r, --remote <name>    Name of the upstream remote (default: upstream)
+  -s, --stat             Show diffstat comparison instead of vimdiff
+  -h, --help             Show this help message
+
+Examples:
+  $script_name abc1234
+  $script_name -r linus abc1234
+  $script_name --stat abc1234
+
+EOF
+)"
+
+#===========================
+#** usage: print usage text
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#===========================
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#===========================
+#** control_c: handle Ctrl-C
+#*
+control_c() {
+	echo -e "\nCtrl-c detected. Exiting."
+	exitme 1
+}
+
+#===========================
+#** extract_upstream_hash: find upstream commit hash in RHEL commit message
+#*
+# Arguments
+#   $1 - RHEL commit hash
+# Returns (stdout)
+#   upstream commit hash, or empty string if not found
+#*
+extract_upstream_hash() {
+	local rhel="$1"
+	local msg
+	local hash
+
+	msg="$(git log -1 --format='%B' "$rhel")" || return 1
+
+	# Pattern 1: 'commit <hash>' on its own line (gort format)
+	hash=$(echo "$msg" | grep -oP '^\s*commit\s+\K[0-9a-f]{40}(?=\s*$)' | head -1)
+	[[ -n "$hash" ]] && { echo "$hash"; return 0; }
+
+	# Pattern 2: 'commit <hash> upstream'
+	hash=$(echo "$msg" | grep -oP 'commit\s+\K[0-9a-f]{40}(?=\s+upstream)' | head -1)
+	[[ -n "$hash" ]] && { echo "$hash"; return 0; }
+
+	# Pattern 3: '(cherry picked from commit <hash>)'
+	hash=$(echo "$msg" | grep -oP 'cherry picked from commit\s+\K[0-9a-f]{40}' | head -1)
+	[[ -n "$hash" ]] && { echo "$hash"; return 0; }
+
+	return 1
+}
+
+#===========================
+#** show_diff: display the two commits side by side in vimdiff
+#*
+# Arguments
+#   $1 - RHEL commit hash
+#   $2 - upstream commit hash
+#*
+show_diff() {
+	local rhel="$1"
+	local upstream="$2"
+	local rhel_patch
+	local upstream_patch
+
+	rhel_patch=$(mktemp /tmp/rhel-XXXXXX.patch)
+	upstream_patch=$(mktemp /tmp/upstream-XXXXXX.patch)
+
+	git show "$rhel" > "$rhel_patch" 2>/dev/null \
+		|| exitme 1 "Failed to generate patch for RHEL commit: $rhel"
+	git show "$upstream" > "$upstream_patch" 2>/dev/null \
+		|| exitme 1 "Failed to generate patch for upstream commit: $upstream"
+
+	if ((stat_only)); then
+		echo "=== RHEL commit: $rhel ==="
+		git show --stat "$rhel"
+		echo ""
+		echo "=== Upstream commit: $upstream ==="
+		git show --stat "$upstream"
+	else
+		vimdiff "$rhel_patch" "$upstream_patch"
+	fi
+
+	rm -f "$rhel_patch" "$upstream_patch"
+}
+
+#===========================
+#** main: main program logic
+#*
+main() {
+	trap control_c SIGINT
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-r|--remote)
+				shift
+				upstream_remote="$1"
+				;;
+			-s|--stat)
+				stat_only=1
+				;;
+			*)
+				if [[ -z "$rhel_commit" ]]; then
+					rhel_commit="$1"
+				else
+					exitme 1 "Unexpected argument: $1"
+				fi
+				;;
+		esac
+		shift
+	done
+
+	[[ -z "$rhel_commit" ]] && exitme 1 "Missing RHEL commit hash."
+
+	git rev-parse --verify "$rhel_commit" >/dev/null 2>&1 \
+		|| exitme 1 "Invalid git revision: $rhel_commit"
+
+	local rhel_full
+	rhel_full=$(git rev-parse "$rhel_commit")
+
+	local upstream_hash
+	upstream_hash=$(extract_upstream_hash "$rhel_full") \
+		|| exitme 1 "No upstream commit reference found in:\n$(git log -1 --format='%s' "$rhel_full")"
+
+	git rev-parse --verify "$upstream_hash" >/dev/null 2>&1 || {
+		echo "Upstream commit $upstream_hash not found locally." >&2
+		echo "Attempting: git fetch $upstream_remote $upstream_hash" >&2
+		git fetch "$upstream_remote" "$upstream_hash" 2>/dev/null \
+			|| exitme 1 "Could not fetch upstream commit $upstream_hash from remote '$upstream_remote'.\nEnsure the upstream remote is configured and the commit exists."
+	}
+
+	echo "RHEL commit:     $rhel_full"
+	echo "Upstream commit: $upstream_hash"
+	echo ""
+
+	show_diff "$rhel_full" "$upstream_hash"
+}
+
+main "$@"
