@@ -1409,6 +1409,18 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
     )
     had_conflict = rc != 0
 
+    if had_conflict:
+        r_unmerged = git("diff --name-only --diff-filter=U",
+                         cwd=rhel_repo, check=False)
+        r_staged = git("diff --cached --name-only",
+                       cwd=rhel_repo, check=False)
+        if not r_unmerged.stdout.strip() and not r_staged.stdout.strip():
+            warn(f"  Cherry-pick produced no changes: {err.strip()}")
+            die(f"Cherry-pick of {commit_hash[:12]} failed with no "
+                f"staged changes.\n"
+                "       The commit object may not be reachable from "
+                "the RHEL repo.")
+
     conflict_notes = []
     oos_conflict_count = 0
     if had_conflict:
@@ -1642,6 +1654,15 @@ def main():
         info(f"Commit: {verify.stdout.strip()}")
         info(f"Scope:  {', '.join(scope_paths)}")
 
+        # Make upstream objects visible so cherry-pick can access them
+        upstream_git = git("rev-parse --git-dir",
+                           cwd=upstream_repo).stdout.strip()
+        if not os.path.isabs(upstream_git):
+            upstream_git = os.path.join(upstream_repo, upstream_git)
+        upstream_objects = os.path.join(upstream_git, "objects")
+        old_alt = os.environ.get("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        os.environ["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = upstream_objects
+
         ok, notes = cherry_pick_commit(
             pick_hash, upstream_repo, rhel_repo, scope_paths,
             args.conflict_policy, args.build_policy, toolbox_name,
@@ -1650,6 +1671,13 @@ def main():
             signed_off_by=args.signed_off_by,
             assisted_by=args.assisted_by,
         )
+
+        # Restore environment
+        if old_alt is not None:
+            os.environ["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = old_alt
+        else:
+            os.environ.pop("GIT_ALTERNATE_OBJECT_DIRECTORIES", None)
+
         if ok:
             if notes:
                 status("Pick complete (with conflicts resolved).")
