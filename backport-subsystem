@@ -459,14 +459,19 @@ def list_pending_commits(upstream_repo, divergence, scope_paths, rhel_repo):
     if not all_hashes:
         return []
 
-    # Collect hashes already referenced in RHEL
-    r2 = git("log --format='%B' --no-merges -500", cwd=rhel_repo, check=False)
-    body = r2.stdout if r2.returncode == 0 else ""
+    # Collect upstream hashes already referenced in RHEL commit messages.
+    # Use --grep to pre-filter so this is fast even on large repos.
     already = set()
-    for m in re.finditer(r"commit\s+([0-9a-f]{40})", body):
-        already.add(m.group(1))
-    for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", body):
-        already.add(m.group(1))
+    for grep_pat in ["commit [0-9a-f]", "cherry picked from commit"]:
+        r2 = git(f"log --format='%B' --no-merges --extended-regexp "
+                 f"--grep='{grep_pat}'",
+                 cwd=rhel_repo, check=False)
+        if r2.returncode != 0:
+            continue
+        for m in re.finditer(r"commit\s+([0-9a-f]{40})", r2.stdout):
+            already.add(m.group(1))
+        for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", r2.stdout):
+            already.add(m.group(1))
 
     pending = [h for h in all_hashes if h not in already]
     info(f"After filtering already-downstream: {len(pending)} pending commits")
