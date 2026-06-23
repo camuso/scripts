@@ -1635,13 +1635,15 @@ def main():
                      cwd=upstream_repo, check=False)
         if verify.returncode != 0:
             die(f"Commit {args.pick} not found in upstream repo.")
+        pick_hash = git(f"rev-parse {args.pick}",
+                        cwd=upstream_repo).stdout.strip()
 
         header("Single commit pick")
         info(f"Commit: {verify.stdout.strip()}")
         info(f"Scope:  {', '.join(scope_paths)}")
 
         ok, notes = cherry_pick_commit(
-            args.pick, upstream_repo, rhel_repo, scope_paths,
+            pick_hash, upstream_repo, rhel_repo, scope_paths,
             args.conflict_policy, args.build_policy, toolbox_name,
             args.subsystem, args.jira, args.upstream_version,
             args.rhel, [], output_dir, 0, 1,
