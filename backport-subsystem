@@ -88,6 +88,26 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Automated RHEL kernel subsystem backport",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            examples:
+              # Full subsystem backport with auto-discovered scope paths:
+              backport-subsystem --subsystem drivers/char/ipmi --rhel 9 \\
+                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
+                --upstream-version v6.15-rc3 -s "Name <email>"
+
+              # Catch up Documentation only (no auto-discovery):
+              backport-subsystem --subsystem drivers/char/ipmi --rhel 9 \\
+                --only Documentation/devicetree/bindings/ipmi \\
+                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
+                --upstream-version v6.15-rc3 -s "Name <email>"
+
+              # Multiple explicit paths, no auto-discovery:
+              backport-subsystem --subsystem drivers/char/ipmi --rhel 9 \\
+                --only Documentation/devicetree/bindings/ipmi \\
+                      Documentation/ipmi \\
+                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
+                --upstream-version v6.15-rc3 -s "Name <email>"
+        """),
     )
     p.add_argument("--subsystem", required=True,
                     help="Subsystem path, e.g. drivers/input")
@@ -103,6 +123,9 @@ def parse_args():
                     help="JIRA URL (default: RHEL-PLACEHOLDER)")
     p.add_argument("--extra-paths", nargs="*", default=[],
                     help="Additional scope paths beyond auto-discovered ones")
+    p.add_argument("--only", nargs="+", default=None, dest="only_paths",
+                    help="Use only these scope paths, skip auto-discovery "
+                         "(e.g. --only Documentation/devicetree/bindings/ipmi)")
     p.add_argument("--branch", default=None,
                     help="Branch name (default: leaf of subsystem path)")
     p.add_argument("--output-dir", default=None,
@@ -301,8 +324,13 @@ def load_enabled_configs(configs_dir):
 # ---------------------------------------------------------------------------
 
 def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
-    """Scan RHEL commit bodies for upstream commit references to find the
-    most recent upstream commit already incorporated.
+    """Scan RHEL commit bodies per scope path for upstream commit references,
+    then select the earliest divergence point so no path's pending commits
+    are missed.
+
+    Each scope path gets its own 200-commit scan window, preventing a
+    heavily-committed path from pushing a lightly-committed path out of
+    the search.
 
     Recognizes these formats in commit messages:
       - 'commit <40-hex>' on its own line (gort format)
@@ -312,41 +340,69 @@ def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
     header("Phase 2: Finding divergence point")
     info("Scanning RHEL main for upstream commit references ...")
 
-    path_args = "-- " + " ".join(scope_paths) if scope_paths else ""
-    r = git(f"log --format='%B' --no-merges -200 {path_args}",
-            cwd=rhel_repo, check=False)
-    if r.returncode != 0:
-        r = git(f"log --format='%B' --no-merges -200", cwd=rhel_repo)
+    def _extract_candidates(text):
+        cands = []
+        for m in re.finditer(r"commit\s+([0-9a-f]{40})\s+upstream", text):
+            cands.append(m.group(1))
+        for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", text):
+            cands.append(m.group(1))
+        if not cands:
+            for m in re.finditer(r"^commit\s+([0-9a-f]{40})\s*$", text, re.M):
+                cands.append(m.group(1))
+        return cands
 
-    candidates = []
+    def _first_valid(candidates):
+        for h in candidates:
+            rc, _, _ = run_quiet(f"git cat-file -t {h}", cwd=upstream_repo)
+            if rc == 0:
+                verify = git(f"log --oneline -1 {h}",
+                             cwd=upstream_repo, check=False)
+                if verify.returncode == 0:
+                    return h, verify.stdout.strip()
+        return None, None
 
-    # Pattern 1: 'commit <hash> upstream' (traditional format)
-    for m in re.finditer(r"commit\s+([0-9a-f]{40})\s+upstream", r.stdout):
-        candidates.append(m.group(1))
+    per_path = []
+    for sp in scope_paths:
+        r = git(f"log --format='%B' --no-merges -200 -- {sp}",
+                cwd=rhel_repo, check=False)
+        if r.returncode != 0 or not r.stdout.strip():
+            info(f"  {sp}: no RHEL commits found (new path)")
+            continue
+        cands = _extract_candidates(r.stdout)
+        if not cands:
+            info(f"  {sp}: no upstream references in RHEL log")
+            continue
+        h, desc = _first_valid(cands)
+        if h:
+            per_path.append((h, sp))
+            info(f"  {sp}: divergence at {h[:12]}")
+            info(f"    {desc}")
 
-    # Pattern 2: 'cherry picked from commit <hash>'
-    for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", r.stdout):
-        candidates.append(m.group(1))
-
-    # Pattern 3: 'commit <hash>' on its own line (gort/backport-subsystem format)
-    if not candidates:
-        for m in re.finditer(r"^commit\s+([0-9a-f]{40})\s*$", r.stdout, re.M):
-            candidates.append(m.group(1))
-
-    if not candidates:
+    if not per_path:
+        r = git("log --format='%B' --no-merges -200", cwd=rhel_repo)
+        cands = _extract_candidates(r.stdout)
+        h, desc = _first_valid(cands)
+        if h:
+            info(f"Divergence point (unscoped fallback): {h[:12]}")
+            info(f"  {desc}")
+            return h
         die("Could not find any upstream commit references in RHEL log.\n"
             "       Use --divergence <upstream-hash> to supply one manually.")
 
-    for h in candidates:
-        rc, _, _ = run_quiet(f"git cat-file -t {h}", cwd=upstream_repo)
-        if rc == 0:
-            verify = git(f"log --oneline -1 {h}", cwd=upstream_repo, check=False)
-            if verify.returncode == 0:
-                info(f"Divergence point: {h[:12]}")
-                info(f"  {verify.stdout.strip()}")
-                return h
+    if len(per_path) == 1:
+        return per_path[0][0]
 
-    die("None of the referenced upstream commits exist in the upstream repo.")
+    earliest_h, earliest_sp = per_path[0]
+    for h, sp in per_path[1:]:
+        rc, _, _ = run_quiet(
+            f"git merge-base --is-ancestor {h} {earliest_h}",
+            cwd=upstream_repo,
+        )
+        if rc == 0:
+            earliest_h, earliest_sp = h, sp
+
+    info(f"Using earliest divergence: {earliest_h[:12]} (from {earliest_sp})")
+    return earliest_h
 
 
 def list_pending_commits(upstream_repo, divergence, scope_paths, rhel_repo):
@@ -1554,9 +1610,13 @@ def main():
     )
     toolbox_name = args.toolbox or f"rhel{args.rhel}"
 
-    scope_paths = discover_scope_paths(
-        args.subsystem, upstream_repo, args.extra_paths,
-    )
+    if args.only_paths:
+        scope_paths = args.only_paths
+        info(f"Using --only scope paths: {', '.join(scope_paths)}")
+    else:
+        scope_paths = discover_scope_paths(
+            args.subsystem, upstream_repo, args.extra_paths,
+        )
     if not scope_paths:
         die("No valid scope paths found. Check --subsystem and upstream repo.")
 
