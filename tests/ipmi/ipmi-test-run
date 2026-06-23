@@ -41,12 +41,16 @@ declare opt_logdir=""
 declare -i opt_stop_on_fail=0
 declare opt_remote=""
 declare -r REMOTE_DIR="/tmp/ipmi-test-run.$$"
+declare -r REPO_URL="git@gitlab.cee.redhat.com:tcamuso/scripts.git"
+declare -r REPO_BRANCH="master"
+declare -r REPO_SUBDIR="tests/ipmi"
 
 # Runtime state
 declare -i monitor_pid=0
 declare -i start_time=0
 declare -i remote_test_pid=0
 declare ssh_ctl=""
+declare local_tmpdir=""
 
 usage() {
     cat << USAGE
@@ -63,8 +67,8 @@ Options:
     -h              Show this help
 
 Remote execution:
-    -r [USER@]HOST  Deploy scripts and run the suite on a remote host
-                    via ssh/scp. Requires key-based SSH access.
+    -r [USER@]HOST  Fetch test scripts from the git repo, deploy them
+                    to HOST via scp, and run the suite over ssh.
                     Logs are pulled back to the local -o DIR if set.
 
 Skip individual suites:
@@ -199,6 +203,37 @@ stop_monitor() {
     monitor_pid=0
 }
 
+fetch_scripts() {
+    local_tmpdir="$(mktemp -d)" || {
+        log "${RED}ERROR: Cannot create temp directory${OFF}"
+        return 1
+    }
+
+    log "Fetching ${YLW}$REPO_SUBDIR${OFF} from ${YLW}$REPO_URL${OFF} (branch: $REPO_BRANCH) ..."
+
+    if ! git clone --depth 1 --branch "$REPO_BRANCH" --filter=blob:none \
+            --sparse "$REPO_URL" "$local_tmpdir/repo" 2>&1; then
+        log "${RED}ERROR: git clone failed${OFF}"
+        return 1
+    fi
+    if ! git -C "$local_tmpdir/repo" sparse-checkout set "$REPO_SUBDIR" 2>&1; then
+        log "${RED}ERROR: sparse-checkout failed${OFF}"
+        return 1
+    fi
+
+    if [[ ! -d "$local_tmpdir/repo/$REPO_SUBDIR" ]]; then
+        log "${RED}ERROR: $REPO_SUBDIR not found in repo${OFF}"
+        return 1
+    fi
+
+    log "${GRN}Fetched $(ls -1 "$local_tmpdir/repo/$REPO_SUBDIR" | wc -l) scripts${OFF}"
+}
+
+local_cleanup() {
+    [[ -n "$local_tmpdir" && -d "$local_tmpdir" ]] && rm -rf "$local_tmpdir"
+    local_tmpdir=""
+}
+
 run_remote() {
     local remote="$opt_remote"
     local -a remote_args=()
@@ -214,13 +249,19 @@ run_remote() {
 
     log_header "Remote Execution on $remote"
 
+    # Fetch test scripts from the repo.
+    fetch_scripts || return 1
+    local src_dir="$local_tmpdir/repo/$REPO_SUBDIR"
+
     # Open a shared SSH connection so the password is only entered once.
+    log ""
     log "Establishing SSH connection to $remote ..."
     log "(Authenticate once -- all subsequent operations reuse this session)"
     log ""
     if ! ssh -o ControlMaster=yes -o ControlPath="$ssh_ctl" \
             -o ControlPersist=600 -fN "$remote"; then
         log "${RED}ERROR: Cannot establish SSH connection to $remote${OFF}"
+        local_cleanup
         return 1
     fi
 
@@ -232,11 +273,13 @@ run_remote() {
     if ! $SSH "$remote" "mkdir -p '$REMOTE_DIR'" 2>&1; then
         log "${RED}ERROR: Cannot create $REMOTE_DIR on $remote${OFF}"
         ssh -o ControlPath="$ssh_ctl" -O exit "$remote" 2>/dev/null
+        local_cleanup
         return 1
     fi
-    if ! $SCP -q "$SCRIPT_DIR"/* "$remote:$REMOTE_DIR/" 2>&1; then
+    if ! $SCP -q "$src_dir"/* "$remote:$REMOTE_DIR/" 2>&1; then
         log "${RED}ERROR: scp to $remote failed${OFF}"
         ssh -o ControlPath="$ssh_ctl" -O exit "$remote" 2>/dev/null
+        local_cleanup
         return 1
     fi
     $SSH "$remote" "chmod +x '$REMOTE_DIR'/*" 2>/dev/null
@@ -261,7 +304,7 @@ run_remote() {
         log ""
         log "${YLW}Starting background monitor against $opt_monitor_target ...${OFF}"
         log "Monitor output: $monitor_log"
-        "$SCRIPT_DIR/ipmi-monitor" "${mon_args[@]}" > /dev/null 2>&1 &
+        "$src_dir/ipmi-monitor" "${mon_args[@]}" > /dev/null 2>&1 &
         monitor_pid=$!
         log "Monitor PID: $monitor_pid"
     fi
@@ -286,6 +329,7 @@ run_remote() {
     fi
 
     remote_cleanup
+    local_cleanup
     stop_monitor
     return $rc
 }
@@ -352,6 +396,7 @@ cleanup() {
     fi
 
     remote_cleanup
+    local_cleanup
     stop_monitor
     print_summary
     exit 1
