@@ -2,12 +2,12 @@
 
 declare script_name="$(basename "$0")"
 declare rhel_commit=""
-declare upstream_remote="upstream"
+declare upstream_remote=""
 declare -i stat_only=0
 
 declare usagestr="$(
 cat <<EOF
-$script_name [-h|--help|help] [-r <remote>] [-s|--stat] <rhel-commit>
+$script_name [-h|--help|help] -r <remote-or-path> [-s|--stat] <rhel-commit>
 
 Extract the upstream commit referenced in a RHEL backport commit
 and vimdiff the two patches.
@@ -22,14 +22,16 @@ Arguments:
   rhel-commit            RHEL commit hash (or any git rev)
 
 Options:
-  -r, --remote <name>    Name of the upstream remote (default: upstream)
+  -r, --remote <name>    Upstream remote name or path to a separate
+                         upstream repo (required)
   -s, --stat             Show diffstat comparison instead of vimdiff
   -h, --help             Show this help message
 
 Examples:
-  $script_name abc1234
+  $script_name -r upstream abc1234
   $script_name -r linus abc1234
-  $script_name --stat abc1234
+  $script_name -r /work/upstream/kernel abc1234
+  $script_name -r upstream --stat abc1234
 
 EOF
 )"
@@ -114,15 +116,25 @@ show_diff() {
 
 	git show "$rhel" > "$rhel_patch" 2>/dev/null \
 		|| exitme 1 "Failed to generate patch for RHEL commit: $rhel"
-	git show "$upstream" > "$upstream_patch" 2>/dev/null \
-		|| exitme 1 "Failed to generate patch for upstream commit: $upstream"
+
+	if [[ -n "$upstream_repo_path" ]]; then
+		git -C "$upstream_repo_path" show "$upstream" > "$upstream_patch" 2>/dev/null \
+			|| exitme 1 "Failed to generate patch for upstream commit: $upstream"
+	else
+		git show "$upstream" > "$upstream_patch" 2>/dev/null \
+			|| exitme 1 "Failed to generate patch for upstream commit: $upstream"
+	fi
 
 	if ((stat_only)); then
 		echo "=== RHEL commit: $rhel ==="
 		git show --stat "$rhel"
 		echo ""
 		echo "=== Upstream commit: $upstream ==="
-		git show --stat "$upstream"
+		if [[ -n "$upstream_repo_path" ]]; then
+			git -C "$upstream_repo_path" show --stat "$upstream"
+		else
+			git show --stat "$upstream"
+		fi
 	else
 		vimdiff "$rhel_patch" "$upstream_patch"
 	fi
@@ -160,6 +172,7 @@ main() {
 		shift
 	done
 
+	[[ -z "$upstream_remote" ]] && exitme 1 "Missing required -r <remote-or-path>."
 	[[ -z "$rhel_commit" ]] && exitme 1 "Missing RHEL commit hash."
 
 	git rev-parse --verify "$rhel_commit" >/dev/null 2>&1 \
@@ -172,12 +185,21 @@ main() {
 	upstream_hash=$(extract_upstream_hash "$rhel_full") \
 		|| exitme 1 "No upstream commit reference found in:\n$(git log -1 --format='%s' "$rhel_full")"
 
-	git rev-parse --verify "$upstream_hash" >/dev/null 2>&1 || {
-		echo "Upstream commit $upstream_hash not found locally." >&2
-		echo "Attempting: git fetch $upstream_remote $upstream_hash" >&2
-		git fetch "$upstream_remote" "$upstream_hash" 2>/dev/null \
-			|| exitme 1 "Could not fetch upstream commit $upstream_hash from remote '$upstream_remote'.\nEnsure the upstream remote is configured and the commit exists."
-	}
+	# Detect whether -r is a repo path or a remote name
+	upstream_repo_path=""
+	if [[ -d "$upstream_remote/.git" ]] || \
+	   git -C "$upstream_remote" rev-parse --git-dir >/dev/null 2>&1; then
+		upstream_repo_path="$upstream_remote"
+		git -C "$upstream_repo_path" rev-parse --verify "$upstream_hash" >/dev/null 2>&1 \
+			|| exitme 1 "Upstream commit $upstream_hash not found in $upstream_repo_path"
+	else
+		git rev-parse --verify "$upstream_hash" >/dev/null 2>&1 || {
+			echo "Upstream commit $upstream_hash not found locally." >&2
+			echo "Attempting: git fetch $upstream_remote $upstream_hash" >&2
+			git fetch "$upstream_remote" "$upstream_hash" 2>/dev/null \
+				|| exitme 1 "Could not fetch upstream commit $upstream_hash from remote '$upstream_remote'.\nEnsure the upstream remote is configured and the commit exists."
+		}
+	fi
 
 	echo "RHEL commit:     $rhel_full"
 	echo "Upstream commit: $upstream_hash"
