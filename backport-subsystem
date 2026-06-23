@@ -107,6 +107,12 @@ def parse_args():
                       Documentation/ipmi \\
                 --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
                 --upstream-version v6.15-rc3 -s "Name <email>"
+
+              # Pick a single upstream commit onto current HEAD:
+              backport-subsystem --pick abc123def456 \\
+                --subsystem drivers/char/ipmi --rhel 9 \\
+                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
+                --upstream-version v6.15-rc3 -s "Name <email>"
         """),
     )
     p.add_argument("--subsystem", required=True,
@@ -146,6 +152,9 @@ def parse_args():
                     help="Signed-off-by trailer (e.g. 'Name <email>')")
     p.add_argument("--assisted-by", default="",
                     help="Assisted-by trailer (e.g. 'Claude <no-reply@anthropic.com>')")
+    p.add_argument("--pick", default=None, metavar="HASH",
+                    help="Cherry-pick a single upstream commit onto current "
+                         "HEAD with conflict resolution and gort-style message")
     p.add_argument("--divergence", default=None,
                     help="Upstream commit hash to use as divergence point "
                          "(skips auto-detection)")
@@ -1619,6 +1628,36 @@ def main():
         )
     if not scope_paths:
         die("No valid scope paths found. Check --subsystem and upstream repo.")
+
+    # -- Single-commit pick mode --
+    if args.pick:
+        verify = git(f"log --oneline -1 {args.pick}",
+                     cwd=upstream_repo, check=False)
+        if verify.returncode != 0:
+            die(f"Commit {args.pick} not found in upstream repo.")
+
+        header("Single commit pick")
+        info(f"Commit: {verify.stdout.strip()}")
+        info(f"Scope:  {', '.join(scope_paths)}")
+
+        ok, notes = cherry_pick_commit(
+            args.pick, upstream_repo, rhel_repo, scope_paths,
+            args.conflict_policy, args.build_policy, toolbox_name,
+            args.subsystem, args.jira, args.upstream_version,
+            args.rhel, [], output_dir, 0, 1,
+            signed_off_by=args.signed_off_by,
+            assisted_by=args.assisted_by,
+        )
+        if ok:
+            if notes:
+                status("Pick complete (with conflicts resolved).")
+                for note in notes:
+                    info(f"  {note}")
+            else:
+                status("Pick complete (clean).")
+        else:
+            sys.exit(1)
+        return
 
     params = {
         "subsystem": args.subsystem,
