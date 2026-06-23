@@ -63,6 +63,36 @@ def die(msg):
     sys.exit(1)
 
 
+UPSTREAM_REMOTE_NAME = "backport-upstream"
+
+
+def ensure_upstream_remote(rhel_repo, upstream_repo):
+    """Ensure the upstream repo is configured as a remote in the RHEL repo.
+
+    Checks for an existing remote pointing to upstream_repo.  If none
+    exists, adds one as 'backport-upstream' and fetches from it.
+    Returns the remote name.
+    """
+    upstream_repo = os.path.realpath(upstream_repo)
+
+    r = git("remote -v", cwd=rhel_repo, check=False)
+    for line in r.stdout.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) >= 2 and os.path.realpath(parts[1]) == upstream_repo:
+            remote_name = parts[0]
+            info(f"Upstream remote '{remote_name}' already configured")
+            return remote_name
+
+    info(f"Adding upstream remote '{UPSTREAM_REMOTE_NAME}' -> {upstream_repo}")
+    git(f"remote add {UPSTREAM_REMOTE_NAME} {upstream_repo}",
+        cwd=rhel_repo, check=False)
+    info(f"Fetching from '{UPSTREAM_REMOTE_NAME}' ...")
+    git(f"fetch --no-tags {UPSTREAM_REMOTE_NAME}", cwd=rhel_repo, check=False)
+    return UPSTREAM_REMOTE_NAME
+
+
 def info(msg):
     print(f"  {INF}{msg}{OFF}")
 
@@ -1650,18 +1680,11 @@ def main():
         pick_hash = git(f"rev-parse {args.pick}",
                         cwd=upstream_repo).stdout.strip()
 
+        ensure_upstream_remote(rhel_repo, upstream_repo)
+
         header("Single commit pick")
         info(f"Commit: {verify.stdout.strip()}")
         info(f"Scope:  {', '.join(scope_paths)}")
-
-        # Make upstream objects visible so cherry-pick can access them
-        upstream_git = git("rev-parse --git-dir",
-                           cwd=upstream_repo).stdout.strip()
-        if not os.path.isabs(upstream_git):
-            upstream_git = os.path.join(upstream_repo, upstream_git)
-        upstream_objects = os.path.join(upstream_git, "objects")
-        old_alt = os.environ.get("GIT_ALTERNATE_OBJECT_DIRECTORIES")
-        os.environ["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = upstream_objects
 
         ok, notes = cherry_pick_commit(
             pick_hash, upstream_repo, rhel_repo, scope_paths,
@@ -1671,13 +1694,6 @@ def main():
             signed_off_by=args.signed_off_by,
             assisted_by=args.assisted_by,
         )
-
-        # Restore environment
-        if old_alt is not None:
-            os.environ["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = old_alt
-        else:
-            os.environ.pop("GIT_ALTERNATE_OBJECT_DIRECTORIES", None)
-
         if ok:
             if notes:
                 status("Pick complete (with conflicts resolved).")
@@ -1752,6 +1768,8 @@ def main():
 
     # -- Phase 4: cherry-pick loop --
     header("Phase 4: Cherry-picking")
+
+    ensure_upstream_remote(rhel_repo, upstream_repo)
 
     # Create or checkout branch
     rc, _, _ = run_quiet(f"git rev-parse --verify {branch}", cwd=rhel_repo)
