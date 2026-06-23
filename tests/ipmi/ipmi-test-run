@@ -1,0 +1,460 @@
+#!/bin/bash
+#
+# ipmi-test-run
+#
+# Orchestrator for the IPMI test suite. Runs ipmi-hang-test,
+# ipmi-functional-test, and ipmi-regression-test in sequence,
+# optionally launching ipmi-monitor in the background against
+# a remote target.
+#
+# Author: Claude (Anthropic)
+# Prompted-by: Tony Camuso <tcamuso@redhat.com>
+#
+
+declare -r VERSION="1.0"
+declare -r SCRIPT_NAME="$(basename "$0")"
+declare -r SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Text formatting
+declare -r BLD='\e[1m'
+declare -r GRN='\e[32m'
+declare -r YLW='\e[33m'
+declare -r RED='\e[31m'
+declare -r OFF='\e[0m'
+
+# Suite results
+declare -i suites_run=0
+declare -i suites_passed=0
+declare -i suites_failed=0
+declare -a failed_suites=()
+
+# Options
+declare -i opt_verbose=0
+declare -i opt_skip_hang=0
+declare -i opt_skip_functional=0
+declare -i opt_skip_regression=0
+declare opt_monitor_target=""
+declare opt_monitor_bmc=""
+declare opt_monitor_user="root"
+declare opt_monitor_pass=""
+declare opt_logdir=""
+declare -i opt_stop_on_fail=0
+declare opt_remote=""
+declare -r REMOTE_DIR="/tmp/ipmi-test-run.$$"
+
+# Runtime state
+declare -i monitor_pid=0
+declare -i start_time=0
+declare -i remote_test_pid=0
+declare ssh_ctl=""
+
+usage() {
+    cat << USAGE
+
+$SCRIPT_NAME [OPTIONS]
+
+Orchestrate the IPMI test suite by running hang, functional, and
+regression tests in sequence, with optional remote monitoring.
+
+Options:
+    -v              Verbose: pass -v to each sub-test
+    -s              Stop on first suite failure
+    -o DIR          Write per-suite logs into DIR (created if needed)
+    -h              Show this help
+
+Remote execution:
+    -r [USER@]HOST  Deploy scripts and run the suite on a remote host
+                    via ssh/scp. Requires key-based SSH access.
+                    Logs are pulled back to the local -o DIR if set.
+
+Skip individual suites:
+    -H              Skip ipmi-hang-test
+    -F              Skip ipmi-functional-test
+    -R              Skip ipmi-regression-test
+
+Remote monitoring (ipmi-monitor runs in background during tests):
+    -t HOST         Target host for the monitor (enables monitoring)
+    -b BMC_HOST     BMC address for out-of-band checks
+    -u USER         BMC username (default: $opt_monitor_user)
+    -p PASS         BMC password (or set IPMI_PASSWORD env var)
+
+Test Execution Order:
+    1. ipmi-hang-test         Module load/unload stress cycles
+    2. ipmi-functional-test   Concurrent access, sensors, SEL, etc.
+    3. ipmi-regression-test   Sanity, ipmiloop, stress, big-message
+
+Examples:
+    # Run full suite, verbose, logs to /tmp/ipmi-logs
+    $SCRIPT_NAME -v -o /tmp/ipmi-logs
+
+    # Run on a remote system, with local monitoring
+    $SCRIPT_NAME -r root@server1 -t server1 -b server1-bmc -p secret
+
+    # Run with remote monitoring (local execution)
+    $SCRIPT_NAME -v -t server1 -b server1-bmc -p secret
+
+    # Skip hang test, stop on first failure
+    $SCRIPT_NAME -H -s
+
+Author: Claude (Anthropic)
+Prompted-by: Tony Camuso <tcamuso@redhat.com>
+
+USAGE
+    exit 0
+}
+
+log() {
+    local msg="$1"
+    echo -e "$msg"
+}
+
+log_header() {
+    local title="$1"
+    log ""
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "${BLD}  $title${OFF}"
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+}
+
+# Run a single test suite and record pass/fail.
+# $1 = suite name (for display)
+# $2 = script basename (under SCRIPT_DIR)
+# $3... = extra arguments to pass to the script
+run_suite() {
+    local name="$1"; shift
+    local script="$SCRIPT_DIR/$1"; shift
+    local -a extra_args=("$@")
+    local logfile=""
+    local exit_code
+
+    log_header "$name"
+
+    if [[ ! -x "$script" ]]; then
+        log "${RED}ERROR: $script not found or not executable${OFF}"
+        ((suites_run++))
+        ((suites_failed++))
+        failed_suites+=("$name (script missing)")
+        return 1
+    fi
+
+    if [[ -n "$opt_logdir" ]]; then
+        logfile="$opt_logdir/$(basename "$script").log"
+        extra_args+=("-o" "$logfile")
+        log "Log: $logfile"
+    fi
+
+    ((opt_verbose)) && extra_args+=("-v")
+
+    log "Running: $script ${extra_args[*]}"
+    log ""
+
+    "$script" "${extra_args[@]}"
+    exit_code=$?
+
+    ((suites_run++))
+    if [[ $exit_code -eq 0 ]]; then
+        ((suites_passed++))
+        log ""
+        log "${GRN}✓ SUITE PASSED: $name${OFF}"
+    else
+        ((suites_failed++))
+        failed_suites+=("$name (exit $exit_code)")
+        log ""
+        log "${RED}✗ SUITE FAILED: $name (exit $exit_code)${OFF}"
+    fi
+
+    return $exit_code
+}
+
+start_monitor() {
+    [[ -z "$opt_monitor_target" ]] && return
+
+    local -a mon_args=("-t" "$opt_monitor_target")
+    [[ -n "$opt_monitor_bmc" ]]  && mon_args+=("-b" "$opt_monitor_bmc")
+    [[ -n "$opt_monitor_user" ]] && mon_args+=("-u" "$opt_monitor_user")
+    [[ -n "$opt_monitor_pass" ]] && mon_args+=("-p" "$opt_monitor_pass")
+    ((opt_verbose))              && mon_args+=("-v")
+
+    local monitor_log=""
+    if [[ -n "$opt_logdir" ]]; then
+        monitor_log="$opt_logdir/ipmi-monitor.log"
+        mon_args+=("-o" "$monitor_log")
+    fi
+
+    log ""
+    log "${YLW}Starting background monitor against $opt_monitor_target ...${OFF}"
+    "$SCRIPT_DIR/ipmi-monitor" "${mon_args[@]}" &
+    monitor_pid=$!
+    log "Monitor PID: $monitor_pid"
+    [[ -n "$monitor_log" ]] && log "Monitor log: $monitor_log"
+}
+
+stop_monitor() {
+    [[ $monitor_pid -eq 0 ]] && return
+
+    log ""
+    log "${YLW}Stopping background monitor (PID $monitor_pid) ...${OFF}"
+    kill -TERM "$monitor_pid" 2>/dev/null
+    wait "$monitor_pid" 2>/dev/null
+    monitor_pid=0
+}
+
+run_remote() {
+    local remote="$opt_remote"
+    local -a remote_args=()
+    local remote_logdir="$REMOTE_DIR/logs"
+    ssh_ctl="/tmp/.ipmi-test-ssh-$$"
+
+    ((opt_verbose))         && remote_args+=("-v")
+    ((opt_stop_on_fail))    && remote_args+=("-s")
+    ((opt_skip_hang))       && remote_args+=("-H")
+    ((opt_skip_functional)) && remote_args+=("-F")
+    ((opt_skip_regression)) && remote_args+=("-R")
+    remote_args+=("-o" "$remote_logdir")
+
+    log_header "Remote Execution on $remote"
+
+    # Open a shared SSH connection so the password is only entered once.
+    log "Establishing SSH connection to $remote ..."
+    log "(Authenticate once -- all subsequent operations reuse this session)"
+    log ""
+    if ! ssh -o ControlMaster=yes -o ControlPath="$ssh_ctl" \
+            -o ControlPersist=600 -fN "$remote"; then
+        log "${RED}ERROR: Cannot establish SSH connection to $remote${OFF}"
+        return 1
+    fi
+
+    # All further ssh/scp calls piggy-back on the master connection.
+    local -r SSH="ssh -o ControlPath=$ssh_ctl"
+    local -r SCP="scp -o ControlPath=$ssh_ctl"
+
+    log "Deploying test scripts to $remote:$REMOTE_DIR ..."
+    if ! $SSH "$remote" "mkdir -p '$REMOTE_DIR'" 2>&1; then
+        log "${RED}ERROR: Cannot create $REMOTE_DIR on $remote${OFF}"
+        ssh -o ControlPath="$ssh_ctl" -O exit "$remote" 2>/dev/null
+        return 1
+    fi
+    if ! $SCP -q "$SCRIPT_DIR"/* "$remote:$REMOTE_DIR/" 2>&1; then
+        log "${RED}ERROR: scp to $remote failed${OFF}"
+        ssh -o ControlPath="$ssh_ctl" -O exit "$remote" 2>/dev/null
+        return 1
+    fi
+    $SSH "$remote" "chmod +x '$REMOTE_DIR'/*" 2>/dev/null
+
+    # Start the local monitor with its output directed to a log file so
+    # it does not interleave with the remote test output on the terminal.
+    if [[ -n "$opt_monitor_target" ]]; then
+        local -a mon_args=("-t" "$opt_monitor_target")
+        [[ -n "$opt_monitor_bmc" ]]  && mon_args+=("-b" "$opt_monitor_bmc")
+        [[ -n "$opt_monitor_user" ]] && mon_args+=("-u" "$opt_monitor_user")
+        [[ -n "$opt_monitor_pass" ]] && mon_args+=("-p" "$opt_monitor_pass")
+
+        local monitor_log=""
+        if [[ -n "$opt_logdir" ]]; then
+            mkdir -p "$opt_logdir"
+            monitor_log="$opt_logdir/ipmi-monitor.log"
+        else
+            monitor_log="/tmp/ipmi-monitor-$$.log"
+        fi
+        mon_args+=("-o" "$monitor_log")
+
+        log ""
+        log "${YLW}Starting background monitor against $opt_monitor_target ...${OFF}"
+        log "Monitor output: $monitor_log"
+        "$SCRIPT_DIR/ipmi-monitor" "${mon_args[@]}" > /dev/null 2>&1 &
+        monitor_pid=$!
+        log "Monitor PID: $monitor_pid"
+    fi
+
+    log ""
+    log "Running test suite on $remote ..."
+    log ""
+
+    # Run the remote session in the background and wait on it, so that
+    # SIGINT/SIGTERM can interrupt the wait and trigger cleanup().
+    $SSH -t "$remote" "$REMOTE_DIR/ipmi-test-run ${remote_args[*]}" &
+    remote_test_pid=$!
+    wait $remote_test_pid 2>/dev/null
+    local rc=$?
+    remote_test_pid=0
+
+    if [[ -n "$opt_logdir" ]]; then
+        mkdir -p "$opt_logdir"
+        log ""
+        log "Pulling logs from $remote:$remote_logdir/ ..."
+        $SCP -q "$remote:$remote_logdir"/* "$opt_logdir/" 2>/dev/null
+    fi
+
+    remote_cleanup
+    stop_monitor
+    return $rc
+}
+
+remote_cleanup() {
+    [[ -z "$opt_remote" || -z "$ssh_ctl" ]] && return
+
+    log ""
+    log "Cleaning up $opt_remote:$REMOTE_DIR ..."
+    ssh -o ControlPath="$ssh_ctl" "$opt_remote" \
+        "rm -rf '$REMOTE_DIR'" 2>/dev/null
+
+    ssh -o ControlPath="$ssh_ctl" -O exit "$opt_remote" 2>/dev/null
+    ssh_ctl=""
+}
+
+print_summary() {
+    local elapsed=$(( $(date +%s) - start_time ))
+    local mins=$(( elapsed / 60 ))
+    local secs=$(( elapsed % 60 ))
+
+    log_header "Overall Test Summary"
+    log ""
+    log "Elapsed:         ${mins}m ${secs}s"
+    log "Suites run:      $suites_run"
+    log "${GRN}Suites passed:   $suites_passed${OFF}"
+    log "${RED}Suites failed:   $suites_failed${OFF}"
+
+    if (( suites_failed > 0 )); then
+        log ""
+        log "${RED}Failed suites:${OFF}"
+        for s in "${failed_suites[@]}"; do
+            log "  - $s"
+        done
+    fi
+
+    log ""
+    if (( suites_failed == 0 )); then
+        log "${GRN}════════════════════════════════════════════════════════════${OFF}"
+        log "${GRN}  ALL SUITES PASSED${OFF}"
+        log "${GRN}════════════════════════════════════════════════════════════${OFF}"
+    else
+        log "${RED}════════════════════════════════════════════════════════════${OFF}"
+        log "${RED}  SOME SUITES FAILED${OFF}"
+        log "${RED}════════════════════════════════════════════════════════════${OFF}"
+    fi
+}
+
+cleanup() {
+    log ""
+    log "${YLW}Interrupted -- shutting down ...${OFF}"
+
+    # Kill the remote test SSH session if it is still running.
+    if [[ $remote_test_pid -ne 0 ]]; then
+        kill -TERM "$remote_test_pid" 2>/dev/null
+        wait "$remote_test_pid" 2>/dev/null
+        remote_test_pid=0
+    fi
+
+    # Kill the remote ipmi-test-run process via the control connection.
+    if [[ -n "$ssh_ctl" && -n "$opt_remote" ]]; then
+        ssh -o ControlPath="$ssh_ctl" "$opt_remote" \
+            "pkill -f '$REMOTE_DIR/ipmi-test-run'" 2>/dev/null
+    fi
+
+    remote_cleanup
+    stop_monitor
+    print_summary
+    exit 1
+}
+
+main() {
+    while getopts "vsHFRr:t:b:u:p:o:h" opt; do
+        case "$opt" in
+            v) opt_verbose=1 ;;
+            s) opt_stop_on_fail=1 ;;
+            H) opt_skip_hang=1 ;;
+            F) opt_skip_functional=1 ;;
+            R) opt_skip_regression=1 ;;
+            r) opt_remote="$OPTARG" ;;
+            t) opt_monitor_target="$OPTARG" ;;
+            b) opt_monitor_bmc="$OPTARG" ;;
+            u) opt_monitor_user="$OPTARG" ;;
+            p) opt_monitor_pass="$OPTARG" ;;
+            o) opt_logdir="$OPTARG" ;;
+            h) usage ;;
+            *) usage ;;
+        esac
+    done
+
+    trap cleanup SIGINT SIGTERM
+
+    # Remote mode: deploy and run on the remote host, then exit.
+    if [[ -n "$opt_remote" ]]; then
+        start_time=$(date +%s)
+        run_remote
+        exit $?
+    fi
+
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}ERROR: This orchestrator must be run as root${OFF}"
+        exit 1
+    fi
+
+    if [[ -n "$opt_logdir" ]]; then
+        mkdir -p "$opt_logdir" || {
+            echo -e "${RED}ERROR: Cannot create log directory $opt_logdir${OFF}"
+            exit 1
+        }
+    fi
+
+    start_time=$(date +%s)
+
+    log_header "IPMI Test Orchestrator v$VERSION"
+    log "Kernel: $(uname -r)"
+    log "Date:   $(date)"
+
+    start_monitor
+
+    # --- Suite 1: Hang test ---
+    if (( ! opt_skip_hang )); then
+        run_suite "Suite 1: Module Load/Unload Stress (ipmi-hang-test)" \
+                  ipmi-hang-test
+        if (( $? != 0 && opt_stop_on_fail )); then
+            stop_monitor
+            print_summary
+            exit 1
+        fi
+    else
+        log ""
+        log "${YLW}Skipping ipmi-hang-test (-H)${OFF}"
+    fi
+
+    # --- Suite 2: Functional test ---
+    if (( ! opt_skip_functional )); then
+        run_suite "Suite 2: Functional Tests (ipmi-functional-test)" \
+                  ipmi-functional-test
+        if (( $? != 0 && opt_stop_on_fail )); then
+            stop_monitor
+            print_summary
+            exit 1
+        fi
+    else
+        log ""
+        log "${YLW}Skipping ipmi-functional-test (-F)${OFF}"
+    fi
+
+    # --- Suite 3: Regression test ---
+    if (( ! opt_skip_regression )); then
+        run_suite "Suite 3: Regression Tests (ipmi-regression-test)" \
+                  ipmi-regression-test
+        if (( $? != 0 && opt_stop_on_fail )); then
+            stop_monitor
+            print_summary
+            exit 1
+        fi
+    else
+        log ""
+        log "${YLW}Skipping ipmi-regression-test (-R)${OFF}"
+    fi
+
+    stop_monitor
+    print_summary
+
+    if (( suites_failed == 0 )); then
+        exit 0
+    else
+        exit 1
+    fi
+}
+
+main "$@"
