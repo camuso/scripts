@@ -74,7 +74,8 @@ class Spinner:
 def run(cmd, *, cwd=None, capture=True, check=True):
     """Run a shell command, return CompletedProcess."""
     return subprocess.run(
-        cmd, shell=True, cwd=cwd, text=True,
+        cmd, shell=True, cwd=cwd,
+        encoding="utf-8", errors="replace",
         capture_output=capture, check=check,
     )
 
@@ -82,7 +83,9 @@ def run(cmd, *, cwd=None, capture=True, check=True):
 def run_quiet(cmd, *, cwd=None):
     """Run a command, return (returncode, stdout, stderr)."""
     r = subprocess.run(
-        cmd, shell=True, cwd=cwd, text=True, capture_output=True,
+        cmd, shell=True, cwd=cwd,
+        encoding="utf-8", errors="replace",
+        capture_output=True,
     )
     return r.returncode, r.stdout, r.stderr
 
