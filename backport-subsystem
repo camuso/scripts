@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 import textwrap
+import threading
+import time
 from collections import defaultdict
 from glob import glob
 
@@ -32,6 +34,38 @@ SUB = "-" * 74
 
 CONFLICT_POLICIES = ["theirs", "abort"]
 BUILD_POLICIES = ["conflict", "every", "none"]
+
+# ---------------------------------------------------------------------------
+# Spinner for long-running operations
+# ---------------------------------------------------------------------------
+
+class Spinner:
+    """Animated spinner for long-running operations."""
+    _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, message):
+        self._message = message
+        self._stop = threading.Event()
+        self._thread = None
+
+    def _spin(self):
+        i = 0
+        while not self._stop.is_set():
+            frame = self._FRAMES[i % len(self._FRAMES)]
+            print(f"\r  {INF}{frame} {self._message}{OFF}", end="", flush=True)
+            i += 1
+            self._stop.wait(0.08)
+        print(f"\r  {STA}✓ {self._message}{OFF}" + " " * 10)
+
+    def __enter__(self):
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join()
+
 
 # ---------------------------------------------------------------------------
 # Utility helpers
@@ -88,8 +122,8 @@ def ensure_upstream_remote(rhel_repo, upstream_repo):
     info(f"Adding upstream remote '{UPSTREAM_REMOTE_NAME}' -> {upstream_repo}")
     git(f"remote add {UPSTREAM_REMOTE_NAME} {upstream_repo}",
         cwd=rhel_repo, check=False)
-    info(f"Fetching from '{UPSTREAM_REMOTE_NAME}' ...")
-    git(f"fetch --no-tags {UPSTREAM_REMOTE_NAME}", cwd=rhel_repo, check=False)
+    with Spinner(f"Fetching from '{UPSTREAM_REMOTE_NAME}' ..."):
+        git(f"fetch --no-tags {UPSTREAM_REMOTE_NAME}", cwd=rhel_repo, check=False)
     return UPSTREAM_REMOTE_NAME
 
 
@@ -310,31 +344,73 @@ def show_confirmation_menu(params):
 # Phase 1: dist-configs
 # ---------------------------------------------------------------------------
 
-def run_dist_configs(rhel_repo, toolbox_name):
-    """Run make dist-configs inside the toolbox, return configs directory."""
-    header("Phase 1: Building dist-configs")
-    info(f"Running make dist-configs in toolbox '{toolbox_name}' ...")
+DIST_CONFIGS_STAMP = ".backport-dist-configs-head"
 
-    rc, out, err = run_quiet(
-        f"toolbox run -c {toolbox_name} make dist-configs",
-        cwd=rhel_repo,
-    )
-    if rc != 0:
-        die(f"make dist-configs failed:\n{err}")
-    status("dist-configs complete.")
 
+def _find_configs_dir(rhel_repo):
+    """Locate the dist-configs output directory."""
     configs_dir = os.path.join(rhel_repo, "configs")
     if not os.path.isdir(configs_dir):
         redhat_configs = os.path.join(rhel_repo, "redhat", "configs")
         if os.path.isdir(redhat_configs):
             configs_dir = redhat_configs
+    return configs_dir
 
+
+def _configs_up_to_date(rhel_repo):
+    """Check if dist-configs are current for this HEAD."""
+    head = git("rev-parse HEAD", cwd=rhel_repo, check=False).stdout.strip()
+    stamp = os.path.join(rhel_repo, DIST_CONFIGS_STAMP)
+    if not os.path.isfile(stamp):
+        return False, head
+    with open(stamp) as fh:
+        saved = fh.read().strip()
+    if saved != head:
+        return False, head
+    configs_dir = _find_configs_dir(rhel_repo)
+    config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
+    if not config_files:
+        config_files = glob(os.path.join(configs_dir, "**", "kernel-*.config"),
+                            recursive=True)
+    if not config_files:
+        return False, head
+    return True, head
+
+
+def run_dist_configs(rhel_repo, toolbox_name):
+    """Run make dist-configs inside the toolbox, return configs directory."""
+    header("Phase 1: Building dist-configs")
+
+    up_to_date, head = _configs_up_to_date(rhel_repo)
+    if up_to_date:
+        configs_dir = _find_configs_dir(rhel_repo)
+        config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
+        if not config_files:
+            config_files = glob(os.path.join(configs_dir, "**",
+                                "kernel-*.config"), recursive=True)
+        status(f"dist-configs up to date for {head[:12]}")
+        info(f"Found {len(config_files)} config files in {configs_dir}")
+        return configs_dir
+
+    with Spinner(f"Running make dist-configs in toolbox '{toolbox_name}' ..."):
+        rc, out, err = run_quiet(
+            f"toolbox run -c {toolbox_name} make dist-configs",
+            cwd=rhel_repo,
+        )
+    if rc != 0:
+        die(f"make dist-configs failed:\n{err}")
+
+    configs_dir = _find_configs_dir(rhel_repo)
     config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
     if not config_files:
         config_files = glob(os.path.join(configs_dir, "**", "kernel-*.config"),
                             recursive=True)
     if not config_files:
         die(f"No kernel-*.config files found under {configs_dir}")
+
+    stamp = os.path.join(rhel_repo, DIST_CONFIGS_STAMP)
+    with open(stamp, "w") as fh:
+        fh.write(head + "\n")
 
     info(f"Found {len(config_files)} config files in {configs_dir}")
     return configs_dir
@@ -377,7 +453,6 @@ def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
       - '(cherry picked from commit <40-hex>)'
     """
     header("Phase 2: Finding divergence point")
-    info("Scanning RHEL main for upstream commit references ...")
 
     def _extract_candidates(text):
         cands = []
@@ -401,26 +476,31 @@ def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
         return None, None
 
     per_path = []
-    for sp in scope_paths:
-        r = git(f"log --format='%B' --no-merges -200 -- {sp}",
-                cwd=rhel_repo, check=False)
-        if r.returncode != 0 or not r.stdout.strip():
-            info(f"  {sp}: no RHEL commits found (new path)")
-            continue
-        cands = _extract_candidates(r.stdout)
-        if not cands:
-            info(f"  {sp}: no upstream references in RHEL log")
-            continue
-        h, desc = _first_valid(cands)
-        if h:
-            per_path.append((h, sp))
-            info(f"  {sp}: divergence at {h[:12]}")
+    with Spinner("Scanning RHEL history for divergence points ..."):
+        for sp in scope_paths:
+            r = git(f"log --format='%B' --no-merges -200 -- {sp}",
+                    cwd=rhel_repo, check=False)
+            if r.returncode != 0 or not r.stdout.strip():
+                continue
+            cands = _extract_candidates(r.stdout)
+            if not cands:
+                continue
+            h, desc = _first_valid(cands)
+            if h:
+                per_path.append((h, sp))
+
+    for h, sp in per_path:
+        verify = git(f"log --oneline -1 {h}", cwd=upstream_repo, check=False)
+        desc = verify.stdout.strip() if verify.returncode == 0 else ""
+        info(f"  {sp}: divergence at {h[:12]}")
+        if desc:
             info(f"    {desc}")
 
     if not per_path:
-        r = git("log --format='%B' --no-merges -200", cwd=rhel_repo)
-        cands = _extract_candidates(r.stdout)
-        h, desc = _first_valid(cands)
+        with Spinner("Scanning RHEL history (unscoped fallback) ..."):
+            r = git("log --format='%B' --no-merges -200", cwd=rhel_repo)
+            cands = _extract_candidates(r.stdout)
+            h, desc = _first_valid(cands)
         if h:
             info(f"Divergence point (unscoped fallback): {h[:12]}")
             info(f"  {desc}")
@@ -462,16 +542,17 @@ def list_pending_commits(upstream_repo, divergence, scope_paths, rhel_repo):
     # Collect upstream hashes already referenced in RHEL commit messages.
     # Use --grep to pre-filter so this is fast even on large repos.
     already = set()
-    for grep_pat in ["commit [0-9a-f]", "cherry picked from commit"]:
-        r2 = git(f"log --format='%B' --no-merges --extended-regexp "
-                 f"--grep='{grep_pat}'",
-                 cwd=rhel_repo, check=False)
-        if r2.returncode != 0:
-            continue
-        for m in re.finditer(r"commit\s+([0-9a-f]{40})", r2.stdout):
-            already.add(m.group(1))
-        for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", r2.stdout):
-            already.add(m.group(1))
+    with Spinner("Scanning RHEL history for already-applied commits ..."):
+        for grep_pat in ["commit [0-9a-f]", "cherry picked from commit"]:
+            r2 = git(f"log --format='%B' --no-merges --extended-regexp "
+                     f"--grep='{grep_pat}'",
+                     cwd=rhel_repo, check=False)
+            if r2.returncode != 0:
+                continue
+            for m in re.finditer(r"commit\s+([0-9a-f]{40})", r2.stdout):
+                already.add(m.group(1))
+            for m in re.finditer(r"cherry picked from commit ([0-9a-f]{40})", r2.stdout):
+                already.add(m.group(1))
 
     pending = [h for h in all_hashes if h not in already]
     info(f"After filtering already-downstream: {len(pending)} pending commits")
@@ -1509,10 +1590,10 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
 
     build_ok = True
     if should_build:
-        info(f"  Building {subsystem} ...")
-        build_ok, build_output = build_test(
-            rhel_repo, toolbox_name, subsystem,
-        )
+        with Spinner(f"Building {subsystem} ..."):
+            build_ok, build_output = build_test(
+                rhel_repo, toolbox_name, subsystem,
+            )
         if not build_ok:
             warn("  Build FAILED -- attempting diagnosis ...")
             fixed, fix_note = diagnose_build_failure(
