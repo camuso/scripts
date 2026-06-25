@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -225,6 +226,9 @@ def parse_args():
     p.add_argument("--divergence", default=None,
                     help="Upstream commit hash to use as divergence point "
                          "(skips auto-detection)")
+    p.add_argument("--patchpal", action="store_true", default=False,
+                    help="Use patchpal GUI for interactive resolution of "
+                         "in-scope cherry-pick conflicts")
     p.add_argument("--toolbox", default=None,
                     help="Toolbox container name (default: rhel<RHEL>)")
     return p.parse_args()
@@ -1085,8 +1089,41 @@ def _check_hunk(filepath, hunk_header, hunk_lines, upstream_diff_text,
         ))
 
 
+def _resolve_inscope_patchpal(in_scope_conflicts, rhel_repo):
+    """Launch patchpal as git mergetool for in-scope conflicted files.
+
+    Returns a list of conflict note strings.
+    """
+    notes = []
+    for cf in in_scope_conflicts:
+        info(f"  Launching patchpal for {cf} ...")
+        r = subprocess.run(
+            "git "
+            "-c mergetool.patchpal.cmd='patchpal -M' "
+            "-c mergetool.patchpal.trustExitCode=true "
+            "-c merge.tool=patchpal "
+            f"mergetool --no-prompt -- {cf}",
+            shell=True, cwd=rhel_repo,
+        )
+        if r.returncode != 0:
+            git("cherry-pick --abort", cwd=rhel_repo, check=False)
+            die(f"patchpal exited with error for {cf}. "
+                "Cherry-pick aborted.")
+        still_unmerged = git(
+            f"diff --name-only --diff-filter=U -- {cf}",
+            cwd=rhel_repo, check=False,
+        ).stdout.strip()
+        if still_unmerged:
+            git("cherry-pick --abort", cwd=rhel_repo, check=False)
+            die(f"{cf} still has unresolved conflicts after patchpal. "
+                "Cherry-pick aborted.")
+        notes.append(f"{cf}: resolved interactively via patchpal")
+    return notes
+
+
 def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver,
-                      commit_hash=None, upstream_repo=None):
+                      commit_hash=None, upstream_repo=None,
+                      use_patchpal=False):
     """Resolve conflicts in the working tree.
 
     Returns (notes, oos_count) where notes is a list of conflict note strings
@@ -1100,6 +1137,7 @@ def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver,
 
     notes = []
     oos_excluded = []
+    in_scope_deferred = []
     in_scope_prefixes = tuple(p.rstrip("/") for p in scope_paths)
 
     for cf in conflicted:
@@ -1118,6 +1156,9 @@ def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver,
             else:
                 git(f"rm -f {cf}", cwd=rhel_repo, check=False)
             oos_excluded.append(cf)
+
+        elif use_patchpal:
+            in_scope_deferred.append(cf)
 
         elif conflict_policy == "theirs":
             rc, _, _ = run_quiet(
@@ -1152,6 +1193,12 @@ def resolve_conflicts(rhel_repo, scope_paths, conflict_policy, rhel_ver,
         elif conflict_policy == "abort":
             die(f"Conflict in {cf} and --conflict-policy=abort. "
                 f"Aborting cherry-pick.")
+
+    if in_scope_deferred:
+        patchpal_notes = _resolve_inscope_patchpal(
+            in_scope_deferred, rhel_repo,
+        )
+        notes.extend(patchpal_notes)
 
     return notes, len(oos_excluded)
 
@@ -1516,7 +1563,8 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
                        conflict_policy, build_policy, toolbox_name,
                        subsystem, jira, upstream_version, rhel_ver,
                        omit_list, output_dir, applied_count, total_count,
-                       signed_off_by, assisted_by=""):
+                       signed_off_by, assisted_by="",
+                       use_patchpal=False):
     """Cherry-pick a single commit with conflict resolution and optional build.
     Returns (success, conflict_notes)."""
 
@@ -1546,6 +1594,7 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
         conflict_notes, oos_conflict_count = resolve_conflicts(
             rhel_repo, scope_paths, conflict_policy, rhel_ver,
             commit_hash=commit_hash, upstream_repo=upstream_repo,
+            use_patchpal=use_patchpal,
         )
 
     removed = scope_index(rhel_repo, scope_paths)
@@ -1735,6 +1784,15 @@ def print_summary(params, total_evaluated, keep_count, omit_count,
 def main():
     args = parse_args()
 
+    if args.patchpal:
+        if not shutil.which("patchpal"):
+            die("--patchpal requires patchpal on PATH. "
+                "Install it or remove the flag.")
+        if not (os.environ.get("DISPLAY") or
+                os.environ.get("WAYLAND_DISPLAY")):
+            die("--patchpal requires a graphical display "
+                "(DISPLAY or WAYLAND_DISPLAY must be set).")
+
     rhel_repo = os.path.abspath(args.rhel_repo)
     upstream_repo = os.path.abspath(args.upstream_repo)
 
@@ -1782,6 +1840,7 @@ def main():
             args.rhel, [], output_dir, 0, 1,
             signed_off_by=args.signed_off_by,
             assisted_by=args.assisted_by,
+            use_patchpal=args.patchpal,
         )
         if ok:
             if notes:
@@ -1900,6 +1959,7 @@ def main():
             args.rhel, omit, output_dir, idx, len(keep),
             signed_off_by=args.signed_off_by,
             assisted_by=args.assisted_by,
+            use_patchpal=args.patchpal,
         )
 
         if not ok:
