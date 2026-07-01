@@ -217,8 +217,8 @@ def parse_args():
     )
     p.add_argument("--subsystem", default=None,
                     help="Subsystem path, e.g. drivers/input")
-    p.add_argument("--rhel", default=None, type=int,
-                    help="RHEL major version (9, 10, ...)")
+    p.add_argument("--rhel", default=None,
+                    help="RHEL version (9, 10, 10.3, ...)")
     p.add_argument("--rhel-repo", default=".",
                     help=argparse.SUPPRESS)
     p.add_argument("--upstream-repo", default=None,
@@ -456,6 +456,105 @@ def merge_cli_into_session(args, session):
         elif field not in ("patchpal", "extra_paths", "only_paths") and cli_val is not None:
             session[field] = cli_val
     return session
+
+
+def find_conflicted_commits(rhel_repo, base_commit):
+    """Scan backported commits for those with a Conflicts stanza.
+
+    Returns a list of (rhel_hash, upstream_hash) for each commit
+    that has 'Conflicts:' in its gort-style message.
+    """
+    r = git(f"log --reverse --format='%H' {base_commit}..HEAD",
+            cwd=rhel_repo, check=False)
+    if r.returncode != 0 or not r.stdout.strip():
+        return []
+
+    result = []
+    for rhel_hash in r.stdout.strip().split("\n"):
+        rhel_hash = rhel_hash.strip()
+        if not rhel_hash:
+            continue
+        body = git(f"log --format='%B' -1 {rhel_hash}",
+                   cwd=rhel_repo, check=False).stdout
+        has_conflict = bool(re.search(r'^Conflicts:', body, re.MULTILINE))
+        m = re.search(r'^commit ([0-9a-f]{40})$', body, re.MULTILINE)
+        upstream_hash = m.group(1) if m else None
+        if has_conflict and upstream_hash:
+            result.append((rhel_hash, upstream_hash))
+    return result
+
+
+def replay_with_patchpal(rhel_repo, upstream_repo, base_commit,
+                         scope_paths, conflict_policy, build_policy,
+                         toolbox_name, subsystem, jira, upstream_version,
+                         rhel_ver, output_dir, signed_off_by,
+                         assisted_by, session):
+    """Reset to before the first conflicted commit and re-apply with patchpal."""
+    conflicted = find_conflicted_commits(rhel_repo, base_commit)
+    if not conflicted:
+        status("No conflicted commits found -- nothing to replay.")
+        return
+
+    info(f"  Found {len(conflicted)} commit(s) with conflicts:")
+    for _, uh in conflicted:
+        subj = git(f"log --format='%s' -1 {uh}",
+                   cwd=upstream_repo, check=False).stdout.strip()
+        info(f"    {uh[:12]} {subj}")
+
+    first_rhel_hash = conflicted[0][0]
+
+    all_rhel = git(f"log --reverse --format='%H' {base_commit}..HEAD",
+                   cwd=rhel_repo, check=False).stdout.strip().split("\n")
+    all_rhel = [h.strip() for h in all_rhel if h.strip()]
+
+    upstream_hashes = []
+    for rhel_h in all_rhel:
+        body = git(f"log --format='%B' -1 {rhel_h}",
+                   cwd=rhel_repo, check=False).stdout
+        m = re.search(r'^commit ([0-9a-f]{40})$', body, re.MULTILINE)
+        upstream_hashes.append((rhel_h, m.group(1) if m else None))
+
+    first_idx = next(i for i, (rh, _) in enumerate(upstream_hashes)
+                     if rh == first_rhel_hash)
+    replay_set = upstream_hashes[first_idx:]
+
+    header("Patchpal replay")
+    info(f"  Resetting to {first_rhel_hash[:12]}~1 and re-applying "
+         f"{len(replay_set)} commit(s) with patchpal ...")
+
+    git(f"reset --hard {first_rhel_hash}~1", cwd=rhel_repo)
+
+    for idx, (_, uh) in enumerate(replay_set):
+        if not uh:
+            warn(f"  Skipping commit with no upstream hash reference")
+            continue
+        subj = git(f"log --format='%s' -1 {uh}",
+                   cwd=upstream_repo, check=False).stdout.strip()
+        num = f"[{idx+1}/{len(replay_set)}]"
+        info(f"{num} {uh[:12]} {subj}")
+
+        ok, notes = cherry_pick_commit(
+            uh, upstream_repo, rhel_repo, scope_paths,
+            conflict_policy, build_policy, toolbox_name,
+            subsystem, jira, upstream_version,
+            rhel_ver, [], output_dir, idx, len(replay_set),
+            signed_off_by=signed_off_by,
+            assisted_by=assisted_by,
+            use_patchpal=True,
+        )
+        if not ok:
+            die(f"Replay failed on {uh[:12]}. Resolve manually.")
+        status(f"  applied {'(with conflicts)' if notes else '(clean)'}")
+
+    patch_count = generate_output(rhel_repo, output_dir, base_commit, [])
+
+    completed_head = git("rev-parse HEAD",
+                         cwd=rhel_repo, check=False).stdout.strip()
+    session["_completed_head"] = completed_head
+    session["patchpal"] = True
+    save_session(rhel_repo, session)
+
+    status(f"Patchpal replay complete -- {len(replay_set)} commits re-applied.")
 
 
 # ---------------------------------------------------------------------------
@@ -2063,7 +2162,8 @@ def main():
 
     branch = args.branch or os.path.basename(args.subsystem.rstrip("/"))
     output_dir = args.output_dir or os.path.join(
-        os.path.dirname(rhel_repo), "backport",
+        os.path.dirname(rhel_repo), "backports",
+        str(args.rhel),
         os.path.basename(args.subsystem.rstrip("/")),
     )
     toolbox_name = args.toolbox or f"rhel{args.rhel}"
@@ -2077,6 +2177,45 @@ def main():
         )
     if not scope_paths:
         die("No valid scope paths found. Check --subsystem and upstream repo.")
+
+    # -- Completion check --
+    current_head = git("rev-parse HEAD",
+                       cwd=rhel_repo, check=False).stdout.strip()
+    completed_head = session.get("_completed_head")
+    base_commit = session.get("_base_commit")
+
+    if completed_head and current_head == completed_head:
+        if args.patchpal and not session.get("patchpal") and base_commit:
+            replay_with_patchpal(
+                rhel_repo, upstream_repo, base_commit,
+                scope_paths, args.conflict_policy, args.build_policy,
+                toolbox_name, args.subsystem, args.jira,
+                args.upstream_version, args.rhel,
+                output_dir, args.signed_off_by,
+                args.assisted_by, session,
+            )
+            return
+        else:
+            status("Backport already completed with current session.")
+            for label, field in [
+                ("subsystem",        "subsystem"),
+                ("rhel",             "rhel"),
+                ("upstream-version", "upstream_version"),
+                ("signed-off-by",    "signed_off_by"),
+                ("jira",             "jira"),
+                ("toolbox",          "toolbox"),
+            ]:
+                val = getattr(args, field, None)
+                if val is not None:
+                    info(f"  {label+':':<20s} {val}")
+            patches_dir = os.path.join(output_dir, "patches")
+            if os.path.isdir(patches_dir):
+                patch_files = sorted(glob(os.path.join(patches_dir, "*.patch")))
+                info(f"  {'patches:':<20s} {patches_dir} "
+                     f"({len(patch_files)} files)")
+            info("\n  Re-run with different parameters or from a new branch "
+                 "to start a new backport.")
+            return
 
     # -- Single-commit pick mode --
     if args.pick:
@@ -2250,6 +2389,13 @@ def main():
 
     # -- Phase 5 --
     patch_count = generate_output(rhel_repo, output_dir, base_commit, omit)
+
+    # Mark completion in session
+    completed_head = git("rev-parse HEAD",
+                         cwd=rhel_repo, check=False).stdout.strip()
+    session["_completed_head"] = completed_head
+    session["_base_commit"] = base_commit
+    save_session(rhel_repo, session)
 
     # -- Phase 6 --
     print_summary(

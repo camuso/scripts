@@ -61,8 +61,8 @@ e.g.\&
 Used for scope-path auto-discovery and branch naming.
 .TP
 .BI \-\-rhel " VERSION"
-RHEL major version number (e.g.\&
-.BR 9 ", " 10 ).
+RHEL version (e.g.\&
+.BR 9 ", " 10 ", " 10.3 ).
 .TP
 .BI \-\-upstream\-repo " DIR"
 Path to the upstream Linux kernel git repository.
@@ -98,7 +98,7 @@ path.
 .BI \-\-output\-dir " DIR"
 Output directory for patches, reports, and saved state.
 Default:
-.IR <rhel\-repo>/../backport/<subsystem>/ .
+.IR <rhel\-repo>/../backports/<rhel>/<subsystem>/ .
 .TP
 .BI \-\-conflict\-policy " POLICY"
 How to handle in-scope file conflicts.
