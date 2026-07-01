@@ -1968,7 +1968,11 @@ def generate_output(rhel_repo, output_dir, base_commit, omit_list):
 
     git(f"format-patch -o {patches_dir} {base_commit}..HEAD", cwd=rhel_repo)
     patch_files = sorted(glob(os.path.join(patches_dir, "*.patch")))
-    info(f"Generated {len(patch_files)} patch files in {patches_dir}")
+    n = len(patch_files)
+    print(f"\n{STA}{'=' * 74}{OFF}")
+    print(f"  {BLD}Patch series generated: {n} file{'s' if n != 1 else ''}{OFF}")
+    print(f"  {INF}{patches_dir}{OFF}")
+    print(f"{STA}{'=' * 74}{OFF}\n")
 
     omitted_path = os.path.join(output_dir, "Omitted-fixes")
     with open(omitted_path, "w") as fh:
