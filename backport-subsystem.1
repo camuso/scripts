@@ -1,0 +1,303 @@
+.\" Man page for backport-subsystem
+.TH BACKPORT-SUBSYSTEM 1 "June 2026" "backport-subsystem" "User Commands"
+.SH NAME
+backport-subsystem \- automated RHEL kernel subsystem backport
+.SH SYNOPSIS
+.B backport-subsystem
+.RI [ OPTIONS ]
+.PP
+Must be run from inside a RHEL kernel git repository.
+Session parameters are prompted interactively on first run and
+reused automatically on subsequent runs.
+.SH DESCRIPTION
+.B backport-subsystem
+cherry-picks upstream Linux kernel commits for a given subsystem into a
+RHEL or CentOS Stream kernel tree.
+It discovers relevant scope paths (source directories, headers,
+documentation, device-tree bindings), finds the divergence point
+between upstream and RHEL, filters out already-applied commits, and
+applies the remaining ones with gort-style commit messages suitable
+for RHEL merge requests.
+.PP
+Out-of-scope files touched by tree-wide commits are automatically
+excluded.
+In-scope conflicts are resolved according to the selected
+.B \-\-conflict\-policy
+or interactively via
+.BR patchpal (1)
+when
+.B \-\-patchpal
+is given.
+.PP
+.BR patchpal (1)
+integration is a key feature for developers who already use patchpal
+for cherry-pick conflict resolution.
+When
+.B \-\-patchpal
+is enabled, clean cherry-picks proceed automatically while conflicts
+in subsystem files launch the patchpal GUI, allowing visual,
+three-way merge resolution.
+Out-of-scope conflicts (MAINTAINERS, files outside the target
+subsystem) are still resolved automatically.
+This combines the speed of batch backporting with the precision of
+interactive conflict resolution.
+.PP
+A
+.B dist-configs
+build is run inside a toolbox container to validate kernel configs,
+with caching so subsequent runs skip the rebuild when HEAD is
+unchanged.
+.SH OPTIONS
+.SS "Session parameters (prompted interactively or via CLI)"
+These are saved to
+.I .backport/session.json
+and reused across runs.
+They can also be provided on the command line to override session values.
+.TP
+.BI \-\-subsystem " PATH"
+Subsystem directory relative to the kernel tree root,
+e.g.\&
+.IR drivers/char/ipmi .
+Used for scope-path auto-discovery and branch naming.
+.TP
+.BI \-\-rhel " VERSION"
+RHEL major version number (e.g.\&
+.BR 9 ", " 10 ).
+.TP
+.BI \-\-upstream\-repo " DIR"
+Path to the upstream Linux kernel git repository.
+.TP
+.BI \-\-upstream\-version " TAG"
+Upstream version tag that marks the end of the range,
+e.g.\&
+.BR v7.1 " or " v7.1\-rc3 .
+.TP
+.BR \-s ", " \-\-signed\-off\-by " " \fI"NAME <EMAIL>"\fR
+Signed-off-by trailer added to every commit message.
+.SS "Optional arguments"
+.TP
+.BI \-\-jira " URL"
+JIRA ticket URL.
+Default:
+.BR RHEL\-PLACEHOLDER .
+.TP
+.BI \-\-extra\-paths " PATH ..."
+Additional scope paths to include alongside the auto-discovered ones.
+.TP
+.BI \-\-only " PATH ..."
+Use only these scope paths and skip auto-discovery entirely.
+Useful for catch-up runs on specific directories such as
+Documentation or include headers.
+.TP
+.BI \-\-branch " NAME"
+Branch name to create or check out.
+Default: the leaf component of the
+.B \-\-subsystem
+path.
+.TP
+.BI \-\-output\-dir " DIR"
+Output directory for patches, reports, and saved state.
+Default:
+.IR <rhel\-repo>/../backport/<subsystem>/ .
+.TP
+.BI \-\-conflict\-policy " POLICY"
+How to handle in-scope file conflicts.
+.RS
+.TP
+.B theirs
+Accept the upstream version (default).
+.TP
+.B abort
+Abort the cherry-pick on any in-scope conflict.
+.RE
+.TP
+.BI \-\-build\-policy " POLICY"
+When to run a build test inside the toolbox container.
+.RS
+.TP
+.B conflict
+Build only after commits that had conflicts (default).
+.TP
+.B every
+Build after every commit.
+.TP
+.B none
+Never build.
+.RE
+.TP
+.B \-\-dry\-run
+Classify and list upstream commits without cherry-picking.
+Useful for reviewing what would be applied before committing to a run.
+.TP
+.B \-\-continue
+Resume from previously saved state in the output directory.
+.TP
+.B \-\-yes
+Skip the interactive confirmation menu and proceed immediately.
+.TP
+.BI \-\-assisted\-by " \"NAME <EMAIL>\""
+Assisted-by trailer added to commit messages, e.g.\&
+.IR "Claude <no-reply@anthropic.com>" .
+.TP
+.BI \-\-pick " HASH"
+Cherry-pick a single upstream commit (by its full 40-character hash)
+onto the current HEAD with conflict resolution and a gort-style
+commit message.
+Skips the normal multi-commit workflow phases.
+.TP
+.BI \-\-divergence " HASH"
+Upstream commit hash to use as the divergence point, skipping
+automatic detection.
+.TP
+.B \-\-patchpal
+Launch the
+.BR patchpal (1)
+GUI for interactive resolution of in-scope cherry-pick conflicts.
+Requires an active graphical display
+.RB ( DISPLAY
+or
+.BR WAYLAND_DISPLAY )
+and
+.B patchpal
+on
+.BR PATH .
+Out-of-scope files are still resolved automatically.
+Clean cherry-picks are unaffected.
+.TP
+.BI \-\-toolbox " NAME"
+Toolbox container name for
+.B dist-configs
+builds.
+Default:
+.BI rhel RHEL
+(e.g.\&
+.BR rhel10 ).
+.SH MODES
+.SS "Full backport (default)"
+Discovers scope paths from the subsystem directory, finds the
+divergence point between upstream and RHEL, lists pending
+upstream commits, and cherry-picks them in order.
+Each commit receives a gort-style message with JIRA, upstream status,
+conflict notes, the original commit metadata, and sign-off trailers.
+.SS "Single-commit pick (\-\-pick)"
+Cherry-picks exactly one upstream commit onto the current HEAD.
+The upstream repository is automatically configured as a git remote
+if needed, ensuring the commit object is reachable.
+Requires
+.B \-\-subsystem
+for scope-path context.
+.SH SESSIONS
+.B backport-subsystem
+automatically manages a session file at
+.I .backport/session.json
+in the current repository.
+There are no flags to manage sessions; they are handled transparently.
+.SS "New session detection"
+A new session is detected when:
+.IP \(bu 2
+No session file exists (first run in this repo), or
+.IP \(bu 2
+The current HEAD equals the upstream tracking tip (at origin), or
+.IP \(bu 2
+The current branch differs from the branch recorded in the last session.
+.PP
+When a new session is detected, the user is prompted interactively
+for all parameters.
+Previous values (from the last session) are shown as defaults in
+brackets; press Enter to keep them.
+Required fields must have a value; optional fields can be cleared
+by typing
+.BR clear .
+.SS "Mid-session"
+When the user has local commits beyond origin on the same branch,
+the saved session is reused automatically with no prompting.
+.PP
+If session-level arguments are provided on the command line
+mid-session, the script asks
+.BR "Is this a new session?" .
+Answering
+.B y
+triggers the full interactive prompt; answering
+.B n
+updates the existing session with the CLI values.
+.SS "Sticky parameters"
+Parameters like
+.BR \-\-patchpal ", " \-\-toolbox ", " \-\-signed\-off\-by ", "
+.BR \-\-conflict\-policy ", and " \-\-build\-policy
+carry their values across sessions as defaults in the interactive
+prompt.
+.SS "Transient flags"
+.BR \-\-dry\-run ", " \-\-pick ", " \-\-continue ", " \-\-yes ", and "
+.B \-\-divergence
+are per-invocation and never saved to the session.
+.SH EXAMPLES
+First run (prompts for session parameters):
+.PP
+.RS
+.nf
+cd ~/kernels/centos\-9
+backport-subsystem \-\-dry\-run
+.fi
+.RE
+.PP
+Subsequent runs reuse the session automatically:
+.PP
+.RS
+.nf
+backport-subsystem
+backport-subsystem \-\-dry\-run
+.fi
+.RE
+.PP
+Pick a single upstream commit (session provides the rest):
+.PP
+.RS
+.nf
+backport-subsystem \-\-pick a8aebe93a4938c0ca1941eeaae821738f869be3d
+.fi
+.RE
+.PP
+Interactive conflict resolution with patchpal:
+.PP
+.RS
+.nf
+backport-subsystem \-\-patchpal
+.fi
+.RE
+.PP
+Override a session value for one run:
+.PP
+.RS
+.nf
+backport-subsystem \-\-upstream\-version v7.2
+.fi
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+All commits applied successfully (or dry-run completed).
+.TP
+.B 1
+An error occurred: invalid arguments, git failures, unresolvable
+conflicts, build failures, or missing prerequisites.
+.SH FILES
+.TP
+.I .backport/session.json
+Automatic session file storing parameters and metadata.
+.TP
+.I .backport\-dist\-configs\-head
+Stamp file in the RHEL repo tracking the HEAD hash for
+.B dist-configs
+caching.
+.TP
+.I <output\-dir>/state.json
+Saved state for
+.B \-\-continue
+resumption.
+.SH SEE ALSO
+.BR rhel\-upstream\-diff (1),
+.BR patchpal (1),
+.BR git\-cherry\-pick (1),
+.BR toolbox (1)
+.SH AUTHORS
+Tony Camuso <tcamuso@redhat.com>

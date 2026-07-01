@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,23 @@ SUB = "-" * 74
 
 CONFLICT_POLICIES = ["theirs", "abort"]
 BUILD_POLICIES = ["conflict", "every", "none"]
+
+_cherrypick_repo = None
+
+
+def _cleanup_and_exit(*_args):
+    """Handle Ctrl-C: abort any in-progress cherry-pick, then exit."""
+    if _cherrypick_repo:
+        subprocess.run("git cherry-pick --abort",
+                       shell=True, cwd=_cherrypick_repo,
+                       capture_output=True)
+        subprocess.run("git reset HEAD",
+                       shell=True, cwd=_cherrypick_repo,
+                       capture_output=True)
+        print(f"\n{WRN}Interrupted -- cherry-pick aborted.{OFF}")
+    else:
+        print(f"\n{WRN}Interrupted.{OFF}")
+    sys.exit(130)
 
 # ---------------------------------------------------------------------------
 # Spinner for long-running operations
@@ -152,46 +170,60 @@ def header(title):
 # Argument parsing
 # ---------------------------------------------------------------------------
 
+def _show_manpage():
+    """Display the man page if possible, otherwise fall back to argparse."""
+    manpage = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "backport-subsystem.1")
+    if os.path.isfile(manpage) and sys.stdout.isatty():
+        rc = subprocess.call(["man", manpage])
+        if rc == 0:
+            sys.exit(0)
+    return False
+
+
+class _ManPageAction(argparse.Action):
+    """Custom argparse action: show man page, fall back to --help text."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS, **kwargs):
+        super().__init__(option_strings, dest=dest, default=default,
+                         nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if not _show_manpage():
+            parser.print_help()
+        sys.exit(0)
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Automated RHEL kernel subsystem backport",
+        add_help=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             examples:
-              # Full subsystem backport with auto-discovered scope paths:
-              backport-subsystem --subsystem drivers/char/ipmi --rhel 9 \\
-                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
-                --upstream-version v6.15-rc3 -s "Name <email>"
+              # First run (from inside the RHEL repo) -- prompts for session:
+              cd ~/kernels/centos-9
+              backport-subsystem --dry-run
 
-              # Catch up Documentation only (no auto-discovery):
-              backport-subsystem --subsystem drivers/char/ipmi --rhel 9 \\
-                --only Documentation/devicetree/bindings/ipmi \\
-                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
-                --upstream-version v6.15-rc3 -s "Name <email>"
+              # Subsequent runs reuse the session automatically:
+              backport-subsystem
+              backport-subsystem --pick abc123def456
+              backport-subsystem --dry-run
 
-              # Multiple explicit paths, no auto-discovery:
-              backport-subsystem --subsystem drivers/char/ipmi --rhel 9 \\
-                --only Documentation/devicetree/bindings/ipmi \\
-                      Documentation/ipmi \\
-                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
-                --upstream-version v6.15-rc3 -s "Name <email>"
-
-              # Pick a single upstream commit onto current HEAD:
-              backport-subsystem --pick abc123def456 \\
-                --subsystem drivers/char/ipmi --rhel 9 \\
-                --rhel-repo ~/kernels/centos-9 --upstream-repo ~/kernels/upstream \\
-                --upstream-version v6.15-rc3 -s "Name <email>"
+              # Override a session value for one run:
+              backport-subsystem --upstream-version v7.2
         """),
     )
-    p.add_argument("--subsystem", required=True,
+    p.add_argument("--subsystem", default=None,
                     help="Subsystem path, e.g. drivers/input")
-    p.add_argument("--rhel", required=True, type=int,
+    p.add_argument("--rhel", default=None, type=int,
                     help="RHEL major version (9, 10, ...)")
-    p.add_argument("--rhel-repo", required=True,
-                    help="Path to RHEL kernel git repo")
-    p.add_argument("--upstream-repo", required=True,
+    p.add_argument("--rhel-repo", default=".",
+                    help=argparse.SUPPRESS)
+    p.add_argument("--upstream-repo", default=None,
                     help="Path to upstream kernel git repo")
-    p.add_argument("--upstream-version", required=True,
+    p.add_argument("--upstream-version", default=None,
                     help="Upstream version tag, e.g. v7.1-rc3")
     p.add_argument("--jira", default="RHEL-PLACEHOLDER",
                     help="JIRA URL (default: RHEL-PLACEHOLDER)")
@@ -216,7 +248,7 @@ def parse_args():
                     help="Resume from saved state")
     p.add_argument("--yes", action="store_true",
                     help="Skip interactive confirmation menu")
-    p.add_argument("-s", "--signed-off-by", required=True,
+    p.add_argument("-s", "--signed-off-by", default=None,
                     help="Signed-off-by trailer (e.g. 'Name <email>')")
     p.add_argument("--assisted-by", default="",
                     help="Assisted-by trailer (e.g. 'Claude <no-reply@anthropic.com>')")
@@ -231,7 +263,200 @@ def parse_args():
                          "in-scope cherry-pick conflicts")
     p.add_argument("--toolbox", default=None,
                     help="Toolbox container name (default: rhel<RHEL>)")
+    p.add_argument("-h", "--help", action=_ManPageAction,
+                    help="Show the man page (or short help if piped)")
     return p.parse_args()
+
+# ---------------------------------------------------------------------------
+# Automatic session management
+# ---------------------------------------------------------------------------
+
+SESSION_FIELDS = [
+    "subsystem", "rhel", "upstream_repo", "upstream_version",
+    "signed_off_by", "jira", "toolbox", "only_paths", "extra_paths",
+    "patchpal", "conflict_policy", "build_policy", "assisted_by",
+]
+
+REQUIRED_SESSION = [
+    "subsystem", "rhel", "upstream_repo", "upstream_version",
+    "signed_off_by",
+]
+
+TRANSIENT_ARGS = {"dry_run", "pick", "resume", "yes", "divergence",
+                  "branch", "output_dir", "rhel_repo"}
+
+SESSION_FILE = os.path.join(".backport", "session.json")
+
+
+def _session_path(repo_root):
+    return os.path.join(repo_root, SESSION_FILE)
+
+
+def load_session(repo_root):
+    """Load .backport/session.json or return empty dict."""
+    path = _session_path(repo_root)
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def save_session(repo_root, session):
+    """Write session file, updating branch/head metadata."""
+    branch = git("rev-parse --abbrev-ref HEAD",
+                 cwd=repo_root, check=False).stdout.strip()
+    head = git("rev-parse HEAD",
+               cwd=repo_root, check=False).stdout.strip()
+    session["_last_branch"] = branch
+    session["_last_head"] = head
+
+    path = _session_path(repo_root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(session, f, indent=2)
+        f.write("\n")
+
+
+def detect_session_boundary(repo_root, session):
+    """Return True if this is a new session (at origin or branch changed)."""
+    if not session:
+        return True
+    last_branch = session.get("_last_branch")
+    cur_branch = git("rev-parse --abbrev-ref HEAD",
+                     cwd=repo_root, check=False).stdout.strip()
+    cur_head = git("rev-parse HEAD",
+                   cwd=repo_root, check=False).stdout.strip()
+    tracking_tip = git("rev-parse @{upstream}",
+                       cwd=repo_root, check=False).stdout.strip()
+
+    at_origin = (cur_head == tracking_tip) if tracking_tip else True
+    branch_changed = (cur_branch != last_branch) if last_branch else True
+    return at_origin or branch_changed
+
+
+def has_session_cli_args(args):
+    """Return True if the user provided session-level args on the CLI."""
+    for field in SESSION_FIELDS:
+        val = getattr(args, field, None)
+        if field == "patchpal" and val:
+            return True
+        if field in ("extra_paths",) and val:
+            return True
+        if field in ("only_paths",) and val is not None:
+            return True
+        if field not in ("patchpal", "extra_paths", "only_paths") and val is not None:
+            return True
+    return False
+
+
+def _prompt_field(label, default, required=False):
+    """Prompt for a single field value. Returns the new value or default."""
+    if default is None or default == "":
+        prompt_str = f"    {label}: "
+    else:
+        prompt_str = f"    {label} [{default}]: "
+
+    while True:
+        val = input(prompt_str).strip()
+        if val.lower() == "clear":
+            return None if not required else default
+        if val == "":
+            if required and (default is None or default == ""):
+                warn(f"    {label} is required. Please enter a value.")
+                continue
+            return default
+        return val
+
+
+def prompt_session(previous):
+    """Interactively prompt for session parameters.
+
+    previous is the old session dict (may be empty for first run).
+    Sticky fields carry their values as defaults.
+    Returns a new session dict.
+    """
+    session = {}
+
+    print()
+    status("Session setup")
+    info("  Enter to keep [default], 'clear' to remove optional fields")
+    print()
+
+    info("  Required:")
+    for field, label in [
+        ("subsystem",        "subsystem"),
+        ("rhel",             "rhel"),
+        ("upstream_repo",    "upstream-repo"),
+        ("upstream_version", "upstream-version"),
+        ("signed_off_by",    "signed-off-by"),
+    ]:
+        default = previous.get(field)
+        if field == "rhel" and default is not None:
+            default = str(default)
+        val = _prompt_field(label, default, required=True)
+        session[field] = int(val) if field == "rhel" else val
+
+    print()
+    info("  Optional (Enter to keep, 'clear' to remove):")
+    for field, label in [
+        ("jira",             "jira"),
+        ("toolbox",          "toolbox"),
+        ("patchpal",         "patchpal"),
+        ("conflict_policy",  "conflict-policy"),
+        ("build_policy",     "build-policy"),
+        ("assisted_by",      "assisted-by"),
+        ("only_paths",       "only-paths"),
+        ("extra_paths",      "extra-paths"),
+    ]:
+        default = previous.get(field)
+        if field == "patchpal":
+            default = "yes" if default else ("no" if default is not None else None)
+            val = _prompt_field(label, default)
+            session[field] = val in ("yes", "y", "true", "1") if val else False
+        elif field in ("only_paths", "extra_paths"):
+            default = " ".join(default) if default else None
+            val = _prompt_field(label, default)
+            session[field] = val.split() if val else []
+        else:
+            val = _prompt_field(label, default)
+            session[field] = val
+
+    return session
+
+
+def apply_session_to_args(args, session):
+    """Copy session values into args, CLI args take precedence."""
+    for field in SESSION_FIELDS:
+        cli_val = getattr(args, field, None)
+        sess_val = session.get(field)
+        if field == "patchpal":
+            if not cli_val and sess_val:
+                setattr(args, field, sess_val)
+        elif field in ("extra_paths",):
+            if not cli_val and sess_val:
+                setattr(args, field, sess_val)
+        elif field == "only_paths":
+            if cli_val is None and sess_val is not None:
+                setattr(args, field, sess_val)
+        else:
+            if cli_val is None and sess_val is not None:
+                setattr(args, field, sess_val)
+
+
+def merge_cli_into_session(args, session):
+    """Update session dict with any CLI-provided session-level args."""
+    for field in SESSION_FIELDS:
+        cli_val = getattr(args, field, None)
+        if field == "patchpal" and cli_val:
+            session[field] = cli_val
+        elif field in ("extra_paths",) and cli_val:
+            session[field] = cli_val
+        elif field == "only_paths" and cli_val is not None:
+            session[field] = cli_val
+        elif field not in ("patchpal", "extra_paths", "only_paths") and cli_val is not None:
+            session[field] = cli_val
+    return session
+
 
 # ---------------------------------------------------------------------------
 # Scope-path auto-discovery
@@ -1571,6 +1796,9 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
     r = git(f"log --format='%s' -1 {commit_hash}", cwd=upstream_repo)
     subject = r.stdout.strip()
 
+    global _cherrypick_repo
+    _cherrypick_repo = rhel_repo
+
     rc, _, err = run_quiet(
         f"git cherry-pick --no-commit {commit_hash}", cwd=rhel_repo,
     )
@@ -1688,6 +1916,7 @@ def cherry_pick_commit(commit_hash, upstream_repo, rhel_repo, scope_paths,
         fh.write(msg)
 
     git(f"commit --allow-empty --file={msg_file}", cwd=rhel_repo)
+    _cherrypick_repo = None
 
     # Post-commit validation against upstream
     validation = validate_patch_vs_upstream(
@@ -1784,6 +2013,36 @@ def print_summary(params, total_evaluated, keep_count, omit_count,
 def main():
     args = parse_args()
 
+    rhel_repo = os.path.abspath(args.rhel_repo)
+    if not os.path.isdir(os.path.join(rhel_repo, ".git")):
+        die("Must be run from a RHEL kernel git repo.")
+
+    # -- Session management --
+    session = load_session(rhel_repo)
+    is_boundary = detect_session_boundary(rhel_repo, session)
+
+    if is_boundary:
+        session = prompt_session(session)
+    elif has_session_cli_args(args):
+        try:
+            answer = input("\n  Is this a new session? [y/N] ").strip().lower()
+        except KeyboardInterrupt:
+            print()
+            die("Aborted by user.")
+        if answer in ("y", "yes"):
+            session = prompt_session(session)
+        else:
+            session = merge_cli_into_session(args, session)
+
+    apply_session_to_args(args, session)
+
+    missing = [f for f in REQUIRED_SESSION if getattr(args, f, None) is None]
+    if missing:
+        labels = [f.replace("_", "-") for f in missing]
+        die(f"Missing required parameters: --{', --'.join(labels)}")
+
+    save_session(rhel_repo, session)
+
     if args.patchpal:
         if not shutil.which("patchpal"):
             die("--patchpal requires patchpal on PATH. "
@@ -1793,11 +2052,8 @@ def main():
             die("--patchpal requires a graphical display "
                 "(DISPLAY or WAYLAND_DISPLAY must be set).")
 
-    rhel_repo = os.path.abspath(args.rhel_repo)
     upstream_repo = os.path.abspath(args.upstream_repo)
 
-    if not os.path.isdir(os.path.join(rhel_repo, ".git")):
-        die(f"Not a git repo: {rhel_repo}")
     if not os.path.isdir(os.path.join(upstream_repo, ".git")):
         die(f"Not a git repo: {upstream_repo}")
 
@@ -2006,5 +2262,7 @@ def main():
     )
 
 
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, _cleanup_and_exit)
     main()
