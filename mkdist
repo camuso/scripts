@@ -108,6 +108,9 @@ main() {
 	local use_toolbox=true
 	local build_debug=false
 	local toolbox_name="${TOOLBOX:-}"
+	local logfile="../mkdist.log"
+
+	exec > >(tee "$logfile") 2>&1
 
 	while getopts "dt:nh" opt; do
 		case "$opt" in
