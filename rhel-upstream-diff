@@ -171,7 +171,7 @@ show_diff() {
 			git show --stat "$upstream"
 		fi
 	else
-		vimdiff "$rhel_patch" "$upstream_patch"
+		vimdiff -c 'redraw!' "$rhel_patch" "$upstream_patch"
 	fi
 
 	rm -f "$rhel_patch" "$upstream_patch"
