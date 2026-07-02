@@ -1,13 +1,19 @@
 #!/bin/bash
 
 declare script_name="$(basename "$0")"
+declare conf_dir="$HOME/.config/rhel-upstream-diff"
+declare conf_file="$conf_dir/rhel-upstream-diff.conf"
 declare rhel_commit=""
 declare upstream_remote=""
 declare -i stat_only=0
 
+declare bold=$'\e[1m'
+declare yellow=$'\e[1;33m'
+declare rst=$'\e[0m'
+
 declare usagestr="$(
 cat <<EOF
-$script_name [-h|--help|help] -r <remote-or-path> [-s|--stat] <rhel-commit>
+$script_name [-h|--help|help] [-r <remote-or-path>] [-s|--stat] <rhel-commit>
 
 Extract the upstream commit referenced in a RHEL backport commit
 and vimdiff the two patches.
@@ -18,20 +24,24 @@ using these patterns (in priority order):
   2. 'commit <hash> upstream'
   3. '(cherry picked from commit <hash>)'
 
+The upstream remote or repo path is saved to:
+  $conf_dir/rhel-upstream-diff.conf
+so it only needs to be specified once. Use -r to change it.
+
 Arguments:
   rhel-commit            RHEL commit hash (or any git rev)
 
 Options:
   -r, --remote <name>    Upstream remote name or path to a separate
-                         upstream repo (required)
+                         upstream repo (saved for future runs)
   -s, --stat             Show diffstat comparison instead of vimdiff
   -h, --help             Show this help message
 
 Examples:
   $script_name -r upstream abc1234
-  $script_name -r linus abc1234
+  $script_name abc1234
   $script_name -r /work/upstream/kernel abc1234
-  $script_name -r upstream --stat abc1234
+  $script_name --stat abc1234
 
 EOF
 )"
@@ -41,6 +51,31 @@ EOF
 #*
 usage() {
 	echo -e "$usagestr"
+}
+
+#===========================
+#** load_conf: load saved upstream remote from conf file
+#*
+load_conf() {
+	[[ -f "$conf_file" ]] || return 1
+	local val
+	val=$(grep -m1 '^upstream_remote=' "$conf_file" 2>/dev/null)
+	val="${val#upstream_remote=}"
+	[[ -n "$val" ]] && { upstream_remote="$val"; return 0; }
+	return 1
+}
+
+#===========================
+#** save_conf: persist upstream remote to conf file
+#*
+# Arguments
+#   $1 - upstream remote name or path
+#*
+save_conf() {
+	local val="$1"
+
+	mkdir -p "$conf_dir"
+	echo "upstream_remote=$val" > "$conf_file"
 }
 
 #===========================
@@ -172,7 +207,13 @@ main() {
 		shift
 	done
 
-	[[ -z "$upstream_remote" ]] && exitme 1 "Missing required -r <remote-or-path>."
+	if [[ -n "$upstream_remote" ]]; then
+		save_conf "$upstream_remote"
+	else
+		load_conf || exitme 1 \
+			"\n${yellow}${bold}No upstream remote configured. Use -r <remote-or-path> to set one.${rst}\n"
+	fi
+
 	[[ -z "$rhel_commit" ]] && exitme 1 "Missing RHEL commit hash."
 
 	git rev-parse --verify "$rhel_commit" >/dev/null 2>&1 \
