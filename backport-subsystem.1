@@ -192,40 +192,47 @@ automatically manages a session file at
 .I .backport/session.json
 in the current repository.
 There are no flags to manage sessions; they are handled transparently.
-.SS "New session detection"
-A new session is detected when:
-.IP \(bu 2
-No session file exists (first run in this repo), or
-.IP \(bu 2
-The current HEAD equals the upstream tracking tip (at origin), or
-.IP \(bu 2
-The current branch differs from the branch recorded in the last session.
+.SS "Interactive mode (no CLI arguments)"
+When invoked without session-level arguments on the command line,
+an interactive menu is displayed showing all parameters with their
+current values (loaded from the saved session, if any).
 .PP
-When a new session is detected, the user is prompted interactively
-for all parameters.
-Previous values (from the last session) are shown as defaults in
-brackets; press Enter to keep them.
-Required fields must have a value; optional fields can be cleared
-by typing
-.BR clear .
-.SS "Mid-session"
-When the user has local commits beyond origin on the same branch,
-the saved session is reused automatically with no prompting.
+Each parameter is labelled with a single\-character hotkey
+.RB ( s ", " r ", " u ", " v ", " b ", " j ", " t ", " p ", " c ", " d ", " a ", " o ", " e ).
+Press a key to edit that parameter.
+All menu input is single\-keypress (no Enter required).
 .PP
-If session-level arguments are provided on the command line
-mid-session, the script asks
-.BR "Is this a new session?" .
-Answering
-.B y
-triggers the full interactive prompt; answering
-.B n
-updates the existing session with the CLI values.
+Press
+.B g
+to accept all values and proceed (Go).
+If required fields (marked with
+.BR * )
+are not set,
+.B g
+will refuse and list what is missing.
+Press
+.B q
+to abort.
+.PP
+When editing a field, type a new value and press Enter.
+Press Enter on an empty line to keep the current value,
+or type
+.B clear
+to remove an optional field.
+The
+.B toolbox
+field presents a numbered list of available toolbox containers
+(from
+.BR "toolbox list" )
+for single\-keypress selection.
+.SS "Command-line mode"
+When session-level arguments are provided on the command line,
+they are merged into the saved session silently, with no
+interactive menu.
+This allows scripted and non\-interactive usage.
 .SS "Sticky parameters"
-Parameters like
-.BR \-\-patchpal ", " \-\-toolbox ", " \-\-signed\-off\-by ", "
-.BR \-\-conflict\-policy ", and " \-\-build\-policy
-carry their values across sessions as defaults in the interactive
-prompt.
+All session parameters carry their values across invocations
+as defaults in the interactive menu.
 .SS "Transient flags"
 .BR \-\-dry\-run ", " \-\-pick ", " \-\-continue ", " \-\-yes ", and "
 .B \-\-divergence

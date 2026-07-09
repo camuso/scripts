@@ -14,9 +14,11 @@ import signal
 import shutil
 import subprocess
 import sys
+import termios
 import textwrap
 import threading
 import time
+import tty
 from collections import defaultdict
 from glob import glob
 
@@ -317,22 +319,6 @@ def save_session(repo_root, session):
         f.write("\n")
 
 
-def detect_session_boundary(repo_root, session):
-    """Return True if this is a new session (at origin or branch changed)."""
-    if not session:
-        return True
-    last_branch = session.get("_last_branch")
-    cur_branch = git("rev-parse --abbrev-ref HEAD",
-                     cwd=repo_root, check=False).stdout.strip()
-    cur_head = git("rev-parse HEAD",
-                   cwd=repo_root, check=False).stdout.strip()
-    tracking_tip = git("rev-parse @{upstream}",
-                       cwd=repo_root, check=False).stdout.strip()
-
-    at_origin = (cur_head == tracking_tip) if tracking_tip else True
-    branch_changed = (cur_branch != last_branch) if last_branch else True
-    return at_origin or branch_changed
-
 
 def has_session_cli_args(args):
     """Return True if the user provided session-level args on the CLI."""
@@ -349,79 +335,196 @@ def has_session_cli_args(args):
     return False
 
 
-def _prompt_field(label, default, required=False):
-    """Prompt for a single field value. Returns the new value or default."""
-    if default is None or default == "":
-        prompt_str = f"    {label}: "
-    else:
-        prompt_str = f"    {label} [{default}]: "
+def _getch():
+    """Read a single keypress without requiring Enter."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    if ch == '\x03':
+        raise KeyboardInterrupt
+    return ch
 
-    while True:
+
+# Menu items: (key, field, label, required)
+_MENU_ITEMS = [
+    ("s", "subsystem",        "subsystem",        True),
+    ("r", "rhel",             "rhel",             True),
+    ("u", "upstream_repo",    "upstream-repo",    True),
+    ("v", "upstream_version", "upstream-version", True),
+    ("b", "signed_off_by",    "signed-off-by",    True),
+    ("j", "jira",             "jira",             False),
+    ("t", "toolbox",          "toolbox",          False),
+    ("p", "patchpal",         "patchpal",         False),
+    ("c", "conflict_policy",  "conflict-policy",  False),
+    ("d", "build_policy",     "build-policy",     False),
+    ("a", "assisted_by",      "assisted-by",      False),
+    ("o", "only_paths",       "only-paths",       False),
+    ("e", "extra_paths",      "extra-paths",      False),
+]
+
+
+def _format_value(field, val):
+    """Format a session value for display."""
+    if val is None or val == "" or val == []:
+        return f"{WRN}(not set){OFF}"
+    if field == "patchpal":
+        return f"{STA}yes{OFF}" if val else f"{INF}no{OFF}"
+    if isinstance(val, list):
+        return " ".join(str(v) for v in val)
+    return str(val)
+
+
+def _list_toolboxes():
+    """Return a list of available toolbox container names."""
+    try:
+        r = subprocess.run("toolbox list -c", shell=True,
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=10)
+        if r.returncode != 0 or not r.stdout.strip():
+            return []
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    names = []
+    for line in r.stdout.strip().splitlines()[1:]:
+        cols = line.split()
+        if len(cols) >= 2:
+            names.append(cols[1])
+    return names
+
+
+def _pick_toolbox(current):
+    """Present available toolboxes as a numbered list for selection."""
+    toolboxes = _list_toolboxes()
+    if not toolboxes:
+        warn("    No toolbox containers found. Enter a name manually.")
+        display = str(current) if current else ""
+        prompt_str = (f"    toolbox [{display}]: " if display
+                      else "    toolbox: ")
         val = input(prompt_str).strip()
-        if val.lower() == "clear":
-            return None if not required else default
+        return current if val == "" else (None if val.lower() == "clear" else val)
+
+    print()
+    cur_marker = ""
+    for i, name in enumerate(toolboxes, 1):
+        cur_marker = f" {STA}<-- current{OFF}" if name == current else ""
+        print(f"    {MNU}{i}{OFF}  {name}{cur_marker}")
+    print(f"    {MNU}0{OFF}  (enter manually)")
+    if current:
+        print(f"\n    Current: {BLD}{current}{OFF}")
+    print(f"    Press a number, or {MNU}Enter{OFF} to keep current: ", end="",
+          flush=True)
+
+    ch = _getch()
+    print()
+
+    if ch in ('\r', '\n'):
+        return current
+    if ch == '0':
+        display = str(current) if current else ""
+        prompt_str = (f"    toolbox [{display}]: " if display
+                      else "    toolbox: ")
+        val = input(prompt_str).strip()
+        return current if val == "" else (None if val.lower() == "clear" else val)
+    if ch.isdigit():
+        idx = int(ch) - 1
+        if 0 <= idx < len(toolboxes):
+            info(f"    Selected: {toolboxes[idx]}")
+            return toolboxes[idx]
+
+    warn(f"    Invalid selection '{ch}'")
+    return current
+
+
+def _edit_field(field, label, current, required):
+    """Prompt the user to edit a single field. Returns the new value."""
+    if field == "toolbox":
+        return _pick_toolbox(current)
+    elif field == "patchpal":
+        display = "yes" if current else ("no" if current is not None else "")
+        prompt_str = f"    {label} [yes/no] ({display}): "
+        val = input(prompt_str).strip().lower()
         if val == "":
-            if required and (default is None or default == ""):
-                warn(f"    {label} is required. Please enter a value.")
-                continue
-            return default
-        return val
+            return current
+        return val in ("yes", "y", "true", "1")
+    elif field in ("only_paths", "extra_paths"):
+        display = " ".join(current) if current else ""
+        prompt_str = f"    {label} [{display}]: " if display else f"    {label}: "
+        val = input(prompt_str).strip()
+        if val == "":
+            return current
+        if val.lower() == "clear":
+            return [] if not required else current
+        return val.split()
+    else:
+        display = str(current) if current is not None else ""
+        prompt_str = f"    {label} [{display}]: " if display else f"    {label}: "
+        while True:
+            val = input(prompt_str).strip()
+            if val == "":
+                if required and not display:
+                    warn(f"    {label} is required.")
+                    continue
+                return current
+            if val.lower() == "clear":
+                return None if not required else current
+            return val
+
+
+def _print_menu(session):
+    """Print the parameter menu with current values."""
+    print(f"\n{MNU}    {'Session parameters'}{OFF}")
+    print(f"    {'─' * 50}")
+    for key, field, label, required in _MENU_ITEMS:
+        val = session.get(field)
+        req = f"{CAU}*{OFF}" if required else " "
+        print(f"  {MNU}{key}{OFF}{req} {label+':':<20s} "
+              f"{_format_value(field, val)}")
+    print(f"    {'─' * 50}")
+    print(f"  {MNU}g{OFF}  Go          "
+          f"{MNU}q{OFF}  Quit")
 
 
 def prompt_session(previous):
-    """Interactively prompt for session parameters.
+    """Menu-driven session editor, gort-style.
 
-    previous is the old session dict (may be empty for first run).
-    Sticky fields carry their values as defaults.
-    Returns a new session dict.
+    Displays all parameters with single-char hotkeys. User presses
+    a key to edit one parameter, 'g' to accept and go, or 'q' to
+    quit. No Enter required -- all input is single-character via
+    _getch().
     """
-    session = {}
+    session = dict(previous)
 
-    print()
-    status("Session setup")
-    info("  Enter to keep [default], 'clear' to remove optional fields")
-    print()
+    _key_map = {key: (field, label, required)
+                for key, field, label, required in _MENU_ITEMS}
 
-    info("  Required:")
-    for field, label in [
-        ("subsystem",        "subsystem"),
-        ("rhel",             "rhel"),
-        ("upstream_repo",    "upstream-repo"),
-        ("upstream_version", "upstream-version"),
-        ("signed_off_by",    "signed-off-by"),
-    ]:
-        default = previous.get(field)
-        if field == "rhel" and default is not None:
-            default = str(default)
-        val = _prompt_field(label, default, required=True)
-        session[field] = int(val) if field == "rhel" else val
+    while True:
+        _print_menu(session)
+        ch = _getch()
 
-    print()
-    info("  Optional (Enter to keep, 'clear' to remove):")
-    for field, label in [
-        ("jira",             "jira"),
-        ("toolbox",          "toolbox"),
-        ("patchpal",         "patchpal"),
-        ("conflict_policy",  "conflict-policy"),
-        ("build_policy",     "build-policy"),
-        ("assisted_by",      "assisted-by"),
-        ("only_paths",       "only-paths"),
-        ("extra_paths",      "extra-paths"),
-    ]:
-        default = previous.get(field)
-        if field == "patchpal":
-            default = "yes" if default else ("no" if default is not None else None)
-            val = _prompt_field(label, default)
-            session[field] = val in ("yes", "y", "true", "1") if val else False
-        elif field in ("only_paths", "extra_paths"):
-            default = " ".join(default) if default else None
-            val = _prompt_field(label, default)
-            session[field] = val.split() if val else []
-        else:
-            val = _prompt_field(label, default)
-            session[field] = val
+        if ch == 'g':
+            missing = [label for _, field, label, req in _MENU_ITEMS
+                       if req and not session.get(field)]
+            if missing:
+                print()
+                warn(f"  Required fields not set: {', '.join(missing)}")
+                continue
+            print()
+            return session
 
-    return session
+        if ch in ('q', 'Q', '\x03'):
+            print()
+            die("Aborted by user.")
+
+        if ch in _key_map:
+            field, label, required = _key_map[ch]
+            print()
+            current = session.get(field)
+            new_val = _edit_field(field, label, current, required)
+            session[field] = new_val
 
 
 def apply_session_to_args(args, session):
@@ -589,87 +692,124 @@ def discover_scope_paths(subsystem, upstream_repo, extra_paths):
 # Interactive confirmation menu
 # ---------------------------------------------------------------------------
 
+_CONFIRM_FIELDS = [
+    ("1", "subsystem",        "Subsystem",        "text"),
+    ("2", "rhel",             "RHEL version",     "text"),
+    ("3", "rhel_repo",        "RHEL repo",        "text"),
+    ("4", "upstream_repo",    "Upstream repo",     "text"),
+    ("5", "upstream_version", "Upstream version",  "text"),
+    ("6", "jira",             "JIRA",             "text"),
+    ("7", "branch",           "Branch",           "text"),
+    ("8", "output_dir",       "Output dir",       "text"),
+    ("c", "conflict_policy",  "Conflict policy",  "cycle"),
+    ("b", "build_policy",     "Build policy",     "cycle"),
+]
+
+
 def show_confirmation_menu(params):
-    """Display parameters and let the user edit scope/conflict/build before proceeding."""
+    """Display parameters and let the user edit any field before proceeding.
+
+    All menu input is single-keypress via _getch() -- no Enter required.
+    Cycle fields (conflict/build policy) toggle on keypress.
+    Text fields drop to an input() prompt for editing.
+    """
 
     scope_paths = list(params["scope_paths"])
-    conflict_policy = params["conflict_policy"]
-    build_policy = params["build_policy"]
+    cycle_values = {
+        "conflict_policy": CONFLICT_POLICIES,
+        "build_policy":    BUILD_POLICIES,
+    }
 
     while True:
-        os.system("")  # enable ANSI on Windows (no-op on Linux)
-        print(f"\n{BLD}{SEP}{OFF}")
-        print(f"  {BLD}Backport Parameters{OFF}")
-        print(f"{SUB}")
-        fields = [
-            ("Subsystem", params["subsystem"]),
-            ("RHEL version", str(params["rhel"])),
-            ("RHEL repo", params["rhel_repo"]),
-            ("Upstream repo", params["upstream_repo"]),
-            ("Upstream version", params["upstream_version"]),
-            ("JIRA", params["jira"]),
-            ("Branch", params["branch"]),
-            ("Output dir", params["output_dir"]),
-            ("Conflict policy", conflict_policy),
-            ("Build policy", f"{build_policy}"
-             + (" (DEFAULT)" if build_policy == "conflict" else "")),
-        ]
-        for i, (label, value) in enumerate(fields, 1):
-            num = f"{i:>3}"
-            print(f"  {MNU}{num}.{OFF} {label:<18s}: {INF}{value}{OFF}")
+        print(f"\n{MNU}    {'Backport Parameters'}{OFF}")
+        print(f"    {'─' * 50}")
+        for key, field, label, ftype in _CONFIRM_FIELDS:
+            val = params[field]
+            suffix = ""
+            if field == "build_policy" and val == "conflict":
+                suffix = " (DEFAULT)"
+            display = f"{val}{suffix}" if val else f"{WRN}(not set){OFF}"
+            print(f"  {MNU}{key}{OFF} {label:<18s}: {INF}{display}{OFF}")
 
-        print(f"{SUB}")
-        print(f"  {BLD}Scope Paths{OFF}")
-        print(f"{SUB}")
+        print(f"\n{MNU}    {'Scope Paths'}{OFF}")
+        print(f"    {'─' * 50}")
         for j, sp in enumerate(scope_paths):
-            letter = chr(ord("a") + j)
-            print(f"  {MNU}  {letter}.{OFF} {INF}{sp}{OFF}")
-        print(f"{SUB}")
+            print(f"    {chr(ord('a') + j)}. {INF}{sp}{OFF}")
+        print(f"    {'─' * 50}")
+
+        print(f"  {MNU}s{OFF}  Edit scope paths   "
+              f"{MNU}N{OFF}  New session (edit all)")
+        print(f"  {MNU}g{OFF}  Go / proceed       "
+              f"{MNU}q{OFF}  Quit")
         print()
-        print(f"  {MNU}[s]{OFF} Edit scope paths   "
-              f"{MNU}[c]{OFF} Toggle conflict policy")
-        print(f"  {MNU}[b]{OFF} Cycle build policy "
-              f"{MNU}[g]{OFF} Go / proceed")
-        print(f"  {MNU}[q]{OFF} Quit")
+        print(f"  {BLD}Choice:{OFF} ", end="", flush=True)
+
+        ch = _getch()
         print()
 
-        try:
-            choice = input(f"  {BLD}Choice:{OFF} ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        if ch == 'g':
+            params["scope_paths"] = scope_paths
+            print()
+            return
+
+        elif ch in ('q', 'Q', '\x03'):
             print()
             sys.exit(0)
 
-        if choice in ("g", ""):
-            params["scope_paths"] = scope_paths
-            params["conflict_policy"] = conflict_policy
-            params["build_policy"] = build_policy
-            return
+        elif ch == 'N':
+            print(f"\n{MNU}    New Session -- Enter to keep current value{OFF}\n")
+            for _, field, label, ftype in _CONFIRM_FIELDS:
+                cur = params[field] or ""
+                if ftype == "cycle":
+                    vals = cycle_values[field]
+                    opts = "/".join(vals)
+                    prompt_str = f"    {label} [{cur}] ({opts}): "
+                    val = input(prompt_str).strip()
+                    if val and val in vals:
+                        params[field] = val
+                    elif val:
+                        warn(f"    Invalid choice, keeping '{cur}'")
+                else:
+                    prompt_str = (f"    {label} [{cur}]: " if cur
+                                  else f"    {label}: ")
+                    val = input(prompt_str).strip()
+                    if val:
+                        params[field] = val
+            print(f"\n  Current scope paths: {', '.join(scope_paths)}")
+            raw = input("  Enter new comma-separated paths (Enter to keep): ").strip()
+            if raw:
+                scope_paths = [p.strip() for p in raw.split(",") if p.strip()]
+            status("  Session updated.")
 
-        elif choice == "q":
-            print("Exiting.")
-            sys.exit(0)
-
-        elif choice == "s":
+        elif ch == 's':
             print(f"\n  Current paths: {', '.join(scope_paths)}")
             raw = input("  Enter new comma-separated paths: ").strip()
             if raw:
                 scope_paths = [p.strip() for p in raw.split(",") if p.strip()]
-                status("Scope paths updated.")
+                status("  Scope paths updated.")
             else:
-                warn("No change (empty input).")
-
-        elif choice == "c":
-            idx = CONFLICT_POLICIES.index(conflict_policy)
-            conflict_policy = CONFLICT_POLICIES[(idx + 1) % len(CONFLICT_POLICIES)]
-            status(f"Conflict policy -> {conflict_policy}")
-
-        elif choice == "b":
-            idx = BUILD_POLICIES.index(build_policy)
-            build_policy = BUILD_POLICIES[(idx + 1) % len(BUILD_POLICIES)]
-            status(f"Build policy -> {build_policy}")
+                warn("  No change (empty input).")
 
         else:
-            warn(f"Unknown choice: {choice}")
+            hit = None
+            for key, field, label, ftype in _CONFIRM_FIELDS:
+                if ch == key:
+                    hit = (field, label, ftype)
+                    break
+            if hit:
+                field, label, ftype = hit
+                if ftype == "cycle":
+                    vals = cycle_values[field]
+                    idx = vals.index(params[field])
+                    params[field] = vals[(idx + 1) % len(vals)]
+                else:
+                    cur = params[field] or ""
+                    print()
+                    prompt_str = (f"    {label} [{cur}]: " if cur
+                                  else f"    {label}: ")
+                    val = input(prompt_str).strip()
+                    if val:
+                        params[field] = val
 
 # ---------------------------------------------------------------------------
 # Phase 1: dist-configs
@@ -2122,27 +2262,13 @@ def main():
 
     # -- Session management --
     session = load_session(rhel_repo)
-    is_boundary = detect_session_boundary(rhel_repo, session)
 
-    if is_boundary:
+    if has_session_cli_args(args):
+        session = merge_cli_into_session(args, session)
+    else:
         session = prompt_session(session)
-    elif has_session_cli_args(args):
-        try:
-            answer = input("\n  Is this a new session? [y/N] ").strip().lower()
-        except KeyboardInterrupt:
-            print()
-            die("Aborted by user.")
-        if answer in ("y", "yes"):
-            session = prompt_session(session)
-        else:
-            session = merge_cli_into_session(args, session)
 
     apply_session_to_args(args, session)
-
-    missing = [f for f in REQUIRED_SESSION if getattr(args, f, None) is None]
-    if missing:
-        labels = [f.replace("_", "-") for f in missing]
-        die(f"Missing required parameters: --{', --'.join(labels)}")
 
     save_session(rhel_repo, session)
 
@@ -2273,6 +2399,10 @@ def main():
     scope_paths = params["scope_paths"]
     conflict_policy = params["conflict_policy"]
     build_policy = params["build_policy"]
+    rhel_repo = params["rhel_repo"]
+    upstream_repo = params["upstream_repo"]
+    branch = params["branch"]
+    output_dir = params["output_dir"]
 
     # -- Phase 1 --
     configs_dir = run_dist_configs(rhel_repo, toolbox_name)
