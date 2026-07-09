@@ -41,9 +41,23 @@ BUILD_POLICIES = ["conflict", "every", "none"]
 
 _cherrypick_repo = None
 
+# Global session state -- single source of truth, saved on every exit.
+_session = {}
+_session_repo = None
+
+
+def _save():
+    """Write the global session to disk (no-op if not initialised)."""
+    if _session_repo and _session:
+        try:
+            save_session(_session_repo, _session)
+        except Exception:
+            pass
+
 
 def _cleanup_and_exit(*_args):
-    """Handle Ctrl-C: abort any in-progress cherry-pick, then exit."""
+    """Handle Ctrl-C: save session, abort any in-progress cherry-pick, exit."""
+    _save()
     if _cherrypick_repo:
         subprocess.run("git cherry-pick --abort",
                        shell=True, cwd=_cherrypick_repo,
@@ -51,9 +65,9 @@ def _cleanup_and_exit(*_args):
         subprocess.run("git reset HEAD",
                        shell=True, cwd=_cherrypick_repo,
                        capture_output=True)
-        print(f"\n{WRN}Interrupted -- cherry-pick aborted.{OFF}")
+        print(f"\n{WRN}Interrupted -- cherry-pick aborted, session saved.{OFF}")
     else:
-        print(f"\n{WRN}Interrupted.{OFF}")
+        print(f"\n{WRN}Interrupted -- session saved.{OFF}")
     sys.exit(130)
 
 # ---------------------------------------------------------------------------
@@ -86,6 +100,44 @@ class Spinner:
     def __exit__(self, *exc):
         self._stop.set()
         self._thread.join()
+
+
+class Progress:
+    """Progress bar for counted operations.
+
+    Usage:
+        prog = Progress("Classifying commits", total=42)
+        for item in items:
+            ...
+            prog.advance()
+        prog.finish()
+    """
+    _BAR_WIDTH = 30
+
+    def __init__(self, message, total):
+        self._message = message
+        self._total = max(total, 1)
+        self._current = 0
+        self._lock = threading.Lock()
+        self._draw()
+
+    def _draw(self):
+        pct = self._current / self._total
+        filled = int(self._BAR_WIDTH * pct)
+        bar = f"{'█' * filled}{'░' * (self._BAR_WIDTH - filled)}"
+        print(f"\r  {INF}{bar} {self._current}/{self._total} "
+              f"{self._message}{OFF}", end="", flush=True)
+
+    def advance(self, n=1):
+        with self._lock:
+            self._current = min(self._current + n, self._total)
+            self._draw()
+
+    def finish(self, message=None):
+        msg = message or self._message
+        bar = '█' * self._BAR_WIDTH
+        print(f"\r  {STA}{bar} {self._total}/{self._total} "
+              f"{msg}{OFF}" + " " * 10)
 
 
 # ---------------------------------------------------------------------------
@@ -488,43 +540,41 @@ def _print_menu(session):
           f"{MNU}q{OFF}  Quit")
 
 
-def prompt_session(previous):
+def prompt_session():
     """Menu-driven session editor, gort-style.
 
-    Displays all parameters with single-char hotkeys. User presses
-    a key to edit one parameter, 'g' to accept and go, or 'q' to
-    quit. No Enter required -- all input is single-character via
-    _getch().
+    Operates directly on the global _session dict. Every edit is
+    immediately visible to the Ctrl-C handler for saving.
     """
-    session = dict(previous)
-
     _key_map = {key: (field, label, required)
                 for key, field, label, required in _MENU_ITEMS}
 
     while True:
-        _print_menu(session)
+        _print_menu(_session)
         ch = _getch()
 
         if ch == 'g':
             missing = [label for _, field, label, req in _MENU_ITEMS
-                       if req and not session.get(field)]
+                       if req and not _session.get(field)]
             if missing:
                 print()
                 warn(f"  Required fields not set: {', '.join(missing)}")
                 continue
             print()
-            return session
+            return
 
         if ch in ('q', 'Q', '\x03'):
+            _save()
             print()
             die("Aborted by user.")
 
         if ch in _key_map:
             field, label, required = _key_map[ch]
             print()
-            current = session.get(field)
+            current = _session.get(field)
             new_val = _edit_field(field, label, current, required)
-            session[field] = new_val
+            _session[field] = new_val
+            _save()
 
 
 def apply_session_to_args(args, session):
@@ -591,7 +641,7 @@ def replay_with_patchpal(rhel_repo, upstream_repo, base_commit,
                          scope_paths, conflict_policy, build_policy,
                          toolbox_name, subsystem, jira, upstream_version,
                          rhel_ver, output_dir, signed_off_by,
-                         assisted_by, session):
+                         assisted_by):
     """Reset to before the first conflicted commit and re-apply with patchpal."""
     conflicted = find_conflicted_commits(rhel_repo, base_commit)
     if not conflicted:
@@ -653,9 +703,9 @@ def replay_with_patchpal(rhel_repo, upstream_repo, base_commit,
 
     completed_head = git("rev-parse HEAD",
                          cwd=rhel_repo, check=False).stdout.strip()
-    session["_completed_head"] = completed_head
-    session["patchpal"] = True
-    save_session(rhel_repo, session)
+    _session["_completed_head"] = completed_head
+    _session["patchpal"] = True
+    _save()
 
     status(f"Patchpal replay complete -- {len(replay_set)} commits re-applied.")
 
@@ -706,6 +756,15 @@ _CONFIRM_FIELDS = [
 ]
 
 
+def _params_to_session(params):
+    """Push confirmation-menu params into the global _session."""
+    for field in SESSION_FIELDS:
+        if field in params:
+            _session[field] = params[field]
+    if "scope_paths" in params:
+        _session["only_paths"] = params["scope_paths"]
+
+
 def show_confirmation_menu(params):
     """Display parameters and let the user edit any field before proceeding.
 
@@ -749,10 +808,15 @@ def show_confirmation_menu(params):
 
         if ch == 'g':
             params["scope_paths"] = scope_paths
+            _params_to_session(params)
+            _save()
             print()
             return
 
         elif ch in ('q', 'Q', '\x03'):
+            params["scope_paths"] = scope_paths
+            _params_to_session(params)
+            _save()
             print()
             sys.exit(0)
 
@@ -779,6 +843,9 @@ def show_confirmation_menu(params):
             raw = input("  Enter new comma-separated paths (Enter to keep): ").strip()
             if raw:
                 scope_paths = [p.strip() for p in raw.split(",") if p.strip()]
+            params["scope_paths"] = scope_paths
+            _params_to_session(params)
+            _save()
             status("  Session updated.")
 
         elif ch == 's':
@@ -786,6 +853,9 @@ def show_confirmation_menu(params):
             raw = input("  Enter new comma-separated paths: ").strip()
             if raw:
                 scope_paths = [p.strip() for p in raw.split(",") if p.strip()]
+                params["scope_paths"] = scope_paths
+                _params_to_session(params)
+                _save()
                 status("  Scope paths updated.")
             else:
                 warn("  No change (empty input).")
@@ -810,6 +880,30 @@ def show_confirmation_menu(params):
                     val = input(prompt_str).strip()
                     if val:
                         params[field] = val
+                _params_to_session(params)
+                _save()
+
+# ---------------------------------------------------------------------------
+# Toolbox helpers
+# ---------------------------------------------------------------------------
+
+def _toolbox_cmd(toolbox_name, make_cmd, rhel_repo):
+    """Build a toolbox run command that works for paths outside $HOME.
+
+    Toolbox only bind-mounts $HOME; paths like /work are available at
+    /run/host/work inside the container.  We detect this and wrap the
+    make command in a bash -c 'cd <path> && <cmd>' so the build runs
+    in the correct directory regardless of mount layout.
+    """
+    home = os.path.expanduser("~")
+    abs_repo = os.path.abspath(rhel_repo)
+    if abs_repo.startswith(home + "/") or abs_repo == home:
+        return (f"toolbox run -c {toolbox_name} {make_cmd}", abs_repo)
+    container_path = f"/run/host{abs_repo}"
+    wrapped = (f"toolbox run -c {toolbox_name} "
+               f"bash -c 'cd {container_path} && {make_cmd}'")
+    return (wrapped, home)
+
 
 # ---------------------------------------------------------------------------
 # Phase 1: dist-configs
@@ -828,47 +922,73 @@ def _find_configs_dir(rhel_repo):
     return configs_dir
 
 
+def _config_source_hash(rhel_repo):
+    """Return a hash representing the current state of config source files.
+
+    Uses git's tree hash of redhat/configs (or configs/) so the stamp
+    only invalidates when config templates actually change, not on
+    every cherry-pick.
+    """
+    for subdir in ("redhat/configs", "configs"):
+        r = git(f"rev-parse HEAD:{subdir}",
+                cwd=rhel_repo, check=False)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    return git("rev-parse HEAD", cwd=rhel_repo, check=False).stdout.strip()
+
+
 def _configs_up_to_date(rhel_repo):
-    """Check if dist-configs are current for this HEAD."""
-    head = git("rev-parse HEAD", cwd=rhel_repo, check=False).stdout.strip()
+    """Check if dist-configs output is current."""
+    src_hash = _config_source_hash(rhel_repo)
     stamp = os.path.join(rhel_repo, DIST_CONFIGS_STAMP)
     if not os.path.isfile(stamp):
-        return False, head
+        return False, src_hash
     with open(stamp) as fh:
         saved = fh.read().strip()
-    if saved != head:
-        return False, head
+    if saved != src_hash:
+        return False, src_hash
     configs_dir = _find_configs_dir(rhel_repo)
     config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
     if not config_files:
         config_files = glob(os.path.join(configs_dir, "**", "kernel-*.config"),
                             recursive=True)
     if not config_files:
-        return False, head
-    return True, head
+        return False, src_hash
+    return True, src_hash
 
 
 def run_dist_configs(rhel_repo, toolbox_name):
     """Run make dist-configs inside the toolbox, return configs directory."""
     header("Phase 1: Building dist-configs")
 
-    up_to_date, head = _configs_up_to_date(rhel_repo)
+    up_to_date, src_hash = _configs_up_to_date(rhel_repo)
     if up_to_date:
         configs_dir = _find_configs_dir(rhel_repo)
         config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
         if not config_files:
             config_files = glob(os.path.join(configs_dir, "**",
                                 "kernel-*.config"), recursive=True)
-        status(f"dist-configs up to date for {head[:12]}")
+        status(f"dist-configs up to date ({src_hash[:12]})")
         info(f"Found {len(config_files)} config files in {configs_dir}")
         return configs_dir
 
     with Spinner(f"Running make dist-configs in toolbox '{toolbox_name}' ..."):
-        rc, out, err = run_quiet(
-            f"toolbox run -c {toolbox_name} make dist-configs",
-            cwd=rhel_repo,
-        )
+        cmd, cwd = _toolbox_cmd(toolbox_name, "make dist-configs", rhel_repo)
+        rc, out, err = run_quiet(cmd, cwd=cwd)
     if rc != 0:
+        configs_dir = _find_configs_dir(rhel_repo)
+        config_files = glob(os.path.join(configs_dir, "kernel-*.config"))
+        if not config_files:
+            config_files = glob(os.path.join(configs_dir, "**",
+                                "kernel-*.config"), recursive=True)
+        if config_files:
+            warn(f"make dist-configs exited with errors, but "
+                 f"{len(config_files)} config files already exist")
+            info(f"Using existing configs in {configs_dir}")
+            stamp = os.path.join(rhel_repo, DIST_CONFIGS_STAMP)
+            with open(stamp, "w") as fh:
+                fh.write(src_hash + "\n")
+            return configs_dir
         die(f"make dist-configs failed:\n{err}")
 
     configs_dir = _find_configs_dir(rhel_repo)
@@ -881,7 +1001,7 @@ def run_dist_configs(rhel_repo, toolbox_name):
 
     stamp = os.path.join(rhel_repo, DIST_CONFIGS_STAMP)
     with open(stamp, "w") as fh:
-        fh.write(head + "\n")
+        fh.write(src_hash + "\n")
 
     info(f"Found {len(config_files)} config files in {configs_dir}")
     return configs_dir
@@ -894,13 +1014,14 @@ def load_enabled_configs(configs_dir):
     if not config_files:
         config_files = glob(os.path.join(configs_dir, "**", "kernel-*.config"),
                             recursive=True)
-    for cf in config_files:
-        bname = os.path.basename(cf)
-        with open(cf) as fh:
-            for line in fh:
-                m = re.match(r"^(CONFIG_\w+)=[ym]", line)
-                if m:
-                    config_map[m.group(1)].add(bname)
+    with Spinner(f"Loading {len(config_files)} arch configs ..."):
+        for cf in config_files:
+            bname = os.path.basename(cf)
+            with open(cf) as fh:
+                for line in fh:
+                    m = re.match(r"^(CONFIG_\w+)=[ym]", line)
+                    if m:
+                        config_map[m.group(1)].add(bname)
     info(f"Loaded {len(config_map)} enabled CONFIG options across "
          f"{len(config_files)} arch configs")
     return config_map
@@ -998,12 +1119,11 @@ def find_divergence_point(rhel_repo, upstream_repo, scope_paths):
 def list_pending_commits(upstream_repo, divergence, scope_paths, rhel_repo):
     """List upstream commits since divergence touching scope_paths,
     excluding those already on RHEL main."""
-    info("Listing upstream commits since divergence ...")
-    path_args = " ".join(scope_paths)
-
-    r = git(f"log --no-merges --reverse --format='%H' "
-            f"{divergence}..HEAD -- {path_args}",
-            cwd=upstream_repo)
+    with Spinner("Listing upstream commits since divergence ..."):
+        path_args = " ".join(scope_paths)
+        r = git(f"log --no-merges --reverse --format='%H' "
+                f"{divergence}..HEAD -- {path_args}",
+                cwd=upstream_repo)
     all_hashes = [h for h in r.stdout.strip().split("\n") if h]
     info(f"Found {len(all_hashes)} upstream commits in range")
 
@@ -1253,6 +1373,8 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
     keep = []
     omit = []
 
+    prog = Progress("Classifying commits", total=len(commits))
+
     for i, h in enumerate(commits):
         r = git(f"log --format='%s' -1 {h}", cwd=upstream_repo)
         subject = r.stdout.strip()
@@ -1260,13 +1382,14 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
         infra_reason = uses_missing_api(h, upstream_repo, rhel_repo)
         if infra_reason:
             omit.append((h, subject, infra_reason))
+            prog.advance()
             continue
 
-        # Detect driver removal commits for disabled drivers
         removed_config = is_driver_removal(h, subject, upstream_repo)
         if removed_config and removed_config not in config_map:
             omit.append((h, subject,
                          f"removes driver {removed_config}, disabled on all archs"))
+            prog.advance()
             continue
 
         r2 = git(f"diff-tree --no-commit-id --name-only -r {h}",
@@ -1278,7 +1401,6 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
         other_files = [f for f in files
                        if not f.endswith(".c") and not f.endswith(".yaml")]
 
-        # If commit only touches yaml/docs/headers (no .c), check yaml CONFIGs
         if not c_files:
             if yaml_files:
                 any_yaml_enabled = False
@@ -1301,6 +1423,7 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
                                  "yaml/docs" + (" (some enabled)" if any_yaml_enabled else "")))
             else:
                 keep.append((h, subject, "no .c files (infra/docs/headers)"))
+            prog.advance()
             continue
 
         any_enabled = False
@@ -1328,6 +1451,10 @@ def classify_commits(commits, config_map, upstream_repo, rhel_repo, scope_paths)
         else:
             keep.append((h, subject, "mixed/uncertain -- keeping for safety"))
 
+        prog.advance()
+
+    prog.finish()
+    print()
     info(f"KEEP: {len(keep)}   OMIT: {len(omit)}")
     return keep, omit
 
@@ -1788,9 +1915,9 @@ def build_test(rhel_repo, toolbox_name, subsystem):
     """Run make M=<subsystem> in the toolbox. Returns (success, output).
     Uses KBUILD_MODPOST_WARN=1 so missing Module.symvers (no prior full
     build) only warns instead of failing the compile check."""
-    cmd = (f"toolbox run -c {toolbox_name} "
-           f"make -j$(nproc) KBUILD_MODPOST_WARN=1 M={subsystem}")
-    rc, out, err = run_quiet(cmd, cwd=rhel_repo)
+    make = f"make -j$(nproc) KBUILD_MODPOST_WARN=1 M={subsystem}"
+    cmd, cwd = _toolbox_cmd(toolbox_name, make, rhel_repo)
+    rc, out, err = run_quiet(cmd, cwd=cwd)
     combined = out + err
     if rc != 0:
         # Distinguish real compiler errors from modpost-only warnings
@@ -2205,7 +2332,8 @@ def generate_output(rhel_repo, output_dir, base_commit, omit_list):
     patches_dir = os.path.join(output_dir, "patches")
     os.makedirs(patches_dir, exist_ok=True)
 
-    git(f"format-patch -o {patches_dir} {base_commit}..HEAD", cwd=rhel_repo)
+    with Spinner("Generating patch series ..."):
+        git(f"format-patch -o {patches_dir} {base_commit}..HEAD", cwd=rhel_repo)
     patch_files = sorted(glob(os.path.join(patches_dir, "*.patch")))
     n = len(patch_files)
     print(f"\n{STA}{'=' * 74}{OFF}")
@@ -2261,16 +2389,17 @@ def main():
         die("Must be run from a RHEL kernel git repo.")
 
     # -- Session management --
-    session = load_session(rhel_repo)
+    global _session, _session_repo
+    _session = load_session(rhel_repo)
+    _session_repo = rhel_repo
 
     if has_session_cli_args(args):
-        session = merge_cli_into_session(args, session)
+        _session = merge_cli_into_session(args, _session)
     else:
-        session = prompt_session(session)
+        prompt_session()
 
-    apply_session_to_args(args, session)
-
-    save_session(rhel_repo, session)
+    apply_session_to_args(args, _session)
+    _save()
 
     if args.patchpal:
         if not shutil.which("patchpal"):
@@ -2307,18 +2436,18 @@ def main():
     # -- Completion check --
     current_head = git("rev-parse HEAD",
                        cwd=rhel_repo, check=False).stdout.strip()
-    completed_head = session.get("_completed_head")
-    base_commit = session.get("_base_commit")
+    completed_head = _session.get("_completed_head")
+    base_commit = _session.get("_base_commit")
 
     if completed_head and current_head == completed_head:
-        if args.patchpal and not session.get("patchpal") and base_commit:
+        if args.patchpal and not _session.get("patchpal") and base_commit:
             replay_with_patchpal(
                 rhel_repo, upstream_repo, base_commit,
                 scope_paths, args.conflict_policy, args.build_policy,
                 toolbox_name, args.subsystem, args.jira,
                 args.upstream_version, args.rhel,
                 output_dir, args.signed_off_by,
-                args.assisted_by, session,
+                args.assisted_by,
             )
             return
         else:
@@ -2403,6 +2532,9 @@ def main():
     upstream_repo = params["upstream_repo"]
     branch = params["branch"]
     output_dir = params["output_dir"]
+
+    _params_to_session(params)
+    _save()
 
     # -- Phase 1 --
     configs_dir = run_dist_configs(rhel_repo, toolbox_name)
@@ -2523,9 +2655,9 @@ def main():
     # Mark completion in session
     completed_head = git("rev-parse HEAD",
                          cwd=rhel_repo, check=False).stdout.strip()
-    session["_completed_head"] = completed_head
-    session["_base_commit"] = base_commit
-    save_session(rhel_repo, session)
+    _session["_completed_head"] = completed_head
+    _session["_base_commit"] = base_commit
+    _save()
 
     # -- Phase 6 --
     print_summary(
