@@ -22,25 +22,44 @@ for RHEL merge requests.
 Out-of-scope files touched by tree-wide commits are automatically
 excluded.
 In-scope conflicts are resolved according to the selected
-.B \-\-conflict\-policy
-or interactively via
+.BR \-\-conflict\-policy :
+.B patchpal
+(launch the
 .BR patchpal (1)
-when
-.B \-\-patchpal
-is given.
+GUI for interactive three-way merge),
+.B edit
+(open conflicted files in the user's editor), or
+.B abort
+(stop on conflict).
+The default is
+.B patchpal
+if a graphical display and
+.BR patchpal (1)
+are available, otherwise
+.BR edit .
 .PP
+The
+.B patchpal
+policy is a key feature for developers who already use
 .BR patchpal (1)
-integration is a key feature for developers who already use patchpal
 for cherry-pick conflict resolution.
-When
-.B \-\-patchpal
-is enabled, clean cherry-picks proceed automatically while conflicts
-in subsystem files launch the patchpal GUI, allowing visual,
-three-way merge resolution.
+The
+.B edit
+policy opens all conflicted files in the user's preferred editor
+(configurable via
+.BR \-\-editor ,
+session, or
+.BR $VISUAL / $EDITOR ;
+defaults to
+.BR vim ).
+.PP
+Clean cherry-picks proceed automatically while conflicts
+in subsystem files invoke the chosen resolution strategy.
 Out-of-scope conflicts (MAINTAINERS, files outside the target
 subsystem) are still resolved automatically.
-This combines the speed of batch backporting with the precision of
-interactive conflict resolution.
+Build failures also present an interactive menu allowing the user
+to fix failing files using their resolution strategy, skip the
+commit, or abort.
 .PP
 A
 .B dist-configs
@@ -102,14 +121,43 @@ Default:
 .TP
 .BI \-\-conflict\-policy " POLICY"
 How to handle in-scope file conflicts.
+Default:
+.B patchpal
+if a graphical display and patchpal are available, otherwise
+.BR edit .
 .RS
 .TP
-.B theirs
-Accept the upstream version (default).
+.B patchpal
+Launch the
+.BR patchpal (1)
+GUI for interactive three-way merge resolution.
+Requires an active graphical display
+.RB ( DISPLAY
+or
+.BR WAYLAND_DISPLAY )
+and
+.B patchpal
+on
+.BR PATH .
+.TP
+.B edit
+Open conflicted files in the user's editor for manual resolution.
+See
+.BR \-\-editor .
 .TP
 .B abort
 Abort the cherry-pick on any in-scope conflict.
 .RE
+.TP
+.BI \-\-editor " CMD"
+Editor command for the
+.B edit
+conflict policy and build-failure fixes.
+Saved in the session file.
+Default: vim (fallback: vi); also respects
+.B $VISUAL
+and
+.BR $EDITOR .
 .TP
 .BI \-\-build\-policy " POLICY"
 When to run a build test inside the toolbox container.
@@ -148,21 +196,6 @@ Skips the normal multi-commit workflow phases.
 .BI \-\-divergence " HASH"
 Upstream commit hash to use as the divergence point, skipping
 automatic detection.
-.TP
-.B \-\-patchpal
-Launch the
-.BR patchpal (1)
-GUI for interactive resolution of in-scope cherry-pick conflicts.
-Requires an active graphical display
-.RB ( DISPLAY
-or
-.BR WAYLAND_DISPLAY )
-and
-.B patchpal
-on
-.BR PATH .
-Out-of-scope files are still resolved automatically.
-Clean cherry-picks are unaffected.
 .TP
 .BI \-\-toolbox " NAME"
 Toolbox container name for
@@ -268,7 +301,7 @@ Interactive conflict resolution with patchpal:
 .PP
 .RS
 .nf
-backport-subsystem \-\-patchpal
+backport-subsystem \-\-conflict\-policy patchpal
 .fi
 .RE
 .PP
