@@ -1,0 +1,115 @@
+#!/bin/bash
+
+logfile="$HOME/.data/mr-review/mr-review-history.log"
+
+usage() {
+	echo "Usage: ${0##*/} [-d <start> <end>] [-w <weeks>] [-h]"
+	echo
+	echo "  Extracts total patches, conflicts, and unique MRs reviewed"
+	echo "  from $logfile between the given dates (inclusive)."
+	echo
+	echo "  No arguments : last 7 days (default)"
+	echo "  -d start end : date range in yyyy-mm-dd format"
+	echo "  -w weeks     : last N weeks from today"
+	echo "  -h           : this help message"
+	exit 1
+}
+
+start_date=""
+end_date=""
+
+while getopts "d:w:h" opt; do
+	case "$opt" in
+	d)	start_date="$OPTARG"
+		end_date="${!OPTIND}"
+		if [[ -z "$end_date" || "$end_date" == -* ]]; then
+			echo "Error: -d requires two dates."
+			usage
+		fi
+		OPTIND=$((OPTIND + 1))
+		;;
+	w)	weeks="$OPTARG"
+		if ! [[ "$weeks" =~ ^[0-9]+$ ]] || (( weeks == 0 )); then
+			echo "Error: -w requires a positive integer."
+			usage
+		fi
+		start_date=$(date -d "$weeks weeks ago" +%Y-%m-%d)
+		end_date=$(date +%Y-%m-%d)
+		;;
+	h)	usage ;;
+	*)	usage ;;
+	esac
+done
+
+# Default: last 7 days
+if [[ -z "$start_date" ]]; then
+	start_date=$(date -d "7 days ago" +%Y-%m-%d)
+	end_date=$(date +%Y-%m-%d)
+fi
+
+for d in "$start_date" "$end_date"; do
+	if ! date -d "$d" +%s &>/dev/null; then
+		echo "Invalid date: $d"
+		usage
+	fi
+done
+
+start_epoch=$(date -d "$start_date" +%s)
+end_epoch=$(date -d "$end_date 23:59:59" +%s)
+
+if (( start_epoch > end_epoch )); then
+	echo "Start date must be before or equal to end date."
+	exit 1
+fi
+
+total_patches=0
+total_conflicts=0
+total_reviews=0
+declare -A mr_seen
+current_mr=""
+
+while IFS= read -r line; do
+	# MR header line: starts with a number
+	if [[ "$line" =~ ^[0-9] ]]; then
+		current_mr="${line%%[[:space:]]*}"
+		continue
+	fi
+
+	# Review lines are indented
+	[[ ! "$line" =~ ^[[:space:]] ]] && continue
+
+	trimmed="${line#"${line%%[![:space:]]*}"}"
+
+	# Extract date: everything up through the year, before the action keyword
+	if [[ "$trimmed" =~ ^([A-Z][a-z]{2}[[:space:]]+[A-Z][a-z]{2}[[:space:]]+[0-9]+[[:space:]]+[0-9:]+[[:space:]]+[AP]M[[:space:]]+[0-9]{4}) ]]; then
+		date_str="${BASH_REMATCH[1]}"
+	else
+		continue
+	fi
+
+	line_epoch=$(date -d "$date_str" +%s 2>/dev/null) || continue
+
+	(( line_epoch < start_epoch || line_epoch > end_epoch )) && continue
+
+	if [[ "$trimmed" =~ :[[:space:]]+([0-9]+)[[:space:]]+patches,[[:space:]]+([0-9]+)[[:space:]]+conflicts ]]; then
+		patches="${BASH_REMATCH[1]}"
+		conflicts="${BASH_REMATCH[2]}"
+	elif [[ "$trimmed" =~ :[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
+		patches="${BASH_REMATCH[1]}"
+		conflicts=0
+	else
+		continue
+	fi
+
+	(( total_patches += patches ))
+	(( total_conflicts += conflicts ))
+	(( total_reviews++ ))
+	[[ -n "$current_mr" ]] && mr_seen["$current_mr"]=1
+
+done < "$logfile"
+
+echo "Date range : $start_date to $end_date"
+echo "Unique MRs : ${#mr_seen[@]}"
+echo "Reviews    : $total_reviews"
+echo "Patches    : $total_patches"
+echo "Conflicts  : $total_conflicts"
