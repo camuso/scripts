@@ -16,7 +16,7 @@ RHEL or CentOS Stream kernel tree.
 It discovers relevant scope paths (source directories, headers,
 documentation, device-tree bindings), finds the divergence point
 between upstream and RHEL, filters out already-applied commits, and
-applies the remaining ones with gort-style commit messages suitable
+applies the remaining ones with RH Kernel Work Flow specified commit messages suitable
 for RHEL merge requests.
 .PP
 Out-of-scope files touched by tree-wide commits are automatically
@@ -189,7 +189,7 @@ Assisted-by trailer added to commit messages, e.g.\&
 .TP
 .BI \-\-pick " HASH"
 Cherry-pick a single upstream commit (by its full 40-character hash)
-onto the current HEAD with conflict resolution and a gort-style
+onto the current HEAD with conflict resolution and a RH Kernel Work Flow specified
 commit message.
 Skips the normal multi-commit workflow phases.
 .TP
@@ -210,7 +210,7 @@ Default:
 Discovers scope paths from the subsystem directory, finds the
 divergence point between upstream and RHEL, lists pending
 upstream commits, and cherry-picks them in order.
-Each commit receives a gort-style message with JIRA, upstream status,
+Each commit receives a RH Kernel Work Flow specified message with JIRA, upstream status,
 conflict notes, the original commit metadata, and sign-off trailers.
 .SS "Single-commit pick (\-\-pick)"
 Cherry-picks exactly one upstream commit onto the current HEAD.

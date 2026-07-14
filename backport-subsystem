@@ -479,10 +479,10 @@ _MENU_ITEMS = [
     ("t", "toolbox",          "toolbox",          False),
     ("c", "conflict_policy",  "conflict-policy",  False),
     ("d", "build_policy",     "build-policy",     False),
-    ("x", "editor",           "editor",           False),
+    ("e", "editor",           "editor",           False),
     ("a", "assisted_by",      "assisted-by",      False),
     ("o", "only_paths",       "only-paths",       False),
-    ("e", "extra_paths",      "extra-paths",      False),
+    ("x", "extra_paths",      "extra-paths",      False),
 ]
 
 
@@ -837,7 +837,7 @@ _CONFIRM_FIELDS = [
     ("8", "output_dir",       "Output dir",       "text"),
     ("c", "conflict_policy",  "Conflict policy",  "cycle"),
     ("b", "build_policy",     "Build policy",     "cycle"),
-    ("x", "editor",           "Editor",           "text"),
+    ("e", "editor",           "Editor",           "text"),
 ]
 
 
