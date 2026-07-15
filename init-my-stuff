@@ -7,7 +7,7 @@ declare tcmd="| tee -a "$logfile" 2>&1"
 declare -i optcount=0
 declare remoteuser
 declare logfile="$HOME/.initmystuff.log"
-declare repolist="rcbak hints etcbk misc ipmi patchtools"
+declare repolist="rcbak hints etcbk misc ipmi patchtools backport-subsystem"
 declare b_pushpriv=true
 declare b_gitrepo=true
 declare clonestr
