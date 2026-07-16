@@ -50,7 +50,7 @@ promoted the GCC redefinition warning to a fatal error.
 
 **Fix applied**: removed the duplicate, restored upstream's
 forward-declaration pattern.  The `check_duplicate_definitions()` check
-was added to `backport-subsystem` to prevent recurrence.
+was added to `isb` to prevent recurrence.
 
 ## Debug Kernel dmesg Analysis (2026-05-14)
 
