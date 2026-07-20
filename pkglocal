@@ -7,9 +7,9 @@
 # directory and binary RPMs under ./<arch>/, matching centpkg local
 # behavior.
 #
-# When run on the host, auto-detects a suitable toolbox (by .el<N> in
-# the spec Release tag) so the build uses the target distro's macros
-# and toolchain.
+# When run on the host, auto-detects a suitable toolbox (by .el<N> or
+# .fc<N>/rawhide in the spec Release tag) so the build uses the target
+# distro's macros and toolchain.
 #
 
 set -euo pipefail
@@ -58,6 +58,12 @@ detect_el_version() {
 		return
 	fi
 
+	# Fedora/Rawhide packages use .fc<N> instead of .el<N>
+	if [[ "$rel" =~ \.fc([0-9]+|[Rr]awhide) ]]; then
+		echo "rawhide"
+		return
+	fi
+
 	# Try the sources file for .el<N> in tarball names
 	if [[ -f sources ]]; then
 		local src
@@ -65,10 +71,13 @@ detect_el_version() {
 		if [[ "$src" =~ \.el([0-9]+) ]]; then
 			echo "${BASH_REMATCH[1]}"
 			return
+		elif [[ "$src" =~ \.fc([0-9]+|[Rr]awhide) ]]; then
+			echo "rawhide"
+			return
 		fi
 	fi
 
-	# Fall back to git branch name (c9s, c10s, rhel-9-main, etc.)
+	# Fall back to git branch name (c9s, c10s, rhel-9-main, rawhide, etc.)
 	local branch
 	branch=$(git branch --show-current 2>/dev/null || true)
 	if [[ "$branch" =~ c([0-9]+)s ]]; then
@@ -77,6 +86,9 @@ detect_el_version() {
 	elif [[ "$branch" =~ rhel-([0-9]+) ]]; then
 		echo "${BASH_REMATCH[1]}"
 		return
+	elif [[ "$branch" =~ ^(rawhide|master|main)$ ]]; then
+		echo "rawhide"
+		return
 	fi
 }
 
@@ -84,9 +96,10 @@ detect_toolbox() {
 	local el_ver="$1"
 	local -a candidates
 	case "$el_ver" in
-		9)  candidates=(c9s rhel9) ;;
-		10) candidates=(c10s rhel10) ;;
-		*)  candidates=("c${el_ver}s" "rhel${el_ver}") ;;
+		9)       candidates=(c9s rhel9) ;;
+		10)      candidates=(c10s rhel10) ;;
+		rawhide) candidates=(rawhide) ;;
+		*)       candidates=("c${el_ver}s" "rhel${el_ver}") ;;
 	esac
 
 	local name

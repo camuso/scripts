@@ -9,6 +9,7 @@
 # Toolbox container naming convention:
 #   .el9  -> rhel9       (or c9s)
 #   .el10 -> c10s        (or rhel10)
+#   .fc*/rawhide -> rawhide
 #
 # Override with: TOOLBOX=<name> mkdist
 #
@@ -76,6 +77,16 @@ detect_toolbox() {
 	el_ver=${dist#.el}
 
 	if [[ -z "$el_ver" ]]; then
+		# Fedora/Rawhide trees use .fc<N> instead of .el<N>
+		if grep -qP '(?<=DIST \?= )\.fc\d+' redhat/Makefile.variables 2>/dev/null; then
+			if toolbox list -c 2>/dev/null | grep -qw rawhide; then
+				toolbox_name="rawhide"
+				return 0
+			fi
+			echo "Warning: no 'rawhide' toolbox container found."
+			toolbox_name=""
+			return 1
+		fi
 		echo "Warning: could not determine RHEL version from DIST."
 		toolbox_name=""
 		return 1
