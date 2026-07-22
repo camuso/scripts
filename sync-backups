@@ -1,0 +1,225 @@
+#!/bin/bash
+#
+# sync-backups - refresh and push the toolbox/cursor/fedora44-upgrade
+# backup directories to a remote host.
+#
+# See BASH_SCRIPT_STANDARDS.md in this repo for the conventions followed
+# here.
+
+declare home_dir="$HOME"
+declare toolbox_backup_dir="$home_dir/toolbox-backup"
+declare cursor_backup_dir="$home_dir/cursor-backup"
+declare upgrade_notes_dir="$home_dir/fedora44-upgrade"
+
+declare default_dest="dell-per640-01.khw.eng.rdu2.dc.redhat.com:380-backup/"
+declare dest="$default_dest"
+
+declare -a toolbox_containers=(c10s c8s c9s rawhide rhel10 rhel9)
+
+declare -i do_refresh_cursor=1
+declare -i do_refresh_toolbox=0
+declare -i dry_run=0
+
+declare usagestr="$(
+cat <<EOF
+$(basename "$0") [-h|--help] [OPTIONS]
+
+Refresh the local backup directories (toolbox-backup, cursor-backup,
+fedora44-upgrade) and rsync them to a remote host.
+
+By default this refreshes cursor-backup's chat/state snapshot (fast,
+SQLite online backup, safe to run while Cursor is open) and then rsyncs
+all three backup directories to the remote destination.
+
+Options:
+  -h, --help            Show this help message
+  -d, --dest HOST:PATH  Remote rsync destination
+                        (default: $default_dest)
+  --no-refresh-cursor   Skip refreshing cursor-backup, just sync as-is
+  --refresh-toolbox     Also recommit+resave every toolbox container
+                        before syncing. Slow (~15+ minutes, ~13GB of
+                        podman commit/save churn) -- only do this after
+                        you've actually changed something inside one of
+                        the toolboxes.
+  -n, --dry-run         Pass --dry-run through to rsync
+
+EOF
+)"
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="$2"
+
+	((code == 0)) && exit "$code"
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	usage
+	exit "$code"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	exitme 1
+}
+
+#** sqlite_safe_backup: snapshot a live sqlite db via the backup API
+#*
+# Arguments
+#   $1 - source db path
+#   $2 - destination db path
+#*
+sqlite_safe_backup() {
+	local src="$1"
+	local dst="$2"
+
+	[[ -f "$src" ]] || return 0
+
+	mkdir -p "$(dirname "$dst")"
+	python3 - "$src" "$dst" <<'PYEOF'
+import sqlite3, sys, os
+
+src, dst = sys.argv[1], sys.argv[2]
+s = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+d = sqlite3.connect(dst)
+s.backup(d)
+d.close()
+s.close()
+print(f"    {src} -> {dst} ({os.path.getsize(dst)/1e6:.1f} MB)")
+PYEOF
+}
+
+#** refresh_cursor_backup: refresh chat/state/transcript snapshot
+#*
+refresh_cursor_backup() {
+	local config_user="$home_dir/.config/Cursor/User"
+	local dot_cursor="$home_dir/.cursor"
+	local ws_root="$config_user/workspaceStorage"
+	local entry=""
+	local d=""
+
+	echo "==> Refreshing cursor-backup"
+
+	echo "  - global chat/composer database"
+	sqlite_safe_backup \
+		"$config_user/globalStorage/state.vscdb" \
+		"$cursor_backup_dir/config-user/globalStorage/state.vscdb"
+
+	echo "  - per-workspace databases"
+	for d in "$ws_root"/*/; do
+		entry="$(basename "$d")"
+		sqlite_safe_backup \
+			"$d/state.vscdb" \
+			"$cursor_backup_dir/config-user/workspaceStorage/$entry/state.vscdb"
+	done
+
+	echo "  - workspace metadata, settings, history"
+	for d in "$ws_root"/*/; do
+		entry="$(basename "$d")"
+		mkdir -p "$cursor_backup_dir/config-user/workspaceStorage/$entry"
+		find "$d" -maxdepth 1 -type f ! -name 'state.vscdb*' \
+			-exec cp -a {} "$cursor_backup_dir/config-user/workspaceStorage/$entry/" \;
+	done
+	cp -a "$config_user/settings.json" "$cursor_backup_dir/config-user/" 2>/dev/null
+	cp -a "$config_user/keybindings.json" "$cursor_backup_dir/config-user/" 2>/dev/null
+	rsync -a "$config_user/snippets/" "$cursor_backup_dir/config-user/snippets/" 2>/dev/null
+	rsync -a "$config_user/History/" "$cursor_backup_dir/config-user/History/" 2>/dev/null
+
+	echo "  - globalStorage extras"
+	cp -a "$config_user/globalStorage/storage.json" \
+		"$cursor_backup_dir/config-user/globalStorage/" 2>/dev/null
+	rsync -a "$config_user/globalStorage/anysphere.cursor-commits/" \
+		"$cursor_backup_dir/config-user/globalStorage/anysphere.cursor-commits/" 2>/dev/null
+
+	echo "  - ~/.cursor (agent transcripts, plans, skills, cli config)"
+	rsync -a --exclude='extensions' --exclude='Cache' \
+		"$dot_cursor/" "$cursor_backup_dir/dot-cursor/"
+
+	echo "  - ~/.config/Cursor/Workspaces (multi-root workspace defs)"
+	rsync -a "$home_dir/.config/Cursor/Workspaces/" \
+		"$cursor_backup_dir/config-cursor-workspaces/"
+}
+
+#** refresh_toolbox_backup: recommit and resave every toolbox container
+#*
+refresh_toolbox_backup() {
+	local name=""
+
+	echo "==> Refreshing toolbox-backup (this is slow)"
+	mkdir -p "$toolbox_backup_dir"
+
+	for name in "${toolbox_containers[@]}"; do
+		echo "  - committing $name"
+		podman commit --pause=true "$name" "localhost/toolbox-backup/$name:latest" >/dev/null
+
+		echo "  - saving $name.tar"
+		podman save -o "$toolbox_backup_dir/${name}.tar" \
+			"localhost/toolbox-backup/$name:latest"
+
+		podman rmi "localhost/toolbox-backup/$name:latest" >/dev/null
+	done
+}
+
+#** sync_to_remote: rsync the backup directories to the remote destination
+#*
+sync_to_remote() {
+	local -a rsync_opts=(-avP --stats)
+
+	((dry_run)) && rsync_opts+=(--dry-run)
+
+	echo "==> Syncing to $dest"
+	rsync "${rsync_opts[@]}" \
+		"$toolbox_backup_dir" "$cursor_backup_dir" "$upgrade_notes_dir" \
+		"$dest"
+}
+
+main() {
+	trap control_c SIGINT
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-d|--dest)
+				dest="$2"
+				shift
+				;;
+			--no-refresh-cursor)
+				do_refresh_cursor=0
+				;;
+			--refresh-toolbox)
+				do_refresh_toolbox=1
+				;;
+			-n|--dry-run)
+				dry_run=1
+				;;
+			*)
+				exitme 1 "Unknown option: $1"
+				;;
+		esac
+		shift
+	done
+
+	((do_refresh_cursor)) && refresh_cursor_backup
+	((do_refresh_toolbox)) && refresh_toolbox_backup
+
+	sync_to_remote
+
+	echo "==> Done"
+}
+
+main "$@"
