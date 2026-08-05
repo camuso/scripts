@@ -208,7 +208,9 @@ check_deps() {
     read -r -p "Choose [i/c/q]: " ans
     case "$ans" in
         [iI]*)
-            if ! dnf install -y "${missing_pkgs[@]}"; then
+            if dnf install -y "${missing_pkgs[@]}"; then
+                hash -r
+            else
                 echo ""
                 echo "Some packages failed to install."
                 echo ""
@@ -246,23 +248,31 @@ run_all_tests() {
     run_security_tests || true
     echo ""
 
+    local ran_workload=false
     for wl in "${ALL_WORKLOADS[@]}"; do
         if ! command -v "${wl}" >/dev/null 2>&1; then
             echo "SKIP: $wl not available"
             continue
         fi
+        ran_workload=true
         for mask in "${COS_MASKS[@]}"; do
             run_test "$wl" "$CORES" "$mask"
         done
     done
 
-    pqos $IFACE -R
+    if $ran_workload; then
+        pqos $IFACE -R
+    fi
 
     echo ""
     echo "========================================"
     echo " Summary: $SUMMARY_FILE"
     echo "========================================"
-    column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
+    if [[ -f "$SUMMARY_FILE" ]]; then
+        column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
+    else
+        echo "(no workload results)"
+    fi
 }
 
 parse_args "$@"
@@ -281,10 +291,14 @@ if $RUN_SECURITY; then
     run_security_tests
 fi
 
-if [[ -n "$WORKLOAD" || -n "$CSV_FILE" ]]; then
-    if [[ -n "$WORKLOAD" ]]; then
-        check_deps pqos "$WORKLOAD" || true
+if [[ -n "$WORKLOAD" ]]; then
+    check_deps pqos "$WORKLOAD" || true
+    if ! command -v "$WORKLOAD" >/dev/null 2>&1; then
+        echo "Error: $WORKLOAD still not available. Cannot run tests."
+        exit 1
     fi
+    main_loop
+elif [[ -n "$CSV_FILE" ]]; then
     main_loop
 fi
 
