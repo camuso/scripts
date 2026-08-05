@@ -184,7 +184,6 @@ progress_dots() {
         (( count++ ))
         sleep 1
     done
-    printf '\r%*s\r' "$cols" ''
 }
 
 run_test() {
@@ -220,12 +219,11 @@ run_test() {
     local wl_pid=$!
     progress_dots "$wl_pid"
     wait "$wl_pid" || rc=$?
-    echo ""
 
     if (( rc != 0 )); then
-        echo -e "${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
+        echo -e "\r${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
     else
-        echo -e "${GREEN}done${OFF}"
+        echo -e "\r${GREEN}done${OFF}"
     fi
 
     if $RUN_SUMMARY; then
