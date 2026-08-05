@@ -246,7 +246,7 @@ extract_metrics() {
 
     case "$wl" in
         cyclictest)
-            result=$(grep "Min:" "$log" 2>/dev/null | awk '{print $2}') || true
+            result=$(grep -oP 'Min:\s+\K\d+' "$log" 2>/dev/null | tail -1) || true
             ;;
         fio)
             result=$(grep "IOPS=" "$log" 2>/dev/null | awk -F'=' '{print $2}' | cut -d',' -f1) || true
@@ -342,6 +342,7 @@ show_summary() {
 
 run_all_tests() {
     RUN_SUMMARY=true
+    : > "$SUMMARY_FILE"
 
     banner "Comprehensive intel-cmt-cat Test Run"
 
