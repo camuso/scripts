@@ -175,16 +175,35 @@ if [[ -d /sys/fs/resctrl/info/L3 ]]; then
     HAS_L3CAT=true
 fi
 
+progress_dots() {
+    local pid=$1
+    local cols
+    cols=$(tput cols 2>/dev/null || echo 80)
+    local count=0
+
+    while kill -0 "$pid" 2>/dev/null; do
+        if (( count >= cols )); then
+            printf '\r%*s\r' "$cols" ''
+            count=0
+        fi
+        printf '.'
+        (( count++ ))
+        sleep 1
+    done
+    printf '\r%*s\r' "$cols" ''
+}
+
 run_test() {
     local wl="$1"
     local core="$2"
     local mask="$3"
     local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
 
-    echo -e "${CYAN}Running $wl on core $core with COS mask $mask${OFF}"
+    echo -ne "${CYAN}Running $wl on core $core with COS mask $mask${OFF} "
 
     if $HAS_L3CAT; then
-        if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" 2>&1; then
+        if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" >/dev/null 2>&1; then
+            echo ""
             echo -e "${YELLOW}Warning: pqos L3 allocation failed for mask $mask${OFF}"
         fi
     fi
@@ -192,21 +211,27 @@ run_test() {
     local rc=0
     case "$wl" in
         cyclictest)
-            taskset -c "$core" cyclictest -p 99 -l 50000 > "$log" 2>&1 || rc=$?
+            taskset -c "$core" cyclictest -p 99 -l 50000 > "$log" 2>&1 &
             ;;
         stress-ng)
-            taskset -c "$core" stress-ng --cpu 1 --timeout 15s > "$log" 2>&1 || rc=$?
+            taskset -c "$core" stress-ng --cpu 1 --timeout 15s > "$log" 2>&1 &
             ;;
         fio)
-            taskset -c "$core" fio --name=test --rw=randwrite --size=50M --runtime=15s > "$log" 2>&1 || rc=$?
+            taskset -c "$core" fio --name=test --rw=randwrite --size=50M --runtime=15s > "$log" 2>&1 &
             ;;
         iperf3)
-            iperf3 -c localhost -t 15 > "$log" 2>&1 || rc=$?
+            iperf3 -c localhost -t 15 > "$log" 2>&1 &
             ;;
     esac
 
+    local wl_pid=$!
+    progress_dots "$wl_pid"
+    wait "$wl_pid" || rc=$?
+
     if (( rc != 0 )); then
         echo -e "${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
+    else
+        echo -e "${GREEN}done${OFF}"
     fi
 
     if $RUN_SUMMARY; then
