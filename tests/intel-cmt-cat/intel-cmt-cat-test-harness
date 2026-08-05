@@ -13,13 +13,24 @@ RUN_SUMMARY=false
 RUN_SECURITY=false
 WORKLOAD=""
 CORES="0"
+IFACE=""
+
+# Use the OS/resctrl interface when resctrl is mounted, MSR otherwise.
+if mountpoint -q /sys/fs/resctrl 2>/dev/null; then
+    IFACE="-I"
+fi
+
+RUN_ALL=false
 
 print_help() {
-    echo "Usage: $0 [--workload=TYPE] [--csv=FILE] [--summary] [--security]"
+    echo "Usage: $0 [--all] [--workload=TYPE] [--csv=FILE] [--summary] [--security] [--msr|--os]"
+    echo "  --all: Run all tests (security + all workloads) with summary"
     echo "  --workload: cyclictest | stress-ng | fio | iperf3"
     echo "  --csv: CSV file with workload,cores,mask"
     echo "  --summary: Generate summary after tests"
     echo "  --security: Run security regression tests (RHEL-214298, RHEL-214424)"
+    echo "  --msr: Force MSR interface (default when resctrl is not mounted)"
+    echo "  --os:  Force OS/resctrl interface (default when resctrl is mounted)"
 }
 
 parse_args() {
@@ -41,6 +52,18 @@ parse_args() {
                 RUN_SECURITY=true
                 shift
                 ;;
+            --all)
+                RUN_ALL=true
+                shift
+                ;;
+            --msr)
+                IFACE="-F msr"
+                shift
+                ;;
+            --os)
+                IFACE="-I"
+                shift
+                ;;
             *)
                 print_help
                 exit 1
@@ -57,7 +80,7 @@ run_test() {
 
     echo "Running $wl on core $core with COS mask $mask"
 
-    pqos -e "llc:1=${mask}" -a "llc:1=${core}"
+    pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}"
 
     case "$wl" in
         cyclictest)
@@ -115,7 +138,7 @@ main_loop() {
         done
     fi
 
-    pqos -R
+    pqos $IFACE -R
 }
 
 run_security_tests() {
@@ -143,7 +166,44 @@ run_security_tests() {
     return $rc
 }
 
+ALL_WORKLOADS=("cyclictest" "stress-ng" "fio")
+
+run_all_tests() {
+    RUN_SUMMARY=true
+
+    echo "========================================"
+    echo " Comprehensive intel-cmt-cat test run"
+    echo "========================================"
+    echo ""
+
+    run_security_tests || true
+    echo ""
+
+    for wl in "${ALL_WORKLOADS[@]}"; do
+        if ! command -v "${wl}" >/dev/null 2>&1; then
+            echo "SKIP: $wl not installed"
+            continue
+        fi
+        for mask in "${COS_MASKS[@]}"; do
+            run_test "$wl" "$CORES" "$mask"
+        done
+    done
+
+    pqos $IFACE -R
+
+    echo ""
+    echo "========================================"
+    echo " Summary: $SUMMARY_FILE"
+    echo "========================================"
+    column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
+}
+
 parse_args "$@"
+
+if $RUN_ALL; then
+    run_all_tests
+    exit $?
+fi
 
 if ! $RUN_SECURITY && [[ -z "$WORKLOAD" && -z "$CSV_FILE" ]]; then
     print_help
