@@ -1,174 +1,76 @@
 #!/bin/bash
-set -euo pipefail
+#
+# intel-cmt-cat-test-harness - Test harness for Intel RDT (CMT/CAT)
+#
+# Runs security regression tests, workload performance tests, or both.
+#
 
 SCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOGDIR="rdt_logs"
 mkdir -p "$LOGDIR"
 
 COS_MASKS=("0x0f" "0xf0" "0x33" "0xcc")
+ALL_WORKLOADS=("cyclictest" "stress-ng" "fio")
 
 SUMMARY_FILE="summary.csv"
 CSV_FILE=""
 RUN_SUMMARY=false
 RUN_SECURITY=false
+RUN_ALL=false
 WORKLOAD=""
 CORES="0"
 IFACE=""
 
-# Use the OS/resctrl interface when resctrl is mounted, MSR otherwise.
+# --- Formatting ---
+
+OFF=$'\033[0m'
+BOLD=$'\033[1m'
+ULINE=$'\033[4m'
+GREEN=$'\033[1;32m'
+RED=$'\033[1;31m'
+CYAN=$'\033[0;36m'
+YELLOW=$'\033[0;33m'
+
+banner() {
+    local msg="$1"
+    local border
+    border=$(printf '%*s' $(( ${#msg} + 4 )) '' | tr ' ' '*')
+    echo ""
+    echo -e "${BOLD}${border}${OFF}"
+    echo -e "${BOLD}* ${msg} *${OFF}"
+    echo -e "${BOLD}${border}${OFF}"
+    echo ""
+}
+
+section() {
+    local msg="$1"
+    local uline
+    uline=$(printf '%*s' ${#msg} '' | tr ' ' '=')
+    echo -e "${BOLD}${ULINE}${msg}${OFF}"
+    echo -e "${BOLD}${uline}${OFF}"
+    echo ""
+}
+
+pass_msg() {
+    echo -e "${GREEN}${BOLD}***********${OFF}"
+    echo -e "${GREEN}${BOLD}*  PASS!  *${OFF}"
+    echo -e "${GREEN}${BOLD}***********${OFF}"
+}
+
+fail_msg() {
+    echo -e "${RED}${BOLD}***********${OFF}"
+    echo -e "${RED}${BOLD}*  FAIL!  *${OFF}"
+    echo -e "${RED}${BOLD}***********${OFF}"
+}
+
+# --- Interface auto-detection ---
+
 if mountpoint -q /sys/fs/resctrl 2>/dev/null; then
     IFACE="-I"
 fi
 
-RUN_ALL=false
+# --- Package dependency map ---
 
-print_help() {
-    echo "Usage: $0 [--all] [--workload=TYPE] [--csv=FILE] [--summary] [--security] [--msr|--os]"
-    echo "  --all: Run all tests (security + all workloads) with summary"
-    echo "  --workload: cyclictest | stress-ng | fio | iperf3"
-    echo "  --csv: CSV file with workload,cores,mask"
-    echo "  --summary: Generate summary after tests"
-    echo "  --security: Run security regression tests (RHEL-214298, RHEL-214424)"
-    echo "  --msr: Force MSR interface (default when resctrl is not mounted)"
-    echo "  --os:  Force OS/resctrl interface (default when resctrl is mounted)"
-}
-
-parse_args() {
-    for arg in "$@"; do
-        case $arg in
-            --workload=*)
-                WORKLOAD="${arg#*=}"
-                shift
-                ;;
-            --csv=*)
-                CSV_FILE="${arg#*=}"
-                shift
-                ;;
-            --summary)
-                RUN_SUMMARY=true
-                shift
-                ;;
-            --security)
-                RUN_SECURITY=true
-                shift
-                ;;
-            --all)
-                RUN_ALL=true
-                shift
-                ;;
-            --msr)
-                IFACE="-F msr"
-                shift
-                ;;
-            --os)
-                IFACE="-I"
-                shift
-                ;;
-            *)
-                print_help
-                exit 1
-                ;;
-        esac
-    done
-}
-
-run_test() {
-    local wl="$1"
-    local core="$2"
-    local mask="$3"
-    local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
-
-    echo "Running $wl on core $core with COS mask $mask"
-
-    pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}"
-
-    case "$wl" in
-        cyclictest)
-            taskset -c $core cyclictest -p 99 -l 50000 > "$log"
-            ;;
-        stress-ng)
-            taskset -c $core stress-ng --cpu 1 --timeout 15s > "$log"
-            ;;
-        fio)
-            taskset -c $core fio --name=test --rw=randwrite --size=50M --runtime=15s > "$log"
-            ;;
-        iperf3)
-            iperf3 -c localhost -t 15 > "$log"
-            ;;
-    esac
-
-    if $RUN_SUMMARY; then
-        extract_metrics "$wl" "$log" "$core" "$mask"
-    fi
-}
-
-extract_metrics() {
-    local wl="$1"
-    local log="$2"
-    local core="$3"
-    local mask="$4"
-    local result=""
-
-    case "$wl" in
-        cyclictest)
-            result=$(grep "Min:" "$log" | awk '{print $2}')
-            ;;
-        fio)
-            result=$(grep "IOPS=" "$log" | awk -F'=' '{print $2}' | cut -d',' -f1)
-            ;;
-        iperf3)
-            result=$(grep "sender" "$log" | tail -1 | awk '{print $7 $8}')
-            ;;
-        stress-ng)
-            result=$(grep "successful run" "$log")
-            ;;
-    esac
-
-    echo "$wl,$core,$mask,$result" >> "$SUMMARY_FILE"
-}
-
-main_loop() {
-    if [[ -n "$CSV_FILE" ]]; then
-        while IFS=',' read -r wl core mask; do
-            run_test "$wl" "$core" "$mask"
-        done < "$CSV_FILE"
-    else
-        for mask in "${COS_MASKS[@]}"; do
-            run_test "$WORKLOAD" "$CORES" "$mask"
-        done
-    fi
-
-    pqos $IFACE -R
-}
-
-run_security_tests() {
-    local rc=0
-
-    echo "========================================"
-    echo " Security regression tests"
-    echo "========================================"
-    echo ""
-
-    for test in test-fd-leak.sh test-symlink-race.sh; do
-        local path="$SCRIPTDIR/$test"
-
-        if [[ ! -x "$path" ]]; then
-            echo "SKIP: $test not found at $path"
-            echo ""
-            continue
-        fi
-
-        echo "--- $test ---"
-        "$path" || rc=$?
-        echo ""
-    done
-
-    return $rc
-}
-
-ALL_WORKLOADS=("cyclictest" "stress-ng" "fio")
-
-# Maps command names to the RPM package that provides them.
 declare -A CMD_TO_PKG=(
     [cyclictest]=realtime-tests
     [stress-ng]=stress-ng
@@ -177,6 +79,34 @@ declare -A CMD_TO_PKG=(
     [pqos]=intel-cmt-cat
     [rdtset]=intel-cmt-cat
 )
+
+# --- Functions ---
+
+print_help() {
+    echo "Usage: $0 [--all] [--workload=TYPE] [--csv=FILE] [--summary] [--security] [--msr|--os]"
+    echo "  --all:       Run all tests (security + all workloads) with summary"
+    echo "  --workload:  cyclictest | stress-ng | fio | iperf3"
+    echo "  --csv:       CSV file with workload,cores,mask"
+    echo "  --summary:   Generate summary after tests"
+    echo "  --security:  Run security regression tests (RHEL-214298, RHEL-214424)"
+    echo "  --msr:       Force MSR interface (default when resctrl is not mounted)"
+    echo "  --os:        Force OS/resctrl interface (default when resctrl is mounted)"
+}
+
+parse_args() {
+    for arg in "$@"; do
+        case $arg in
+            --workload=*) WORKLOAD="${arg#*=}" ;;
+            --csv=*)      CSV_FILE="${arg#*=}" ;;
+            --summary)    RUN_SUMMARY=true ;;
+            --security)   RUN_SECURITY=true ;;
+            --all)        RUN_ALL=true ;;
+            --msr)        IFACE="-F msr" ;;
+            --os)         IFACE="-I" ;;
+            *)            print_help; exit 1 ;;
+        esac
+    done
+}
 
 check_deps() {
     local missing_cmds=()
@@ -198,8 +128,8 @@ check_deps() {
         return 0
     fi
 
-    echo "Missing commands: ${missing_cmds[*]}"
-    echo "Packages to try:  ${missing_pkgs[*]}"
+    echo -e "${YELLOW}Missing commands:${OFF} ${missing_cmds[*]}"
+    echo -e "${YELLOW}Packages to try:${OFF}  ${missing_pkgs[*]}"
     echo ""
     echo "  i) Install — attempt dnf install of the above packages"
     echo "  c) Continue — skip tests that need missing tools"
@@ -210,9 +140,10 @@ check_deps() {
         [iI]*)
             if dnf install -y "${missing_pkgs[@]}"; then
                 hash -r
+                echo ""
             else
                 echo ""
-                echo "Some packages failed to install."
+                echo -e "${YELLOW}Some packages failed to install.${OFF}"
                 echo ""
                 echo "  c) Continue — skip tests that need missing tools"
                 echo "  q) Quit — exit so you can find and install them manually"
@@ -234,52 +165,170 @@ check_deps() {
     esac
 }
 
-run_all_tests() {
-    RUN_SUMMARY=true
+run_test() {
+    local wl="$1"
+    local core="$2"
+    local mask="$3"
+    local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
 
-    echo "========================================"
-    echo " Comprehensive intel-cmt-cat test run"
-    echo "========================================"
-    echo ""
+    echo -e "${CYAN}Running $wl on core $core with COS mask $mask${OFF}"
 
-    check_deps pqos rdtset "${ALL_WORKLOADS[@]}" || true
-    echo ""
-
-    run_security_tests || true
-    echo ""
-
-    local ran_workload=false
-    for wl in "${ALL_WORKLOADS[@]}"; do
-        if ! command -v "${wl}" >/dev/null 2>&1; then
-            echo "SKIP: $wl not available"
-            continue
-        fi
-        ran_workload=true
-        for mask in "${COS_MASKS[@]}"; do
-            run_test "$wl" "$CORES" "$mask"
-        done
-    done
-
-    if $ran_workload; then
-        pqos $IFACE -R
+    if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" 2>&1; then
+        echo -e "${YELLOW}Warning: pqos allocation failed for mask $mask — skipping${OFF}"
+        return 1
     fi
 
-    echo ""
-    echo "========================================"
-    echo " Summary: $SUMMARY_FILE"
-    echo "========================================"
+    local rc=0
+    case "$wl" in
+        cyclictest)
+            taskset -c "$core" cyclictest -p 99 -l 50000 > "$log" 2>&1 || rc=$?
+            ;;
+        stress-ng)
+            taskset -c "$core" stress-ng --cpu 1 --timeout 15s > "$log" 2>&1 || rc=$?
+            ;;
+        fio)
+            taskset -c "$core" fio --name=test --rw=randwrite --size=50M --runtime=15s > "$log" 2>&1 || rc=$?
+            ;;
+        iperf3)
+            iperf3 -c localhost -t 15 > "$log" 2>&1 || rc=$?
+            ;;
+    esac
+
+    if (( rc != 0 )); then
+        echo -e "${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
+    fi
+
+    if $RUN_SUMMARY; then
+        extract_metrics "$wl" "$log" "$core" "$mask"
+    fi
+
+    return $rc
+}
+
+extract_metrics() {
+    local wl="$1"
+    local log="$2"
+    local core="$3"
+    local mask="$4"
+    local result=""
+
+    case "$wl" in
+        cyclictest)
+            result=$(grep "Min:" "$log" 2>/dev/null | awk '{print $2}') || true
+            ;;
+        fio)
+            result=$(grep "IOPS=" "$log" 2>/dev/null | awk -F'=' '{print $2}' | cut -d',' -f1) || true
+            ;;
+        iperf3)
+            result=$(grep "sender" "$log" 2>/dev/null | tail -1 | awk '{print $7 $8}') || true
+            ;;
+        stress-ng)
+            result=$(grep "successful run" "$log" 2>/dev/null) || true
+            ;;
+    esac
+
+    echo "$wl,$core,$mask,$result" >> "$SUMMARY_FILE"
+}
+
+run_security_tests() {
+    local rc=0
+
+    section "Security Regression Tests"
+
+    for test in test-fd-leak.sh test-symlink-race.sh; do
+        local path="$SCRIPTDIR/$test"
+
+        if [[ ! -x "$path" ]]; then
+            echo -e "${YELLOW}SKIP:${OFF} $test not found at $path"
+            echo ""
+            continue
+        fi
+
+        section "$test"
+        if "$path"; then
+            echo ""
+            pass_msg
+        else
+            rc=$?
+            echo ""
+            fail_msg
+        fi
+        echo ""
+    done
+
+    return $rc
+}
+
+run_workload_tests() {
+    local workloads=("$@")
+    local ran=false
+
+    for wl in "${workloads[@]}"; do
+        if ! command -v "${wl}" >/dev/null 2>&1; then
+            echo -e "${YELLOW}SKIP:${OFF} $wl not available"
+            continue
+        fi
+
+        section "Workload: $wl"
+        ran=true
+
+        for mask in "${COS_MASKS[@]}"; do
+            run_test "$wl" "$CORES" "$mask" || true
+        done
+        echo ""
+    done
+
+    if $ran; then
+        pqos $IFACE -R 2>/dev/null || true
+    fi
+}
+
+main_loop() {
+    if [[ -n "$CSV_FILE" ]]; then
+        while IFS=',' read -r wl core mask; do
+            run_test "$wl" "$core" "$mask" || true
+        done < "$CSV_FILE"
+    else
+        for mask in "${COS_MASKS[@]}"; do
+            run_test "$WORKLOAD" "$CORES" "$mask" || true
+        done
+    fi
+
+    pqos $IFACE -R 2>/dev/null || true
+}
+
+show_summary() {
+    banner "Summary: $SUMMARY_FILE"
     if [[ -f "$SUMMARY_FILE" ]]; then
         column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
     else
         echo "(no workload results)"
     fi
+    echo ""
 }
+
+run_all_tests() {
+    RUN_SUMMARY=true
+
+    banner "Comprehensive intel-cmt-cat Test Run"
+
+    check_deps pqos rdtset "${ALL_WORKLOADS[@]}" || true
+    echo ""
+
+    run_security_tests || true
+
+    run_workload_tests "${ALL_WORKLOADS[@]}"
+
+    show_summary
+}
+
+# --- Main ---
 
 parse_args "$@"
 
 if $RUN_ALL; then
     run_all_tests
-    exit $?
+    exit 0
 fi
 
 if ! $RUN_SECURITY && [[ -z "$WORKLOAD" && -z "$CSV_FILE" ]]; then
@@ -288,13 +337,13 @@ if ! $RUN_SECURITY && [[ -z "$WORKLOAD" && -z "$CSV_FILE" ]]; then
 fi
 
 if $RUN_SECURITY; then
-    run_security_tests
+    run_security_tests || true
 fi
 
 if [[ -n "$WORKLOAD" ]]; then
     check_deps pqos "$WORKLOAD" || true
     if ! command -v "$WORKLOAD" >/dev/null 2>&1; then
-        echo "Error: $WORKLOAD still not available. Cannot run tests."
+        echo -e "${RED}Error: $WORKLOAD still not available. Cannot run tests.${OFF}"
         exit 1
     fi
     main_loop
@@ -302,3 +351,6 @@ elif [[ -n "$CSV_FILE" ]]; then
     main_loop
 fi
 
+if $RUN_SUMMARY; then
+    show_summary
+fi
