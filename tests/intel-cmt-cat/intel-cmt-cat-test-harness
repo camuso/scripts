@@ -71,7 +71,7 @@ fail_msg() {
 # Default to OS/resctrl interface.  Modern kernels auto-mount resctrl
 # and pqos MSR mode conflicts with it ("Mixed use of MSR and kernel
 # interfaces").  Use --msr to override if needed.
-IFACE="-I"
+IFACE="--iface=os"
 echo "IFACE_SET: '$IFACE'"
 
 # --- Package dependency map ---
@@ -106,8 +106,8 @@ parse_args() {
             --summary)    RUN_SUMMARY=true ;;
             --security)   RUN_SECURITY=true ;;
             --all)        RUN_ALL=true ;;
-            --msr)        IFACE="-F msr" ;;
-            --os)         IFACE="-I" ;;
+            --msr)        IFACE="--iface=msr" ;;
+            --os)         IFACE="--iface=os" ;;
             *)            print_help; exit 1 ;;
         esac
     done
