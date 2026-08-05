@@ -35,22 +35,35 @@
 #   2 - SKIP (cannot run test — missing prerequisites)
 #
 
-set -euo pipefail
-
 PQOS="${1:-$(command -v pqos 2>/dev/null || echo "")}"
 TESTDIR=$(mktemp -d /tmp/symlink-race-test.XXXXXX)
 ITERATIONS=50
+SWAPPER_PID=""
 
 OFF=$'\033[0m'
-PASS=$'\033[1;32m'
-FAIL=$'\033[1;31m'
+BOLD=$'\033[1m'
+GREEN=$'\033[1;32m'
+RED=$'\033[1;31m'
 INFO=$'\033[0;36m'
 WARN=$'\033[0;33m'
 
+pass_result() {
+    echo -e "${GREEN}${BOLD}***********${OFF}"
+    echo -e "${GREEN}${BOLD}*  PASS!  *${OFF}"
+    echo -e "${GREEN}${BOLD}***********${OFF}"
+}
+
+fail_result() {
+    echo -e "${RED}${BOLD}***********${OFF}"
+    echo -e "${RED}${BOLD}*  FAIL!  *${OFF}"
+    echo -e "${RED}${BOLD}***********${OFF}"
+}
+
 cleanup() {
-    # Kill the swapper if still running
-    [[ -n "${SWAPPER_PID:-}" ]] && kill "$SWAPPER_PID" 2>/dev/null || true
-    wait "$SWAPPER_PID" 2>/dev/null || true
+    if [[ -n "$SWAPPER_PID" ]]; then
+        kill "$SWAPPER_PID" 2>/dev/null || true
+        wait "$SWAPPER_PID" 2>/dev/null || true
+    fi
     rm -rf "$TESTDIR"
 }
 trap cleanup EXIT
@@ -87,7 +100,6 @@ echo ""
 
 TARGET="$TESTDIR/sensitive-file.txt"
 OUTPUT="$TESTDIR/pqos-output.csv"
-REGULAR="$TESTDIR/regular-file.tmp"
 SENTINEL="THIS_DATA_MUST_SURVIVE"
 
 echo "$SENTINEL" > "$TARGET"
@@ -107,8 +119,8 @@ swapper() {
         rm -f "$OUTPUT"
         touch "$OUTPUT"
         rm -f "$OUTPUT"
-        ln -s "$TARGET" "$OUTPUT"
-    done
+        ln -sf "$TARGET" "$OUTPUT"
+    done 2>/dev/null
 }
 
 swapper &
@@ -120,22 +132,19 @@ echo -e "${INFO}Running $ITERATIONS attempts to trigger the race...${OFF}"
 
 hit=0
 for (( i = 1; i <= ITERATIONS; i++ )); do
-    # Reset the target each iteration
     echo "$SENTINEL" > "$TARGET"
 
-    # Run pqos briefly; suppress output — we only care about the target
     "$PQOS" -o "$OUTPUT" -t 1 >/dev/null 2>&1 || true
 
-    # Check if the target was clobbered
     if [[ ! -f "$TARGET" ]]; then
-        echo -e "  ${FAIL}Hit on iteration $i:${OFF} target file deleted!"
+        echo -e "  ${RED}${BOLD}Hit on iteration $i:${OFF} target file deleted!"
         hit=1
         break
     fi
 
     contents=$(cat "$TARGET")
     if [[ "$contents" != "$SENTINEL" ]]; then
-        echo -e "  ${FAIL}Hit on iteration $i:${OFF} target file overwritten!"
+        echo -e "  ${RED}${BOLD}Hit on iteration $i:${OFF} target file overwritten!"
         echo "    Expected: $SENTINEL"
         echo "    Got:      $contents"
         hit=1
@@ -146,20 +155,24 @@ done
 # Stop the swapper
 kill "$SWAPPER_PID" 2>/dev/null || true
 wait "$SWAPPER_PID" 2>/dev/null || true
-unset SWAPPER_PID
+SWAPPER_PID=""
 
 echo ""
 
 # --- Results ---
 
 if [[ "$hit" -eq 1 ]]; then
-    echo -e "${FAIL}FAIL:${OFF} Symlink race triggered — pqos followed a symlink!"
+    fail_result
+    echo ""
+    echo -e "${RED}${BOLD}FAIL:${OFF} Symlink race triggered — pqos followed a symlink!"
     echo ""
     echo "  The TOCTOU window between lstat() and fopen() was exploited."
     echo "  This confirms the vulnerability described in RHEL-214424."
     exit 1
 else
-    echo -e "${PASS}PASS:${OFF} Target file survived all $ITERATIONS iterations."
+    pass_result
+    echo ""
+    echo -e "${GREEN}${BOLD}PASS:${OFF} Target file survived all $ITERATIONS iterations."
     echo ""
     echo "  On patched code (O_NOFOLLOW), this is expected — the race"
     echo "  window is eliminated entirely."

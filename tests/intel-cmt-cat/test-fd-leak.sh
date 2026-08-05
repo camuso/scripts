@@ -16,16 +16,27 @@
 #   2 - SKIP (cannot run test — missing prerequisites)
 #
 
-set -euo pipefail
-
 RDTSET="${1:-$(command -v rdtset 2>/dev/null || echo "")}"
 RESULT_FILE=$(mktemp /tmp/fd-leak-test.XXXXXX)
 
 OFF=$'\033[0m'
-PASS=$'\033[1;32m'
-FAIL=$'\033[1;31m'
+BOLD=$'\033[1m'
+GREEN=$'\033[1;32m'
+RED=$'\033[1;31m'
 INFO=$'\033[0;36m'
 WARN=$'\033[0;33m'
+
+pass_result() {
+    echo -e "${GREEN}${BOLD}***********${OFF}"
+    echo -e "${GREEN}${BOLD}*  PASS!  *${OFF}"
+    echo -e "${GREEN}${BOLD}***********${OFF}"
+}
+
+fail_result() {
+    echo -e "${RED}${BOLD}***********${OFF}"
+    echo -e "${RED}${BOLD}*  FAIL!  *${OFF}"
+    echo -e "${RED}${BOLD}***********${OFF}"
+}
 
 cleanup() {
     rm -f "$RESULT_FILE"
@@ -127,18 +138,22 @@ echo ""
 MSR_COUNT=$(grep -c '^LEAKED' "$RESULT_FILE" 2>/dev/null) || MSR_COUNT=0
 
 if [[ "$MSR_COUNT" -gt 0 ]]; then
-    echo -e "${FAIL}FAIL:${OFF} $MSR_COUNT MSR file descriptor(s) leaked to child process!"
+    fail_result
+    echo ""
+    echo -e "${RED}${BOLD}FAIL:${OFF} $MSR_COUNT MSR file descriptor(s) leaked to child process!"
     echo ""
     echo "  The child process inherited open /dev/cpu/*/msr descriptors"
     echo "  after rdtset dropped privileges. This confirms the vulnerability"
     echo "  described in RHEL-214298."
     echo ""
     grep '^LEAKED' "$RESULT_FILE" | while read -r line; do
-        echo -e "  ${FAIL}•${OFF} $line"
+        echo -e "  ${RED}${BOLD}•${OFF} $line"
     done
     exit 1
 else
-    echo -e "${PASS}PASS:${OFF} No MSR file descriptors leaked to child process."
+    pass_result
+    echo ""
+    echo -e "${GREEN}${BOLD}PASS:${OFF} No MSR file descriptors leaked to child process."
     echo ""
     echo "  The child process did not inherit any /dev/cpu/*/msr descriptors."
     echo "  The fix is working correctly."

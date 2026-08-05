@@ -245,14 +245,7 @@ run_security_tests() {
         fi
 
         section "$test"
-        if "$path"; then
-            echo ""
-            pass_msg
-        else
-            rc=$?
-            echo ""
-            fail_msg
-        fi
+        "$path" || rc=$?
         echo ""
     done
 
