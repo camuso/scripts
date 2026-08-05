@@ -145,6 +145,11 @@ run_security_tests() {
 
 parse_args "$@"
 
+if ! $RUN_SECURITY && [[ -z "$WORKLOAD" && -z "$CSV_FILE" ]]; then
+    print_help
+    exit 1
+fi
+
 if $RUN_SECURITY; then
     run_security_tests
 fi
