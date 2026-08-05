@@ -193,11 +193,10 @@ run_test() {
     local mask="$3"
     local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
 
-    echo -ne "${CYAN}Running $wl on core $core with COS mask $mask${OFF} "
+    echo -e "${CYAN}Running $wl on core $core with COS mask $mask${OFF}"
 
     if $HAS_L3CAT; then
         if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" >/dev/null 2>&1; then
-            echo ""
             echo -e "${YELLOW}Warning: pqos L3 allocation failed for mask $mask${OFF}"
         fi
     fi
@@ -221,6 +220,7 @@ run_test() {
     local wl_pid=$!
     progress_dots "$wl_pid"
     wait "$wl_pid" || rc=$?
+    echo ""
 
     if (( rc != 0 )); then
         echo -e "${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
