@@ -170,6 +170,11 @@ check_deps() {
     esac
 }
 
+HAS_L3CAT=false
+if [[ -d /sys/fs/resctrl/info/L3 ]]; then
+    HAS_L3CAT=true
+fi
+
 run_test() {
     local wl="$1"
     local core="$2"
@@ -177,11 +182,11 @@ run_test() {
     local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
 
     echo -e "${CYAN}Running $wl on core $core with COS mask $mask${OFF}"
-    echo "DEBUG: pqos $IFACE -e llc:1=${mask} -a llc:1=${core}"
 
-    if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" 2>&1; then
-        echo -e "${YELLOW}Warning: pqos allocation failed for mask $mask — skipping${OFF}"
-        return 1
+    if $HAS_L3CAT; then
+        if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" 2>&1; then
+            echo -e "${YELLOW}Warning: pqos L3 allocation failed for mask $mask${OFF}"
+        fi
     fi
 
     local rc=0
@@ -262,10 +267,11 @@ run_workload_tests() {
     local workloads=("$@")
     local ran=false
 
-    if [[ -n "$IFACE" ]]; then
-        echo -e "${CYAN}pqos interface:${OFF} $IFACE"
+    echo -e "${CYAN}pqos interface:${OFF} $IFACE"
+    if $HAS_L3CAT; then
+        echo -e "${CYAN}L3 CAT:${OFF} available — workloads will run with cache allocation"
     else
-        echo -e "${CYAN}pqos interface:${OFF} (default/MSR)"
+        echo -e "${YELLOW}L3 CAT:${OFF} not available — workloads will run without cache allocation"
     fi
     echo ""
 
