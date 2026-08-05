@@ -63,13 +63,10 @@ fail_msg() {
     echo -e "${RED}${BOLD}***********${OFF}"
 }
 
-# --- Interface auto-detection ---
-# Prefer resctrl (OS interface) when available to avoid the "Mixed use
-# of MSR and kernel interfaces" conflict.
-
-if mountpoint -q /sys/fs/resctrl 2>/dev/null || [[ -d /sys/fs/resctrl/info ]]; then
-    IFACE="-I"
-fi
+# Default to OS/resctrl interface.  Modern kernels auto-mount resctrl
+# and pqos MSR mode conflicts with it ("Mixed use of MSR and kernel
+# interfaces").  Use --msr to override if needed.
+IFACE="-I"
 
 # --- Package dependency map ---
 
