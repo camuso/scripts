@@ -220,10 +220,14 @@ run_test() {
     progress_dots "$wl_pid"
     wait "$wl_pid" || rc=$?
 
+    local cols
+    cols=$(tput cols 2>/dev/null || echo 80)
+    printf '\r%*s\r' "$cols" ''
+
     if (( rc != 0 )); then
-        echo -e "\r${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
+        echo -e "${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
     else
-        echo -e "\r${GREEN}done${OFF}"
+        echo -e "${GREEN}done${OFF}"
     fi
 
     if $RUN_SUMMARY; then
