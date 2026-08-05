@@ -170,7 +170,7 @@ ALL_WORKLOADS=("cyclictest" "stress-ng" "fio")
 
 # Maps command names to the RPM package that provides them.
 declare -A CMD_TO_PKG=(
-    [cyclictest]=rt-tests
+    [cyclictest]=realtime-tests
     [stress-ng]=stress-ng
     [fio]=fio
     [iperf3]=iperf3
@@ -186,7 +186,6 @@ check_deps() {
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing_cmds+=("$cmd")
             local pkg="${CMD_TO_PKG[$cmd]:-$cmd}"
-            # Avoid duplicate package names
             local already=false
             for p in "${missing_pkgs[@]+"${missing_pkgs[@]}"}"; do
                 [[ "$p" == "$pkg" ]] && already=true
@@ -200,16 +199,35 @@ check_deps() {
     fi
 
     echo "Missing commands: ${missing_cmds[*]}"
-    echo "Required packages: ${missing_pkgs[*]}"
+    echo "Packages to try:  ${missing_pkgs[*]}"
     echo ""
-    read -r -p "Install them now? [y/N] " ans
+    echo "  i) Install — attempt dnf install of the above packages"
+    echo "  c) Continue — skip tests that need missing tools"
+    echo "  q) Quit — exit so you can install manually"
+    echo ""
+    read -r -p "Choose [i/c/q]: " ans
     case "$ans" in
-        [yY]*)
-            dnf install -y "${missing_pkgs[@]}"
+        [iI]*)
+            if ! dnf install -y "${missing_pkgs[@]}"; then
+                echo ""
+                echo "Some packages failed to install."
+                echo ""
+                echo "  c) Continue — skip tests that need missing tools"
+                echo "  q) Quit — exit so you can find and install them manually"
+                echo ""
+                read -r -p "Choose [c/q]: " ans2
+                case "$ans2" in
+                    [cC]*) return 1 ;;
+                    *)     exit 1 ;;
+                esac
+            fi
+            ;;
+        [cC]*)
+            echo "Continuing — tests requiring missing tools will be skipped."
+            return 1
             ;;
         *)
-            echo "Skipping install. Tests requiring these tools will be skipped."
-            return 1
+            exit 1
             ;;
     esac
 }
