@@ -21,6 +21,11 @@ WORKLOAD=""
 CORES="0"
 IFACE=""
 
+# --- Debug: confirm script version ---
+echo "HARNESS: $0"
+echo "HARNESS_DATE: $(stat -c %Y "$0" 2>/dev/null || echo unknown)"
+echo "IFACE_INIT: will be set below"
+
 # --- Formatting ---
 
 OFF=$'\033[0m'
@@ -67,6 +72,7 @@ fail_msg() {
 # and pqos MSR mode conflicts with it ("Mixed use of MSR and kernel
 # interfaces").  Use --msr to override if needed.
 IFACE="-I"
+echo "IFACE_SET: '$IFACE'"
 
 # --- Package dependency map ---
 
@@ -171,6 +177,7 @@ run_test() {
     local log="$LOGDIR/${wl}_${core}_${mask}_$(date +%s).log"
 
     echo -e "${CYAN}Running $wl on core $core with COS mask $mask${OFF}"
+    echo "DEBUG: pqos $IFACE -e llc:1=${mask} -a llc:1=${core}"
 
     if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" 2>&1; then
         echo -e "${YELLOW}Warning: pqos allocation failed for mask $mask — skipping${OFF}"
