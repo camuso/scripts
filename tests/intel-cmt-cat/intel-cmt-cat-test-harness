@@ -64,8 +64,10 @@ fail_msg() {
 }
 
 # --- Interface auto-detection ---
+# Prefer resctrl (OS interface) when available to avoid the "Mixed use
+# of MSR and kernel interfaces" conflict.
 
-if mountpoint -q /sys/fs/resctrl 2>/dev/null; then
+if mountpoint -q /sys/fs/resctrl 2>/dev/null || [[ -d /sys/fs/resctrl/info ]]; then
     IFACE="-I"
 fi
 
@@ -255,6 +257,13 @@ run_security_tests() {
 run_workload_tests() {
     local workloads=("$@")
     local ran=false
+
+    if [[ -n "$IFACE" ]]; then
+        echo -e "${CYAN}pqos interface:${OFF} $IFACE"
+    else
+        echo -e "${CYAN}pqos interface:${OFF} (default/MSR)"
+    fi
+    echo ""
 
     for wl in "${workloads[@]}"; do
         if ! command -v "${wl}" >/dev/null 2>&1; then
