@@ -21,11 +21,6 @@ WORKLOAD=""
 CORES="0"
 IFACE=""
 
-# --- Debug: confirm script version ---
-echo "HARNESS: $0"
-echo "HARNESS_DATE: $(stat -c %Y "$0" 2>/dev/null || echo unknown)"
-echo "IFACE_INIT: will be set below"
-
 # --- Formatting ---
 
 OFF=$'\033[0m'
@@ -72,7 +67,6 @@ fail_msg() {
 # and pqos MSR mode conflicts with it ("Mixed use of MSR and kernel
 # interfaces").  Use --msr to override if needed.
 IFACE="--iface=os"
-echo "IFACE_SET: '$IFACE'"
 
 # --- Package dependency map ---
 
