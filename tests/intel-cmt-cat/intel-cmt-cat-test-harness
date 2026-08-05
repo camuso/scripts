@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOGDIR="rdt_logs"
 mkdir -p "$LOGDIR"
 
@@ -9,14 +10,16 @@ COS_MASKS=("0x0f" "0xf0" "0x33" "0xcc")
 SUMMARY_FILE="summary.csv"
 CSV_FILE=""
 RUN_SUMMARY=false
+RUN_SECURITY=false
 WORKLOAD=""
 CORES="0"
 
 print_help() {
-    echo "Usage: $0 [--workload=TYPE] [--csv=FILE] [--summary]"
+    echo "Usage: $0 [--workload=TYPE] [--csv=FILE] [--summary] [--security]"
     echo "  --workload: cyclictest | stress-ng | fio | iperf3"
     echo "  --csv: CSV file with workload,cores,mask"
     echo "  --summary: Generate summary after tests"
+    echo "  --security: Run security regression tests (RHEL-214298, RHEL-214424)"
 }
 
 parse_args() {
@@ -32,6 +35,10 @@ parse_args() {
                 ;;
             --summary)
                 RUN_SUMMARY=true
+                shift
+                ;;
+            --security)
+                RUN_SECURITY=true
                 shift
                 ;;
             *)
@@ -111,6 +118,38 @@ main_loop() {
     pqos -R
 }
 
+run_security_tests() {
+    local rc=0
+
+    echo "========================================"
+    echo " Security regression tests"
+    echo "========================================"
+    echo ""
+
+    for test in test-fd-leak.sh test-symlink-race.sh; do
+        local path="$SCRIPTDIR/$test"
+
+        if [[ ! -x "$path" ]]; then
+            echo "SKIP: $test not found at $path"
+            echo ""
+            continue
+        fi
+
+        echo "--- $test ---"
+        "$path" || rc=$?
+        echo ""
+    done
+
+    return $rc
+}
+
 parse_args "$@"
-main_loop
+
+if $RUN_SECURITY; then
+    run_security_tests
+fi
+
+if [[ -n "$WORKLOAD" || -n "$CSV_FILE" ]]; then
+    main_loop
+fi
 

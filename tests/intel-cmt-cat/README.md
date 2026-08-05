@@ -32,6 +32,38 @@ require `mba`.
 
 ## Scripts
 
+### test-fd-leak.sh
+
+Security regression test for RHEL-214298. Verifies that `rdtset` does not
+leak privileged MSR file descriptors to child processes after dropping
+privileges.
+
+```
+sudo ./test-fd-leak.sh [path-to-rdtset]
+```
+
+Runs `rdtset` in MSR mode with a Python sub-command that inspects its own
+inherited file descriptors. If any `/dev/cpu/*/msr` descriptors are present
+in the child, the vulnerability exists. Auto-detects `rdtset` in `$PATH` if
+no argument is given.
+
+### test-symlink-race.sh
+
+Security regression test for RHEL-214424. Attempts to trigger a TOCTOU
+(time-of-check/time-of-use) symlink race in the `pqos` `safe_fopen()`
+function.
+
+```
+sudo ./test-symlink-race.sh [path-to-pqos]
+```
+
+Runs a background process that rapidly swaps a regular file and a symlink at
+the output path while `pqos` tries to open it. A FAIL conclusively proves
+the vulnerability; a PASS on unpatched code does **not** prove its absence
+because the race window (between `lstat()` and `fopen()`) is only
+microseconds wide. On patched code (`O_NOFOLLOW`), the window is eliminated
+entirely and the test will always PASS.
+
 ### intelrdt-test
 
 Self-contained single-run test. Detects the available RDT interface
@@ -60,6 +92,7 @@ sudo ./intel-cmt-cat-test-harness --csv=testplan.csv --summary
 | `--workload=TYPE` | One of: `cyclictest`, `stress-ng`, `fio`, `iperf3` |
 | `--csv=FILE` | CSV file with rows of `workload,cores,mask` |
 | `--summary` | Append extracted metrics to `summary.csv` |
+| `--security` | Run security regression tests (RHEL-214298, RHEL-214424) |
 
 Logs are written to the `rdt_logs/` directory.
 

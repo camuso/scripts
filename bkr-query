@@ -247,7 +247,7 @@ set_status_filter() {
 	echo ""
 
 	local choice=""
-	prompt_input "Select status filter [1-3]" choice
+	promptgetchar "${INF}Select status filter [1-3]: ${OFF}" choice
 
 	case "$choice" in
 		1) status_filter="free" ;;
@@ -353,6 +353,7 @@ show_query() {
 }
 
 #** run_query: execute the beaker query
+#*  Captures stderr to detect Kerberos/auth failures and other errors.
 #*
 run_query() {
 	build_query
@@ -365,7 +366,34 @@ run_query() {
 		return 1
 	fi
 
-	bkr "${bkr_args[@]}"
+	local errfile
+	errfile="$(mktemp)"
+	local -i rc=0
+
+	bkr "${bkr_args[@]}" 2>"$errfile" || rc=$?
+
+	if ((rc != 0)); then
+		local errmsg
+		errmsg="$(<"$errfile")"
+
+		echo -e "\n${CAU}bkr command failed (exit code: $rc)${OFF}\n"
+
+		if [[ "$errmsg" == *"GSSError"* ]] || \
+		   [[ "$errmsg" == *"Cannot contact any KDC"* ]] || \
+		   [[ "$errmsg" == *"Credentials cache"* ]]; then
+			echo -e "${WRN}Kerberos authentication failed.${OFF}"
+			echo -e "${INF}Try running: ${STA}kinit${OFF}"
+		elif [[ "$errmsg" == *"HTTP 401"* ]] || \
+		     [[ "$errmsg" == *"Unauthorized"* ]]; then
+			echo -e "${WRN}Authentication error (HTTP 401).${OFF}"
+			echo -e "${INF}Check your Kerberos ticket: ${STA}klist${OFF}"
+		else
+			echo -e "${WRN}$errmsg${OFF}"
+		fi
+	fi
+
+	rm -f "$errfile"
+	return $rc
 }
 
 #** menu_parser: main menu loop
@@ -375,8 +403,7 @@ menu_parser() {
 
 	while true; do
 		show_menu
-		echo -en "${MNU}   Enter option: ${OFF}"
-		read -r opt
+		promptgetchar "${MNU}   Enter option: ${OFF}" opt
 
 		case "$opt" in
 			v|V) set_cpu_vendor ;;
