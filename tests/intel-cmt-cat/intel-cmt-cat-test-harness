@@ -168,6 +168,52 @@ run_security_tests() {
 
 ALL_WORKLOADS=("cyclictest" "stress-ng" "fio")
 
+# Maps command names to the RPM package that provides them.
+declare -A CMD_TO_PKG=(
+    [cyclictest]=rt-tests
+    [stress-ng]=stress-ng
+    [fio]=fio
+    [iperf3]=iperf3
+    [pqos]=intel-cmt-cat
+    [rdtset]=intel-cmt-cat
+)
+
+check_deps() {
+    local missing_cmds=()
+    local missing_pkgs=()
+
+    for cmd in "$@"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_cmds+=("$cmd")
+            local pkg="${CMD_TO_PKG[$cmd]:-$cmd}"
+            # Avoid duplicate package names
+            local already=false
+            for p in "${missing_pkgs[@]+"${missing_pkgs[@]}"}"; do
+                [[ "$p" == "$pkg" ]] && already=true
+            done
+            $already || missing_pkgs+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing_cmds[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    echo "Missing commands: ${missing_cmds[*]}"
+    echo "Required packages: ${missing_pkgs[*]}"
+    echo ""
+    read -r -p "Install them now? [y/N] " ans
+    case "$ans" in
+        [yY]*)
+            dnf install -y "${missing_pkgs[@]}"
+            ;;
+        *)
+            echo "Skipping install. Tests requiring these tools will be skipped."
+            return 1
+            ;;
+    esac
+}
+
 run_all_tests() {
     RUN_SUMMARY=true
 
@@ -176,12 +222,15 @@ run_all_tests() {
     echo "========================================"
     echo ""
 
+    check_deps pqos rdtset "${ALL_WORKLOADS[@]}" || true
+    echo ""
+
     run_security_tests || true
     echo ""
 
     for wl in "${ALL_WORKLOADS[@]}"; do
         if ! command -v "${wl}" >/dev/null 2>&1; then
-            echo "SKIP: $wl not installed"
+            echo "SKIP: $wl not available"
             continue
         fi
         for mask in "${COS_MASKS[@]}"; do
@@ -215,6 +264,9 @@ if $RUN_SECURITY; then
 fi
 
 if [[ -n "$WORKLOAD" || -n "$CSV_FILE" ]]; then
+    if [[ -n "$WORKLOAD" ]]; then
+        check_deps pqos "$WORKLOAD" || true
+    fi
     main_loop
 fi
 
