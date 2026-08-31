@@ -9,7 +9,11 @@ SCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOGDIR="rdt_logs"
 mkdir -p "$LOGDIR"
 
-COS_MASKS=("0x0f" "0xf0" "0x33" "0xcc")
+# L3 CAT bitmasks must be contiguous on most Intel platforms.
+# Non-contiguous masks (e.g. 0x33, 0xcc) are rejected by resctrl.
+#   0x0f = lower 4 ways    0xf0 = upper 4 ways
+#   0x03 = lower 2 ways    0xff = all ways (baseline)
+COS_MASKS=("0x0f" "0xf0" "0x03" "0xff")
 ALL_WORKLOADS=("cyclictest" "stress-ng" "fio")
 
 SUMMARY_FILE="summary.csv"
@@ -201,7 +205,7 @@ run_test() {
 
     if $HAS_L3CAT; then
         if ! pqos $IFACE -e "llc:1=${mask}" -a "llc:1=${core}" >/dev/null 2>&1; then
-            echo -e "${YELLOW}Warning: pqos L3 allocation failed for mask $mask${OFF}"
+            echo -e "${YELLOW}Warning: pqos L3 allocation failed for mask $mask — running without allocation${OFF}"
         fi
     fi
 
@@ -384,7 +388,8 @@ show_summary() {
         fi
         echo ""
         if [[ -f "$SUMMARY_FILE" ]]; then
-            echo -e "${BOLD}Workload Metrics${OFF} (workload, core, mask, metric)"
+            echo -e "${BOLD}Workload Metrics${OFF} (workload, core, L3 mask, metric)"
+            echo -e "  Masks: 0x0f=lower4  0xf0=upper4  0x03=lower2  0xff=all (baseline)"
             echo ""
             column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
             echo ""
