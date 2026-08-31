@@ -360,10 +360,10 @@ show_summary() {
             echo -e "  ${GREEN}${BOLD}All $SEC_PASS security tests PASSED${OFF}"
         fi
         echo ""
-        echo -e "  ${CYAN}NOTE:${OFF} A PASS on the symlink race test does not prove"
-        echo -e "  the absence of the vulnerability on unpatched builds."
-        echo -e "  The TOCTOU window is microseconds wide; the test may"
-        echo -e "  simply not win the race.  A FAIL is conclusive."
+        echo -e "  ${CYAN}NOTE:${OFF} The symlink test is deterministic — unpatched"
+        echo -e "  code will FAIL (target truncated before the post-open"
+        echo -e "  check detects the symlink).  Patched code will PASS"
+        echo -e "  (O_NOFOLLOW rejects the symlink at open time)."
         echo ""
     fi
 

@@ -1,28 +1,25 @@
 #!/bin/bash
 #
-# test-symlink-race.sh - Test for TOCTOU symlink race in pqos safe_fopen
-#                        (RHEL-214424)
+# test-symlink-race.sh - Test for symlink-following truncation in pqos
+#                        safe_fopen (RHEL-214424)
 #
-# The vulnerability is a time-of-check/time-of-use (TOCTOU) race in the
-# original safe_fopen() implementation.  The old code calls lstat() to
-# verify the path is not a symlink, then calls fopen() to open it.
-# Between those two calls there is a window where an attacker can swap a
-# regular file for a symlink, causing pqos to follow the symlink and
-# truncate or overwrite an arbitrary file.
+# The vulnerability is in the original safe_fopen() implementation:
 #
-# The fix replaces fopen() with open(O_NOFOLLOW) + fdopen(), making the
-# symlink check and the open a single atomic kernel operation.
+#   1. lstat(path) — collects symlink metadata
+#   2. fopen(path, "w+") — follows the symlink, truncating the TARGET
+#   3. fstat(fd) vs lstat comparison detects the mismatch, aborts
 #
-# This test attempts to exploit the race by running a background process
-# that rapidly swaps a regular file and a symlink at the output path
-# while pqos tries to open it repeatedly.  Because the race window is
-# very narrow (microseconds between lstat and fopen), this test may PASS
-# even on unpatched code — the race is real but difficult to trigger
-# deterministically.  A FAIL result conclusively proves the vulnerability;
-# a PASS result on unpatched code does NOT prove its absence.
+# Steps 1-3 correctly detect the symlink, but the damage happens at
+# step 2: fopen("w+") truncates the symlink target to zero bytes
+# before the check at step 3 can prevent it.  No race is required —
+# a pre-existing symlink is enough.
 #
-# On patched code, the test will always PASS because O_NOFOLLOW rejects
-# symlinks atomically regardless of timing.
+# The fix replaces fopen() with open(O_NOFOLLOW) + fdopen().  The
+# kernel rejects the symlink atomically at open time with ELOOP,
+# so the target is never opened or truncated.
+#
+# On unpatched code: FAIL — the target file is truncated to zero.
+# On patched code:   PASS — the target file is untouched.
 #
 # Must be run as root on a system with RDT/CAT support (x86_64).
 #
@@ -30,15 +27,13 @@
 #   sudo ./test-symlink-race.sh [path-to-pqos]
 #
 # Exit codes:
-#   0 - PASS (target file survived all iterations)
-#   1 - FAIL (pqos followed a symlink — vulnerability confirmed)
+#   0 - PASS (target file intact — symlink was rejected before open)
+#   1 - FAIL (target file truncated — vulnerability confirmed)
 #   2 - SKIP (cannot run test — missing prerequisites)
 #
 
 PQOS="${1:-$(command -v pqos 2>/dev/null || echo "")}"
 TESTDIR=$(mktemp -d /tmp/symlink-race-test.XXXXXX)
-ITERATIONS=50
-SWAPPER_PID=""
 
 OFF=$'\033[0m'
 BOLD=$'\033[1m'
@@ -60,23 +55,18 @@ fail_result() {
 }
 
 cleanup() {
-    if [[ -n "$SWAPPER_PID" ]]; then
-        kill "$SWAPPER_PID" 2>/dev/null || true
-        wait "$SWAPPER_PID" 2>/dev/null || true
-    fi
     rm -rf "$TESTDIR"
 }
 trap cleanup EXIT
 
-echo -e "${INFO}=== pqos symlink TOCTOU race test (RHEL-214424) ===${OFF}"
+echo -e "${INFO}=== pqos symlink truncation test (RHEL-214424) ===${OFF}"
 echo ""
-echo -e "${INFO}NOTE:${OFF} The vulnerability is a narrow TOCTOU race between lstat()"
-echo "  and fopen() in the original safe_fopen().  This test tries to hit"
-echo "  that window by rapidly swapping a regular file and a symlink while"
-echo "  pqos opens the path.  Because the window is only microseconds wide,"
-echo "  the test may PASS on unpatched code simply because the swap didn't"
-echo "  land in the gap.  A FAIL conclusively proves the bug; a PASS does"
-echo "  not guarantee its absence on unpatched builds."
+echo -e "${INFO}NOTE:${OFF} This test checks whether pqos safe_fopen() truncates a"
+echo "  symlink target before detecting the symlink.  The original code"
+echo "  calls fopen(\"w+\") which follows symlinks and truncates the"
+echo "  target, then detects the mismatch and aborts — but the damage"
+echo "  is already done.  No race condition is needed; a pre-existing"
+echo "  symlink is sufficient."
 echo ""
 
 # --- Prerequisite checks ---
@@ -93,91 +83,87 @@ if [[ -z "$PQOS" || ! -x "$PQOS" ]]; then
 fi
 
 echo -e "${INFO}pqos:${OFF} $PQOS"
-echo -e "${INFO}iterations:${OFF} $ITERATIONS"
 echo ""
 
 # --- Set up files ---
 
 TARGET="$TESTDIR/sensitive-file.txt"
-OUTPUT="$TESTDIR/pqos-output.csv"
+SYMLINK="$TESTDIR/pqos-output.csv"
 SENTINEL="THIS_DATA_MUST_SURVIVE"
 
 echo "$SENTINEL" > "$TARGET"
+ln -sf "$TARGET" "$SYMLINK"
 
-echo -e "${INFO}Target file:${OFF} $TARGET"
-echo -e "${INFO}Output path:${OFF} $OUTPUT"
+echo -e "${INFO}Target file:${OFF}  $TARGET"
+echo -e "${INFO}Symlink:${OFF}      $SYMLINK -> $TARGET"
+echo -e "${INFO}Content:${OFF}      $SENTINEL"
 echo ""
 
-# --- Symlink swapper ---
-#
-# Tight loop: alternate the output path between a regular file and a
-# symlink to the target.  The goal is to have a regular file in place
-# when lstat() runs, then swap it for a symlink before fopen() runs.
+# Verify setup
+if [[ ! -L "$SYMLINK" ]]; then
+    echo -e "${RED}Error:${OFF} Failed to create symlink"
+    exit 2
+fi
 
-swapper() {
-    while true; do
-        rm -f "$OUTPUT"
-        touch "$OUTPUT"
-        rm -f "$OUTPUT"
-        ln -sf "$TARGET" "$OUTPUT"
-    done 2>/dev/null
-}
+# --- Trigger the vulnerability ---
 
-swapper &
-SWAPPER_PID=$!
+echo -e "${INFO}Running pqos with symlink as output path...${OFF}"
+echo ""
 
-# --- Run the race ---
-
-echo -e "${INFO}Running $ITERATIONS attempts to trigger the race...${OFF}"
-
-hit=0
-for (( i = 1; i <= ITERATIONS; i++ )); do
-    echo "$SENTINEL" > "$TARGET"
-
-    "$PQOS" -o "$OUTPUT" -t 1 >/dev/null 2>&1 || true
-
-    if [[ ! -f "$TARGET" ]]; then
-        echo -e "  ${RED}${BOLD}Hit on iteration $i:${OFF} target file deleted!"
-        hit=1
-        break
-    fi
-
-    contents=$(cat "$TARGET")
-    if [[ "$contents" != "$SENTINEL" ]]; then
-        echo -e "  ${RED}${BOLD}Hit on iteration $i:${OFF} target file overwritten!"
-        echo "    Expected: $SENTINEL"
-        echo "    Got:      $contents"
-        hit=1
-        break
-    fi
+# pqos will attempt safe_fopen(SYMLINK, "w+").
+# On unpatched code: fopen truncates the target, then lstat/fstat
+#   catches the mismatch and prints "File is a symlink".
+# On patched code: open(O_NOFOLLOW) fails with ELOOP immediately.
+"$PQOS" --iface=os -o "$SYMLINK" -u csv -T 2>&1 | while IFS= read -r line; do
+    echo "  pqos: $line"
 done
-
-# Stop the swapper
-kill "$SWAPPER_PID" 2>/dev/null || true
-wait "$SWAPPER_PID" 2>/dev/null || true
-SWAPPER_PID=""
-
 echo ""
 
-# --- Results ---
+# --- Check the target ---
 
-if [[ "$hit" -eq 1 ]]; then
+if [[ ! -f "$TARGET" ]]; then
     fail_result
     echo ""
-    echo -e "${RED}${BOLD}FAIL:${OFF} Symlink race triggered — pqos followed a symlink!"
+    echo -e "${RED}${BOLD}FAIL:${OFF} Target file was deleted!"
     echo ""
-    echo "  The TOCTOU window between lstat() and fopen() was exploited."
+    echo "  pqos followed the symlink and removed the target file."
     echo "  This confirms the vulnerability described in RHEL-214424."
     exit 1
-else
-    pass_result
-    echo ""
-    echo -e "${GREEN}${BOLD}PASS:${OFF} Target file survived all $ITERATIONS iterations."
-    echo ""
-    echo "  On patched code (O_NOFOLLOW), this is expected — the race"
-    echo "  window is eliminated entirely."
-    echo ""
-    echo "  On unpatched code, this may simply mean the race was not won"
-    echo "  in $ITERATIONS attempts.  The TOCTOU window is real but narrow."
-    exit 0
 fi
+
+contents=$(cat "$TARGET")
+if [[ -z "$contents" ]]; then
+    fail_result
+    echo ""
+    echo -e "${RED}${BOLD}FAIL:${OFF} Target file was truncated to zero bytes!"
+    echo ""
+    echo "  pqos safe_fopen() called fopen(\"w+\") which followed the"
+    echo "  symlink and truncated the target before the post-open"
+    echo "  lstat/fstat check could prevent it."
+    echo ""
+    echo "  This confirms the vulnerability described in RHEL-214424."
+    exit 1
+fi
+
+if [[ "$contents" != "$SENTINEL" ]]; then
+    fail_result
+    echo ""
+    echo -e "${RED}${BOLD}FAIL:${OFF} Target file content was modified!"
+    echo ""
+    echo "  Expected: $SENTINEL"
+    echo "  Got:      $contents"
+    echo ""
+    echo "  pqos followed the symlink and overwrote the target."
+    echo "  This confirms the vulnerability described in RHEL-214424."
+    exit 1
+fi
+
+pass_result
+echo ""
+echo -e "${GREEN}${BOLD}PASS:${OFF} Target file is intact."
+echo ""
+echo "  Content: $contents"
+echo ""
+echo "  The symlink was rejected at open time (O_NOFOLLOW → ELOOP)"
+echo "  before any truncation could occur.  The fix is working."
+exit 0
