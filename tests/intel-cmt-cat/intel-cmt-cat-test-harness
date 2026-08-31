@@ -17,6 +17,11 @@ CSV_FILE=""
 RUN_SUMMARY=false
 RUN_SECURITY=false
 RUN_ALL=false
+SEC_PASS=0
+SEC_FAIL=0
+SEC_SKIP=0
+WL_RUN=0
+WL_FAIL=0
 WORKLOAD=""
 CORES="0"
 IFACE=""
@@ -224,8 +229,10 @@ run_test() {
     cols=$(tput cols 2>/dev/null || echo 80)
     printf '\r%*s\r' "$cols" ''
 
+    (( WL_RUN++ ))
     if (( rc != 0 )); then
         echo -e "${YELLOW}Warning: $wl exited with code $rc (see $log)${OFF}"
+        (( WL_FAIL++ ))
     else
         echo -e "${GREEN}done${OFF}"
     fi
@@ -272,12 +279,18 @@ run_security_tests() {
 
         if [[ ! -x "$path" ]]; then
             echo -e "${YELLOW}SKIP:${OFF} $test not found at $path"
+            (( SEC_SKIP++ ))
             echo ""
             continue
         fi
 
         section "$test"
-        "$path" || rc=$?
+        if "$path"; then
+            (( SEC_PASS++ ))
+        else
+            (( SEC_FAIL++ ))
+            rc=1
+        fi
         echo ""
     done
 
@@ -331,11 +344,60 @@ main_loop() {
 }
 
 show_summary() {
-    banner "Summary: $SUMMARY_FILE"
-    if [[ -f "$SUMMARY_FILE" ]]; then
-        column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
+    banner "Test Summary"
+
+    local sec_total=$(( SEC_PASS + SEC_FAIL + SEC_SKIP ))
+    if (( sec_total > 0 )); then
+        echo -e "${BOLD}Security Tests${OFF}"
+        echo -e "  RHEL-214298 (fd leak):      test-fd-leak.sh"
+        echo -e "  RHEL-214424 (symlink race): test-symlink-race.sh"
+        echo ""
+        if (( SEC_FAIL > 0 )); then
+            echo -e "  ${RED}${BOLD}FAIL: $SEC_FAIL${OFF}  ${GREEN}PASS: $SEC_PASS${OFF}  SKIP: $SEC_SKIP  (of $sec_total)"
+        elif (( SEC_SKIP > 0 )); then
+            echo -e "  ${GREEN}${BOLD}PASS: $SEC_PASS${OFF}  SKIP: $SEC_SKIP  (of $sec_total)"
+        else
+            echo -e "  ${GREEN}${BOLD}All $SEC_PASS security tests PASSED${OFF}"
+        fi
+        echo ""
+        echo -e "  ${CYAN}NOTE:${OFF} A PASS on the symlink race test does not prove"
+        echo -e "  the absence of the vulnerability on unpatched builds."
+        echo -e "  The TOCTOU window is microseconds wide; the test may"
+        echo -e "  simply not win the race.  A FAIL is conclusive."
+        echo ""
+    fi
+
+    if (( WL_RUN > 0 )); then
+        local wl_pass=$(( WL_RUN - WL_FAIL ))
+        echo -e "${BOLD}Workload Tests${OFF} ($WL_RUN runs across ${#COS_MASKS[@]} cache masks)"
+        echo ""
+        if $HAS_L3CAT; then
+            echo -e "  ${CYAN}L3 CAT:${OFF} available — results reflect cache partitioning"
+        else
+            echo -e "  ${YELLOW}L3 CAT:${OFF} not available — ran without cache allocation"
+        fi
+        echo ""
+        if (( WL_FAIL > 0 )); then
+            echo -e "  ${GREEN}Completed: $wl_pass${OFF}  ${RED}${BOLD}Failed: $WL_FAIL${OFF}  (of $WL_RUN)"
+        else
+            echo -e "  ${GREEN}${BOLD}All $WL_RUN workload runs completed successfully${OFF}"
+        fi
+        echo ""
+        if [[ -f "$SUMMARY_FILE" ]]; then
+            echo -e "${BOLD}Workload Metrics${OFF} (workload, core, mask, metric)"
+            echo ""
+            column -t -s',' "$SUMMARY_FILE" 2>/dev/null || cat "$SUMMARY_FILE"
+            echo ""
+        fi
+    fi
+
+    local total=$(( sec_total + WL_RUN ))
+    local total_fail=$(( SEC_FAIL + WL_FAIL ))
+    echo -e "${BOLD}────────────────────────────────────────${OFF}"
+    if (( total_fail > 0 )); then
+        echo -e "${RED}${BOLD}OVERALL: $total_fail failure(s) out of $total tests${OFF}"
     else
-        echo "(no workload results)"
+        echo -e "${GREEN}${BOLD}OVERALL: All $total tests passed${OFF}"
     fi
     echo ""
 }
