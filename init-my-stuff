@@ -159,13 +159,17 @@ assure git
 
 cd		# make sure we're home
 
-# If we're creating a system that will have push privileges to the
-# repos, then use ssh access, else use http.
-# For ssh access, the user will have to add the ssh key to the github
-# account.
+# Use HTTPS with token auth if GITHUB_TOKEN is available (supports
+# both clone and push with 'repo' scope). Fall back to SSH if push
+# privileges are needed without a token, or plain HTTPS for read-only.
 #
-$b_pushpriv && clonestr="git clone git@github.com:camuso/" \
-	    || clonestr="git clone https://github.com/camuso/"
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+	clonestr="git clone https://${GITHUB_TOKEN}@github.com/camuso/"
+elif $b_pushpriv; then
+	clonestr="git clone git@github.com:camuso/"
+else
+	clonestr="git clone https://github.com/camuso/"
+fi
 
 # Get the gitlab token
 # If called by ark2host, then the lab.toml file should be there.

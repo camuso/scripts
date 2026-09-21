@@ -71,7 +71,12 @@ else
   fi
 fi
 
-git config --global url."git@github.com:".insteadOf "https://github.com/"
-ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+# Only set up SSH URL rewriting and host key if the SSH key upload succeeded
+if $key_exists || [[ "${RESP:-}" == "201" ]]; then
+  git config --global url."git@github.com:".insteadOf "https://github.com/"
+  ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+else
+  echo "⚠️  SSH key not on GitHub — will use HTTPS with token for git access."
+fi
 unset GITHUB_TOKEN
 
