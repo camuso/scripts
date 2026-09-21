@@ -113,6 +113,15 @@ else
        echo "Warning: ~/.config/github/mygithubtoken not found locally"
 fi
 
+# Export the GitHub token so runremote can inject it into the remote env
+if [ -f ~/.config/github/mygithubtoken ]; then
+       export GITHUB_TOKEN
+       GITHUB_TOKEN="$(cat ~/.config/github/mygithubtoken)"
+else
+       echo "⚠️  No GitHub token found at ~/.config/github/mygithubtoken"
+       echo "   SSH key upload to GitHub will be skipped."
+fi
+
 script="$HOME/bin/bootstrap-github-access"
 if [[ ! -f "$script" ]]; then
   echo "❌ Script not found: $script"
