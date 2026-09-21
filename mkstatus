@@ -256,6 +256,25 @@ extract_meetings() {
 
 generate_patchreviews() {
     emit_section "Patchreviews"
+    emit ""
+
+    if command -v mr-review-stats &>/dev/null; then
+        local end_date
+        end_date=$(date +%Y-%m-%d)
+        local stats_output
+        stats_output=$(mr-review-stats -d "$since_date" "$end_date" 2>&1)
+        if [[ $? -eq 0 && -n "$stats_output" ]]; then
+            emit "$ mr-review-stats -d $since_date $end_date"
+            emit "$stats_output"
+        else
+            emit "[ERROR: mr-review-stats failed]"
+            emit "[Run manually: mr-review-stats -d $since_date $end_date]"
+        fi
+    else
+        emit "[mr-review-stats not found in PATH]"
+    fi
+
+    emit ""
     emit "- Up to date and continuing."
 }
 

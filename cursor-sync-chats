@@ -1,0 +1,67 @@
+#!/bin/bash
+#
+# cursor-sync-chats - push Cursor chat transcripts to a remote machine
+#
+# Syncs the agent-transcripts directories from ~/.cursor/projects/
+# to a remote host. Uses rsync with --ignore-existing so chats on
+# the remote are never overwritten, only new ones are added.
+#
+# Usage: cursor-sync-chats <remote-host>
+#        cursor-sync-chats  (uses default host)
+#
+# Tony Camuso / Claude opus4.6
+
+declare default_host="dell-per640-01.khw.eng.rdu2.dc.redhat.com"
+declare remote="${1:-$default_host}"
+declare projects="$HOME/.cursor/projects"
+declare -i errs=0
+
+# Projects that have agent-transcripts worth syncing
+declare -a workspaces=(
+	home-tcamuso-bin
+	home-tcamuso-patchtools
+	home-tcamuso-isb
+)
+
+usage() {
+	echo "Usage: ${0##*/} [remote-host]"
+	echo "  Default host: $default_host"
+	echo ""
+	echo "  Pushes Cursor chat transcripts to the remote machine."
+	echo "  Safe to run while Cursor is open on either end."
+	exit 1
+}
+
+[[ "$1" == "-h" || "$1" == "--help" ]] && usage
+
+# Verify SSH connectivity
+if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$remote" true 2>/dev/null; then
+	echo "ERROR: Cannot reach $remote via SSH."
+	exit 1
+fi
+
+for ws in "${workspaces[@]}"; do
+	src="$projects/$ws/agent-transcripts/"
+
+	if [[ ! -d "$src" ]]; then
+		echo "SKIP: $ws (no local transcripts)"
+		continue
+	fi
+
+	echo -n "Syncing $ws ... "
+	if rsync -a --ignore-existing -r \
+		"$src" \
+		"$remote:$projects/$ws/agent-transcripts/"; then
+		echo "OK"
+	else
+		echo "FAILED"
+		(( errs++ ))
+	fi
+done
+
+if (( errs )); then
+	echo "$errs workspace(s) failed."
+	exit 1
+else
+	echo "Done."
+fi
