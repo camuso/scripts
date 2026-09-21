@@ -2,7 +2,11 @@
 # bootstrap-github-access.sh
 # Uploads remote system's SSH key to GitHub using GITHUB_TOKEN
 
-set -euo pipefail
+# Load token from file if not in environment
+if [[ -z "${GITHUB_TOKEN:-}" ]] && [[ -f ~/.config/github/mygithubtoken ]]; then
+  export GITHUB_TOKEN
+  GITHUB_TOKEN="$(cat ~/.config/github/mygithubtoken)"
+fi
 
 [[ -n "${GITHUB_TOKEN:-}" ]] && echo "✅ GITHUB_TOKEN is set" \
                              || echo "❌ GITHUB_TOKEN is missing"
@@ -33,9 +37,22 @@ PUBKEY=$(<"$KEYFILE")
 LOCAL_FP=$(ssh-keygen -lf "$KEYFILE" | awk '{print $2}')
 EXISTING=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API")
 
-if echo "$EXISTING" | jq -r '.[].key' \
-   | ssh-keygen -lf /dev/stdin 2>/dev/null \
-   | awk '{print $2}' | grep -q "$LOCAL_FP"; then
+key_exists=false
+if command -v jq >/dev/null 2>&1; then
+  if echo "$EXISTING" | jq -r '.[].key' 2>/dev/null \
+     | ssh-keygen -lf /dev/stdin 2>/dev/null \
+     | awk '{print $2}' | grep -q "$LOCAL_FP"; then
+    key_exists=true
+  fi
+else
+  # Fallback: simple string match when jq is not available
+  local_key_data=$(awk '{print $2}' < "$KEYFILE")
+  if echo "$EXISTING" | grep -qF "$local_key_data"; then
+    key_exists=true
+  fi
+fi
+
+if $key_exists; then
   echo "✅ Key already exists on GitHub (fingerprint $LOCAL_FP)."
 else
   echo "⬆️  Uploading SSH key to GitHub..."

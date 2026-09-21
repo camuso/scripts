@@ -293,8 +293,22 @@ upload_gitlab_ssh_key() {
 
 echo
 
+# Load GITHUB_TOKEN from file if not already set
+if [[ -z "${GITHUB_TOKEN:-}" ]] && [[ -f ~/.config/github/mygithubtoken ]]; then
+	export GITHUB_TOKEN
+	GITHUB_TOKEN="$(cat ~/.config/github/mygithubtoken)"
+	echo "Loaded GITHUB_TOKEN from ~/.config/github/mygithubtoken"
+fi
+
 upload_github_ssh_key
 upload_gitlab_ssh_key
+
+# Ensure GitHub and GitLab SSH host keys are trusted before cloning
+echo "Adding SSH host keys for github.com and gitlab.com ..."
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts 2>/dev/null
 
 echo "*******************************"
 echo "* Clone or update Env Files   *"
