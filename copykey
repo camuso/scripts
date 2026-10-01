@@ -122,7 +122,17 @@ main() {
 
 	### Script to Automate the Process
 
-	key=${3:-~/.ssh/id_rsa.pub}
+	# Prefer ed25519, fall back to RSA
+	if [ -n "$3" ]; then
+		key="$3"
+	elif [ -f ~/.ssh/id_ed25519.pub ]; then
+		key=~/.ssh/id_ed25519.pub
+	elif [ -f ~/.ssh/id_rsa.pub ]; then
+		key=~/.ssh/id_rsa.pub
+	else
+		echo "No SSH public key found (~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub)"
+		exit 1
+	fi
 
 	if [ -z "$remote_user" ] || [ -z "$remote_host" ]; then
 	echo "Usage: $0 <remote_user> <remote_host> [ssh_key_path]"
