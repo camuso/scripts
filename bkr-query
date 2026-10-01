@@ -58,35 +58,40 @@ declare -a bkr_args=()
 
 declare usagestr="$(
 cat <<EOF
-$(basename "$0") [-h|--help]
+$(basename "$0") [options]
 
-Interactive Beaker system query builder.
+Beaker system query builder - interactive or command-line.
 
-Generates and executes bkr system-list queries with XML filters.
+With no options, runs in interactive menu mode.
+With options, builds and runs the query directly.
 
-Options:
-  -h, --help     Show this help message
-  help           Show this help message
+Command-line Options:
+  -v VENDOR   CPU Vendor (e.g., intel, amd)
+  -o OWNER    System Owner (e.g., kernel)
+  -f FLAGS    CPU Flags, comma-separated (e.g., shstk,ibt,smx)
+  -k KEYS     Key/Values, comma-separated (e.g., TPM,SECUREBOOT)
+  -d DRIVERS  Device Drivers, comma-separated (e.g., tpm,mei)
+  -s STATUS   Status filter: free (default), automated, all
+  -b          Build and show query only (don't run)
+  -h, --help  Show this help message
 
-Menu Options:
-  v - Set CPU Vendor (e.g., intel, amd)
-  o - Set System Owner (e.g., kernel)
-  f - Set CPU Flags (comma-separated, e.g., shstk,ibt,smx)
-  k - Set Key/Values (comma-separated, e.g., TPM,SECUREBOOT)
-  d - Set Device Drivers (comma-separated, e.g., tpm,mei)
-  s - Set Status filter (FREE, AUTOMATED, ALL)
-  c - Clear all filters
-  b - Build and show query
-  r - Run query
+Interactive Menu Options:
+  v - Set CPU Vendor         f - Set CPU Flags
+  o - Set System Owner       k - Set Key/Values
+  d - Set Device Drivers     s - Set Status filter
+  c - Clear all filters      b - Build and show query
+  r - Run query              h - Help
   q - Quit
 
 Fuzzy matching (case-insensitive contains) is used for vendor, owner,
 and device driver inputs.  CPU flags use exact match.
 
 Examples:
-  CPU Vendor: intel        -> matches "GenuineIntel"
-  CPU Flags: shstk,ibt,smx -> requires all three flags (exact match)
-  Device: tpm              -> matches "tpm_tis", "tpm_crb", etc.
+  $(basename "$0")                              # interactive mode
+  $(basename "$0") -f shstk,ibt,smx            # query by CPU flags
+  $(basename "$0") -v intel -f shstk -s free   # vendor + flag + free
+  $(basename "$0") -d tpm -k TPM               # device + key/value
+  $(basename "$0") -v intel -b                  # show query, don't run
 
 EOF
 )"
@@ -378,17 +383,23 @@ run_query() {
 
 		echo -e "\n${CAU}bkr command failed (exit code: $rc)${OFF}\n"
 
-		if [[ "$errmsg" == *"GSSError"* ]] || \
-		   [[ "$errmsg" == *"Cannot contact any KDC"* ]] || \
-		   [[ "$errmsg" == *"Credentials cache"* ]]; then
-			echo -e "${WRN}Kerberos authentication failed.${OFF}"
-			echo -e "${INF}Try running: ${STA}kinit${OFF}"
+		# Show the last line of the traceback -- it has the actual error
+		local lastline
+		lastline="$(tail -1 <<< "$errmsg")"
+		echo -e "${WRN}$lastline${OFF}\n"
+
+		if [[ "$errmsg" == *"GSSError"* ]]                  || \
+		   [[ "$errmsg" == *"MissingCredentialsError"* ]]   || \
+		   [[ "$errmsg" == *"Cannot contact any KDC"* ]]    || \
+		   [[ "$errmsg" == *"Credentials cache"* ]]         || \
+		   [[ "$errmsg" == *"No Kerberos credentials"* ]]   || \
+		   [[ "$errmsg" == *"gssapi"* ]]                    || \
+		   [[ "$errmsg" == *"_login_krbv"* ]]; then
+			echo -e "${INF}Kerberos auth issue. Check: ${STA}klist${OFF}"
+			echo -e "${INF}Renew with:  ${STA}kinit${INF}  or  ${STA}kinit <principal>@REDHAT.COM${OFF}"
 		elif [[ "$errmsg" == *"HTTP 401"* ]] || \
 		     [[ "$errmsg" == *"Unauthorized"* ]]; then
-			echo -e "${WRN}Authentication error (HTTP 401).${OFF}"
-			echo -e "${INF}Check your Kerberos ticket: ${STA}klist${OFF}"
-		else
-			echo -e "${WRN}$errmsg${OFF}"
+			echo -e "${INF}HTTP auth issue. Check: ${STA}klist${OFF}"
 		fi
 	fi
 
@@ -429,9 +440,25 @@ menu_parser() {
 main() {
 	trap control_c SIGINT
 
-	# Parse command line arguments
+	local b_cli=false
+	local b_build_only=false
+	local -i i
+
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
+			-v) cpu_vendor="$2"; b_cli=true; shift ;;
+			-o) system_owner="$2"; b_cli=true; shift ;;
+			-f) parse_csv_input "$2" cpu_flags; b_cli=true; shift ;;
+			-k)
+				parse_csv_input "$2" key_values
+				for i in "${!key_values[@]}"; do
+					key_values[$i]="${key_values[$i]^^}"
+				done
+				b_cli=true; shift
+				;;
+			-d) parse_csv_input "$2" device_drivers; b_cli=true; shift ;;
+			-s) status_filter="$2"; b_cli=true; shift ;;
+			-b) b_build_only=true; b_cli=true ;;
 			-h|--help|help)
 				usage
 				exit 0
@@ -450,10 +477,17 @@ main() {
 		echo -e "${WRN}Warning: bkr command not found. Install beaker-client to run queries.${OFF}"
 	fi
 
-	# Run interactive menu
-	menu_parser
+	if $b_cli; then
+		if $b_build_only; then
+			show_query
+		else
+			run_query
+		fi
+	else
+		menu_parser
+		echo -e "${STA}Goodbye.${OFF}"
+	fi
 
-	echo -e "${STA}Goodbye.${OFF}"
 	exit 0
 }
 
