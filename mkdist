@@ -36,7 +36,9 @@ OPTIONS
     -h        Show this help
 
 ENVIRONMENT
-    TOOLBOX   Same as -t (command-line flag takes precedence)
+    TOOLBOX             Same as -t (command-line flag takes precedence)
+    HEARTBEAT_INTERVAL  Seconds between "still working" messages during
+                        quiet build phases (default: 30)
 
 EOF
 )"
@@ -46,8 +48,114 @@ usage() {
 }
 
 control_c() {
+	[[ -t 0 ]] && printf "\n" > /dev/tty 2>/dev/null
 	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	[[ -n "${build_pid:-}" ]] && kill "$build_pid" 2>/dev/null
+	[[ -n "${stage_file:-}" ]] && rm -f "$stage_file"
 	exit $CTLC_EXIT
+}
+
+# Heartbeat interval (seconds) between "still working" reassurance messages.
+declare -i HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-30}"
+
+# Map a line of build output to a short, human-readable description of
+# what's happening right now.  Echoes the description on a match;
+# returns non-zero (and echoes nothing) otherwise, in which case the
+# caller keeps showing whatever stage it last detected.
+detect_stage() {
+	case "$1" in
+		*'/configs/kernel-'*)          echo "processing kernel configs" ;;
+		*'Processing uki_addons'*)     echo "processing UKI addons" ;;
+		*'Creating linux-'*'.tar.'*)   echo "building the source tarball" ;;
+		*'Copying sources for'*)       echo "copying kernel sources" ;;
+		*'Executing(%prep)'*)          echo "unpacking the kernel source" ;;
+		*'Executing(%build)'*)         echo "starting the kernel build" ;;
+		*'BUILDING A KERNEL FOR'*)     echo "compiling the kernel" ;;
+		*'modules_install'*)           echo "installing kernel modules" ;;
+		*' modules'*)                  echo "building kernel modules" ;;
+		*'Executing(%install)'*)       echo "installing build results" ;;
+		*'Executing(%files)'*)         echo "packaging the RPMs" ;;
+		*'Wrote: '*)                   echo "finishing up" ;;
+		*)                             return 1 ;;
+	esac
+}
+
+# Run "$@" in the background and show a spinner (on a tty) or a plain
+# periodic heartbeat (otherwise) until it finishes, describing the
+# current build stage.  Some build steps (e.g. compressing the source
+# tarball, compiling) produce no output for a long time and can look
+# like a hang, so this keeps the user reassured.
+# Sets globals: build_pid, stage_file.  Returns the exit code of "$@".
+run_with_heartbeat() {
+	stage_file=$(mktemp)
+
+	# Relay the command's output unchanged (to whatever fd 1 already
+	# points at -- main() has it teeing to the log) while also peeking
+	# at each line to update the current-stage file.
+	relay_and_watch() {
+		local line stage
+		while IFS= read -r line; do
+			printf '%s\n' "$line"
+			stage=$(detect_stage "$line") && printf '%s' "$stage" > "$stage_file"
+		done
+	}
+
+	"$@" > >(relay_and_watch) 2>&1 &
+	build_pid=$!
+
+	local start now elapsed mins secs next_msg cur_stage last_stage=""
+	start=$(date +%s)
+	next_msg=$((start + HEARTBEAT_INTERVAL))
+
+	# Note: main() redirects stdout/stderr through `tee` via process
+	# substitution, so fd 1/2 are pipes even in an interactive shell.
+	# Check stdin instead (untouched by that redirection) to decide
+	# whether a spinner makes sense.
+	if [[ -t 0 ]]; then
+		local spinchars='|/-\' i=0
+		tput civis > /dev/tty 2>/dev/null
+		while kill -0 "$build_pid" 2>/dev/null; do
+			i=$(( (i + 1) % 4 ))
+			now=$(date +%s)
+			elapsed=$((now - start))
+			mins=$((elapsed / 60))
+			secs=$((elapsed % 60))
+			cur_stage=$(cat "$stage_file" 2>/dev/null)
+			[[ -z "$cur_stage" ]] && cur_stage="preparing the build"
+			if [[ "$cur_stage" != "$last_stage" ]]; then
+				[[ -n "$last_stage" ]] && printf "\n" > /dev/tty
+				last_stage="$cur_stage"
+			fi
+			printf "\r\033[K  %s I'm still %s ... (%dm %02ds elapsed)" \
+				"${spinchars:$i:1}" "$cur_stage" "$mins" "$secs" > /dev/tty
+			sleep 0.2
+		done
+		printf "\r\033[K" > /dev/tty
+		tput cnorm > /dev/tty 2>/dev/null
+	else
+		while kill -0 "$build_pid" 2>/dev/null; do
+			sleep 1
+			now=$(date +%s)
+			elapsed=$((now - start))
+			mins=$((elapsed / 60))
+			secs=$((elapsed % 60))
+			cur_stage=$(cat "$stage_file" 2>/dev/null)
+			[[ -z "$cur_stage" ]] && cur_stage="preparing the build"
+			if [[ "$cur_stage" != "$last_stage" ]]; then
+				echo "Now ${cur_stage} ... (${mins}m ${secs}s elapsed)"
+				last_stage="$cur_stage"
+				next_msg=$((now + HEARTBEAT_INTERVAL))
+			elif (( now >= next_msg )); then
+				echo "Still ${cur_stage} ... (${mins}m ${secs}s elapsed)"
+				next_msg=$((now + HEARTBEAT_INTERVAL))
+			fi
+		done
+	fi
+
+	wait "$build_pid"
+	local -i rc=$?
+	rm -f "$stage_file"
+	return $rc
 }
 
 exitme() {
@@ -193,6 +301,7 @@ ${flavor_opts} \
 
 	mkstart=$(date +%s)
 
+	local -i rc
 	if $use_toolbox; then
 		local here
 		here="$(pwd)"
@@ -200,15 +309,15 @@ ${flavor_opts} \
 		echo "Kernel tree: $here"
 		echo ""
 		cd "$HOME"
-		toolbox run -c "$toolbox_name" \
+		run_with_heartbeat toolbox run -c "$toolbox_name" \
 			bash -c "cd /run/host${here} && ${build_cmd}"
+		rc=$?
 	else
 		echo "Building on host (no toolbox)"
 		echo ""
-		eval "$build_cmd"
+		run_with_heartbeat bash -c "$build_cmd"
+		rc=$?
 	fi
-
-	local -i rc=$?
 	mkend=$(date +%s)
 	mkdiff=$((mkend - mkstart))
 	etmins=$((mkdiff / 60))
