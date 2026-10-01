@@ -1,0 +1,232 @@
+#!/bin/bash
+#
+# md2gdoc - Convert a Markdown file to a Google Doc
+#
+# Converts markdown to HTML via pandoc, uploads to Google Drive
+# with auto-conversion to native Google Docs format via rclone,
+# and prints the Google Docs URL.
+#
+# Dependencies: pandoc, rclone (configured with a Google Drive remote)
+#
+# Usage: md2gdoc [-f] <file.md> [gdrive-folder]
+#
+# The optional gdrive-folder specifies the destination folder on
+# Google Drive (default: root). Nested paths like "Work/Reports"
+# are supported.
+#
+# If a Google Doc with the same name already exists, the script
+# will prompt to replace it. Use -f to force replacement.
+
+set -euo pipefail
+
+RCLONE_REMOTE="gdrive"
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+Usage: ${0##*/} [-f] <file.md> [gdrive-folder]
+
+Convert a Markdown file to a native Google Doc.
+
+Options:
+  -f             Force replacement if a doc with the same name exists
+
+Arguments:
+  file.md        Path to the Markdown file to convert
+  gdrive-folder  Optional destination folder on Google Drive (default: root)
+
+Examples:
+  ${0##*/} report.md
+  ${0##*/} -f ~/docs/notes.md "Work/Reports"
+
+Dependencies: pandoc, rclone (with a configured Google Drive remote named "$RCLONE_REMOTE")
+EOF
+    exit 1
+}
+
+# --- Parse options ---
+
+FORCE=false
+while getopts "fh" opt; do
+    case "$opt" in
+        f) FORCE=true ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# --- Preflight checks ---
+
+[[ $# -ge 1 ]] || usage
+
+MD_FILE="$1"
+GDRIVE_FOLDER="${2:-}"
+
+[[ -f "$MD_FILE" ]] || die "File not found: $MD_FILE"
+command -v pandoc  >/dev/null 2>&1 || die "pandoc is not installed"
+command -v rclone  >/dev/null 2>&1 || die "rclone is not installed"
+rclone listremotes 2>/dev/null | grep -q "^${RCLONE_REMOTE}:" \
+    || die "rclone remote '$RCLONE_REMOTE' not configured (run: rclone config)"
+
+# --- Derive names ---
+
+BASENAME="$(basename "$MD_FILE" .md)"
+WORK_DIR="$(mktemp -d /tmp/md2gdoc.XXXXXX)"
+HTML_TMP="${WORK_DIR}/${BASENAME}.html"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+if [[ -n "$GDRIVE_FOLDER" ]]; then
+    SEARCH_PATH="${RCLONE_REMOTE}:${GDRIVE_FOLDER}"
+else
+    SEARCH_PATH="${RCLONE_REMOTE}:"
+fi
+
+# --- Check for existing file and handle replacement ---
+
+EXISTING_ID=$(rclone lsf "$SEARCH_PATH" --format "ip" --files-only 2>/dev/null \
+    | grep ";${BASENAME}\\.docx\$" \
+    | head -1 \
+    | cut -d';' -f1) || true
+
+if [[ -n "$EXISTING_ID" ]]; then
+    if $FORCE; then
+        echo "Replacing existing Google Doc: $BASENAME ..."
+        rclone deletefile "${SEARCH_PATH}/${BASENAME}.docx" 2>/dev/null || true
+    else
+        echo "A Google Doc named '$BASENAME' already exists on Drive."
+        echo "  https://docs.google.com/document/d/${EXISTING_ID}/edit"
+        read -rp "Replace it? [y/N] " answer
+        case "$answer" in
+            [Yy]*)
+                echo "Replacing ..."
+                rclone deletefile "${SEARCH_PATH}/${BASENAME}.docx" 2>/dev/null || true
+                ;;
+            *)
+                echo "Aborted."
+                exit 0
+                ;;
+        esac
+    fi
+fi
+
+# --- Build CSS for Google Docs compatibility ---
+
+CSS_FILE="${WORK_DIR}/gdoc.css"
+cat > "$CSS_FILE" <<'CSSEOF'
+body {
+    font-family: Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.4;
+    max-width: 7.5in;
+}
+h1 { font-size: 18pt; font-weight: bold; margin-top: 18pt; margin-bottom: 6pt; }
+h2 { font-size: 14pt; font-weight: bold; margin-top: 14pt; margin-bottom: 4pt; }
+h3 { font-size: 12pt; font-weight: bold; margin-top: 12pt; margin-bottom: 4pt; }
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8pt 0;
+}
+th {
+    background-color: #e8e8e8;
+    font-weight: bold;
+    font-size: 10pt;
+    text-align: left;
+    border: 1px solid #999;
+    padding: 4pt 6pt;
+}
+td {
+    font-size: 10pt;
+    border: 1px solid #ccc;
+    padding: 3pt 6pt;
+    vertical-align: top;
+}
+blockquote {
+    border-left: 3px solid #ccc;
+    margin-left: 0;
+    padding-left: 10pt;
+    color: #333;
+    font-style: italic;
+}
+code {
+    font-family: "Courier New", monospace;
+    font-size: 10pt;
+    background-color: #f0f0f0;
+    padding: 1pt 3pt;
+}
+pre {
+    font-family: "Courier New", monospace;
+    font-size: 9pt;
+    background-color: #f5f5f5;
+    padding: 6pt;
+    border: 1px solid #ddd;
+    white-space: pre-wrap;
+}
+CSSEOF
+
+# --- Convert markdown → HTML ---
+
+echo "Converting $MD_FILE → HTML ..."
+pandoc "$MD_FILE" -f markdown -t html --standalone \
+    --metadata title="$BASENAME" \
+    --css="$CSS_FILE" --embed-resources \
+    -o "$HTML_TMP"
+
+# Google Docs import ignores <style> blocks but respects inline styles.
+# Post-process to inline the critical table styles.
+python3 -c "
+import re, sys
+
+html = open(sys.argv[1]).read()
+
+# Inline styles for <th> elements
+html = re.sub(
+    r'<th([^>]*)>',
+    r'<th\1 style=\"background-color:#e8e8e8; font-weight:bold; font-size:10pt; '
+    r'text-align:left; border:1px solid #999; padding:4pt 6pt;\">',
+    html)
+
+# Inline styles for <td> elements
+html = re.sub(
+    r'<td([^>]*)>',
+    r'<td\1 style=\"font-size:10pt; border:1px solid #ccc; padding:3pt 6pt; '
+    r'vertical-align:top;\">',
+    html)
+
+# Inline styles for <table> elements
+html = re.sub(
+    r'<table([^>]*)>',
+    r'<table\1 style=\"border-collapse:collapse; width:100%;\">',
+    html)
+
+open(sys.argv[1], 'w').write(html)
+" "$HTML_TMP"
+
+# --- Upload to Google Drive with auto-conversion ---
+# rclone imports HTML and converts to native Google Doc format.
+# The resulting file appears as .docx in rclone listings.
+
+echo "Uploading to Google Drive and converting to Google Doc ..."
+DEST="${SEARCH_PATH}/${BASENAME}.docx"
+rclone copyto "$HTML_TMP" "$DEST" --drive-import-formats html 2>&1
+
+# --- Retrieve the Google Doc ID ---
+
+DOC_ID=$(rclone lsf "$SEARCH_PATH" --format "ip" --files-only 2>/dev/null \
+    | grep ";${BASENAME}\\.docx\$" \
+    | head -1 \
+    | cut -d';' -f1) || true
+
+if [[ -z "$DOC_ID" ]]; then
+    echo "Upload succeeded but could not retrieve the document ID."
+    echo "Check your Google Drive for: $BASENAME"
+    exit 0
+fi
+
+DOC_URL="https://docs.google.com/document/d/${DOC_ID}/edit"
+
+echo ""
+echo "Done! Google Doc URL:"
+echo "  $DOC_URL"
