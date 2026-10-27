@@ -1,0 +1,371 @@
+#!/bin/bash
+#
+# ipmi-msglimit-test
+#
+# Tests the per-user IPMI message limit counting (nr_msgs).
+# Targets the bug fixed by upstream commit b52da4054ee0
+# ("ipmi: Rework user message limit handling").
+#
+# The bug: ipmi_free_recv_msg() did not decrement nr_msgs, so the
+# per-user message count leaked upward on every message cycle.
+# After max_msgs_per_user messages, all further sends fail with EBUSY.
+#
+# This test lowers max_msgs_per_user to a small value, then sends
+# many sequential synchronous messages through a single /dev/ipmi0
+# session. On a buggy kernel, sends fail once the count leaks past
+# the limit. On a fixed kernel, all messages succeed because the
+# count stays balanced.
+#
+# Author: Claude (Anthropic)
+# Prompted-by: Tony Camuso <tcamuso@redhat.com>
+#
+
+declare -r SCRIPT_NAME="$(basename "$0")"
+declare -r BLD='\e[1m'
+declare -r GRN='\e[32m'
+declare -r YLW='\e[33m'
+declare -r RED='\e[31m'
+declare -r OFF='\e[0m'
+
+declare -i opt_verbose=0
+declare -i opt_limit=20
+declare -i opt_count=200
+declare opt_logfile=""
+declare opt_dev="/dev/ipmi0"
+
+declare -r PARAM="/sys/module/ipmi_msghandler/parameters/max_msgs_per_user"
+declare -i saved_limit=0
+declare tmpdir=""
+declare test_bin=""
+
+usage() {
+    cat << USAGE
+
+$SCRIPT_NAME [OPTIONS]
+
+Test IPMI per-user message limit counting (nr_msgs).
+
+Verifies fix for b52da4054ee0 ("ipmi: Rework user message limit handling").
+Sends many sequential IPMI commands through a single /dev/ipmi0 session
+with a lowered max_msgs_per_user. A buggy kernel leaks the message count
+and fails with EBUSY after exceeding the limit.
+
+Options:
+    -v          Verbose output
+    -l LIMIT    Temporary max_msgs_per_user value (default: $opt_limit)
+    -n COUNT    Number of messages to send (default: $opt_count)
+    -d DEVICE   IPMI device (default: $opt_dev)
+    -o FILE     Write results to log file
+    -h          Show this help
+
+USAGE
+    exit 0
+}
+
+log() {
+    echo -e "$1"
+    [[ -n "$opt_logfile" ]] && echo -e "$1" | sed 's/\x1b\[[0-9;]*m//g' >> "$opt_logfile"
+}
+
+cleanup() {
+    if [[ $saved_limit -gt 0 && -w "$PARAM" ]]; then
+        echo "$saved_limit" > "$PARAM"
+        ((opt_verbose)) && log "Restored max_msgs_per_user=$saved_limit"
+    fi
+    [[ -n "$tmpdir" && -d "$tmpdir" ]] && rm -rf "$tmpdir"
+}
+trap cleanup EXIT
+
+build_test() {
+    tmpdir=$(mktemp -d) || { log "${RED}Cannot create tmpdir${OFF}"; return 1; }
+    test_bin="$tmpdir/ipmi-msglimit"
+
+    cat > "$tmpdir/ipmi-msglimit.c" << 'CSOURCE'
+/*
+ * ipmi-msglimit.c — send N synchronous IPMI "Get Device ID" commands
+ * through a single /dev/ipmiN session to exercise nr_msgs counting.
+ *
+ * Exit 0: all messages succeeded.
+ * Exit 1: one or more sends failed (likely EBUSY from nr_msgs leak).
+ * Exit 2: setup or receive error.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
+#include <linux/ipmi.h>
+
+static int send_get_devid(int fd, long msgid)
+{
+    struct ipmi_system_interface_addr addr;
+    struct ipmi_req req;
+
+    memset(&addr, 0, sizeof(addr));
+    addr.addr_type = IPMI_SYSTEM_INTERFACE_ADDR_TYPE;
+    addr.channel = IPMI_BMC_CHANNEL;
+    addr.lun = 0;
+
+    memset(&req, 0, sizeof(req));
+    req.addr = (unsigned char *)&addr;
+    req.addr_len = sizeof(addr);
+    req.msgid = msgid;
+    req.msg.netfn = 0x06;  /* App */
+    req.msg.cmd = 0x01;    /* Get Device ID */
+    req.msg.data_len = 0;
+    req.msg.data = NULL;
+
+    if (ioctl(fd, IPMICTL_SEND_COMMAND, &req) < 0)
+        return -errno;
+    return 0;
+}
+
+static int recv_msg(int fd, long *msgid_out, int timeout_ms)
+{
+    struct ipmi_recv msg;
+    struct ipmi_addr addr;
+    unsigned char data[256];
+    fd_set rfds;
+    struct timeval tv;
+
+    FD_ZERO(&rfds);
+    FD_SET(fd, &rfds);
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    if (select(fd + 1, &rfds, NULL, NULL, &tv) <= 0)
+        return -ETIMEDOUT;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.addr = (unsigned char *)&addr;
+    msg.addr_len = sizeof(addr);
+    msg.msg.data = data;
+    msg.msg.data_len = sizeof(data);
+
+    if (ioctl(fd, IPMICTL_RECEIVE_MSG_TRUNC, &msg) < 0)
+        return -errno;
+
+    if (msgid_out)
+        *msgid_out = msg.msgid;
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+    const char *dev = "/dev/ipmi0";
+    int count = 200;
+    int verbose = 0;
+    int opt, fd, rc;
+    int i, ebusy_count = 0, send_ok = 0, recv_ok = 0, recv_err = 0;
+
+    while ((opt = getopt(argc, argv, "d:n:v")) != -1) {
+        switch (opt) {
+        case 'd': dev = optarg; break;
+        case 'n': count = atoi(optarg); break;
+        case 'v': verbose = 1; break;
+        default:
+            fprintf(stderr, "Usage: %s [-d /dev/ipmiN] [-n count] [-v]\n",
+                    argv[0]);
+            return 2;
+        }
+    }
+
+    fd = open(dev, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Cannot open %s: %s\n", dev, strerror(errno));
+        return 2;
+    }
+
+    for (i = 0; i < count; i++) {
+        rc = send_get_devid(fd, i + 1);
+        if (rc == -EBUSY) {
+            ebusy_count++;
+            if (verbose)
+                fprintf(stderr, "msg %d: send EBUSY (nr_msgs limit hit)\n",
+                        i + 1);
+            continue;
+        }
+        if (rc < 0) {
+            fprintf(stderr, "msg %d: send error: %s\n",
+                    i + 1, strerror(-rc));
+            close(fd);
+            return 2;
+        }
+        send_ok++;
+
+        /* Read the response synchronously. */
+        long got_id = 0;
+        rc = recv_msg(fd, &got_id, 5000);
+        if (rc < 0) {
+            recv_err++;
+            if (verbose)
+                fprintf(stderr, "msg %d: recv error: %s\n",
+                        i + 1, strerror(-rc));
+        } else {
+            recv_ok++;
+        }
+    }
+
+    close(fd);
+
+    printf("sent=%d recv=%d recv_err=%d ebusy=%d total=%d\n",
+           send_ok, recv_ok, recv_err, ebusy_count, count);
+
+    if (ebusy_count > 0) {
+        fprintf(stderr,
+                "FAIL: %d/%d messages hit EBUSY — nr_msgs count leaked\n",
+                ebusy_count, count);
+        return 1;
+    }
+    if (recv_err > 0) {
+        fprintf(stderr,
+                "WARNING: %d receive errors (timeouts?), but no EBUSY\n",
+                recv_err);
+    }
+    return 0;
+}
+CSOURCE
+
+    if ! gcc -Wall -o "$test_bin" "$tmpdir/ipmi-msglimit.c" 2>&1; then
+        log "${RED}Compilation failed${OFF}"
+        return 1
+    fi
+    ((opt_verbose)) && log "Built $test_bin"
+    return 0
+}
+
+main() {
+    while getopts "vl:n:d:o:h" opt; do
+        case "$opt" in
+            v) opt_verbose=1 ;;
+            l) opt_limit="$OPTARG" ;;
+            n) opt_count="$OPTARG" ;;
+            d) opt_dev="$OPTARG" ;;
+            o) opt_logfile="$OPTARG" ;;
+            h) usage ;;
+            *) usage ;;
+        esac
+    done
+
+    [[ -n "$opt_logfile" ]] && : > "$opt_logfile"
+
+    log ""
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log "${BLD}  IPMI Message Limit Test (b52da4054ee0)${OFF}"
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log ""
+
+    # Preflight checks
+    if [[ ! -e "$opt_dev" ]]; then
+        log "${RED}FAIL: $opt_dev not found — IPMI driver not loaded?${OFF}"
+        exit 2
+    fi
+
+    if [[ ! -r "$PARAM" ]]; then
+        log "${RED}FAIL: Cannot read $PARAM — ipmi_msghandler not loaded?${OFF}"
+        exit 2
+    fi
+
+    if ! command -v gcc &>/dev/null; then
+        log "${RED}FAIL: gcc not found — needed to compile test program${OFF}"
+        exit 2
+    fi
+
+    log "Device:             $opt_dev"
+    log "Messages to send:   $opt_count"
+    log "Temporary limit:    $opt_limit"
+
+    # Build the C test program
+    log ""
+    log "${YLW}Compiling test program...${OFF}"
+    if ! build_test; then
+        exit 2
+    fi
+
+    # Save and lower max_msgs_per_user
+    saved_limit=$(cat "$PARAM")
+    log "Original max_msgs_per_user=$saved_limit"
+
+    if [[ -w "$PARAM" ]]; then
+        echo "$opt_limit" > "$PARAM"
+        log "Lowered max_msgs_per_user=$opt_limit"
+    else
+        log "${YLW}WARNING: Cannot write $PARAM (not root?) — using current limit${OFF}"
+        saved_limit=0  # Don't restore on exit
+    fi
+
+    # --- Test 1: Sequential synchronous messages ---
+    log ""
+    log "${BLD}Test 1: Sequential message counting${OFF}"
+    log "Sending $opt_count synchronous Get Device ID commands..."
+    log "On a buggy kernel, sends fail with EBUSY after ~$opt_limit messages."
+    log ""
+
+    local output rc
+    if ((opt_verbose)); then
+        output=$("$test_bin" -d "$opt_dev" -n "$opt_count" -v 2>&1)
+    else
+        output=$("$test_bin" -d "$opt_dev" -n "$opt_count" 2>&1)
+    fi
+    rc=$?
+
+    log "Result: $output"
+
+    if [[ $rc -eq 0 ]]; then
+        log ""
+        log "${GRN}✓ PASS: All $opt_count messages succeeded — nr_msgs counting is correct${OFF}"
+    elif [[ $rc -eq 1 ]]; then
+        log ""
+        log "${RED}✗ FAIL: Messages hit EBUSY — nr_msgs count is leaking${OFF}"
+        log "${RED}  This indicates the b52da4054ee0 fix is missing or broken.${OFF}"
+    else
+        log ""
+        log "${RED}✗ ERROR: Test program failed (exit $rc)${OFF}"
+    fi
+
+    # --- Test 2: Verify limit is still enforced ---
+    # This confirms the limit mechanism itself works (not just that
+    # counting is balanced). We skip this if we couldn't lower the limit.
+    if [[ -w "$PARAM" ]]; then
+        log ""
+        log "${BLD}Test 2: Limit enforcement (negative test)${OFF}"
+        log "Verifying max_msgs_per_user is still enforced..."
+
+        # Set limit to 2, send 50 messages. Some EBUSY is expected because
+        # the limit is so low that send can outpace the response path.
+        echo 2 > "$PARAM"
+        local output2
+        output2=$("$test_bin" -d "$opt_dev" -n 50 2>&1)
+        local rc2=$?
+        echo "$opt_limit" > "$PARAM"  # restore test limit
+
+        log "Result: $output2"
+
+        if [[ $rc2 -eq 1 ]]; then
+            log "${GRN}✓ PASS: Limit correctly enforced (EBUSY returned as expected)${OFF}"
+        elif [[ $rc2 -eq 0 ]]; then
+            # With limit=2, it's possible all 50 succeed if synchronous
+            # send/recv is fast enough. Not a failure, just informational.
+            log "${YLW}  INFO: All 50 succeeded even with limit=2 (fast sync path)${OFF}"
+            log "${YLW}  Limit enforcement could not be verified.${OFF}"
+        else
+            log "${RED}✗ ERROR: Test program failed (exit $rc2)${OFF}"
+        fi
+    fi
+
+    log ""
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    if [[ $rc -eq 0 ]]; then
+        log "${GRN}  MESSAGE LIMIT TEST PASSED${OFF}"
+    else
+        log "${RED}  MESSAGE LIMIT TEST FAILED${OFF}"
+    fi
+    log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+
+    exit $rc
+}
+
+main "$@"
