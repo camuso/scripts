@@ -31,6 +31,9 @@ kernel tree.
 OPTIONS
     -d        Build the debug kernel instead of the base kernel
               (enables PROVE_LOCKING/lockdep, KASAN, DEBUG_OBJECTS, etc.)
+    -S        Short-circuit: skip to %install/%package (reuse previous
+              build in BUILD dir).  Use after a build that compiled
+              successfully but failed at a late stage (KABI, packaging).
     -t NAME   Toolbox container name (overrides auto-detect)
     -n        No toolbox -- run the build directly on the host
     -h        Show this help
@@ -226,14 +229,16 @@ main() {
 	local mkstart mkend mkdiff etmins etsecs
 	local use_toolbox=true
 	local build_debug=false
+	local short_circuit=false
 	local toolbox_name="${TOOLBOX:-}"
 	local logfile="../mkdist.log"
 
 	exec > >(tee "$logfile") 2>&1
 
-	while getopts "dt:nh" opt; do
+	while getopts "dSt:nh" opt; do
 		case "$opt" in
 			d) build_debug=true ;;
+			S) short_circuit=true ;;
 			t) toolbox_name="$OPTARG" ;;
 			n) use_toolbox=false ;;
 			h) usage; exit 0 ;;
@@ -269,6 +274,12 @@ main() {
 		echo "Build flavor: base"
 	fi
 
+	local sc_flag=""
+	if $short_circuit; then
+		sc_flag="--short-circuit"
+		echo "Short-circuit: reusing previous build, skipping to packaging"
+	fi
+
 	local build_cmd
 	build_cmd="make dist-rpm-baseonly \
 RPMBUILDOPTS=\"--target \$(uname -m) \
@@ -285,6 +296,7 @@ ${flavor_opts} \
 --without efiuki \
 --without kabichk \
 --nodeps \
+${sc_flag} \
 -bb\""
 
 	# Validate any existing source tarball before building
