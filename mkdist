@@ -283,7 +283,7 @@ ${flavor_opts} \
 --without doc \
 --without cross_headers \
 --without efiuki \
---define 'signkernel 0' \
+--nodeps \
 -bb\""
 
 	# Validate any existing source tarball before building
