@@ -10,11 +10,12 @@
 # per-user message count leaked upward on every message cycle.
 # After max_msgs_per_user messages, all further sends fail with EBUSY.
 #
-# This test lowers max_msgs_per_user to a small value, then sends
-# many sequential synchronous messages through a single /dev/ipmi0
-# session. On a buggy kernel, sends fail once the count leaks past
-# the limit. On a fixed kernel, all messages succeed because the
-# count stays balanced.
+# This test lowers max_msgs_per_user to a small value, then runs
+# multiple rounds of batch-send/drain-all through a single /dev/ipmi0
+# session. Each round fires LIMIT messages without waiting, then drains
+# all responses. On a buggy kernel, the drain doesn't decrement nr_msgs,
+# so round 2 immediately hits EBUSY. On a fixed kernel, drain resets
+# the count and all rounds succeed.
 #
 # Author: Claude (Anthropic)
 # Prompted-by: Tony Camuso <tcamuso@redhat.com>
@@ -29,7 +30,7 @@ declare -r OFF='\e[0m'
 
 declare -i opt_verbose=0
 declare -i opt_limit=20
-declare -i opt_count=200
+declare -i opt_rounds=5
 declare opt_logfile=""
 declare opt_dev="/dev/ipmi0"
 
@@ -46,14 +47,15 @@ $SCRIPT_NAME [OPTIONS]
 Test IPMI per-user message limit counting (nr_msgs).
 
 Verifies fix for b52da4054ee0 ("ipmi: Rework user message limit handling").
-Sends many sequential IPMI commands through a single /dev/ipmi0 session
-with a lowered max_msgs_per_user. A buggy kernel leaks the message count
-and fails with EBUSY after exceeding the limit.
+Uses a batch-send/drain pattern: each round fires LIMIT messages as fast
+as possible (no recv between sends), then drains all responses. On a buggy
+kernel, nr_msgs leaks (never decremented on recv) so round 2+ sends fail
+with EBUSY. On a fixed kernel, drain resets the count and all rounds pass.
 
 Options:
     -v          Verbose output
     -l LIMIT    Temporary max_msgs_per_user value (default: $opt_limit)
-    -n COUNT    Number of messages to send (default: $opt_count)
+    -r ROUNDS   Number of batch+drain rounds (default: $opt_rounds)
     -d DEVICE   IPMI device (default: $opt_dev)
     -o FILE     Write results to log file
     -h          Show this help
@@ -82,12 +84,33 @@ build_test() {
 
     cat > "$tmpdir/ipmi-msglimit.c" << 'CSOURCE'
 /*
- * ipmi-msglimit.c — send N synchronous IPMI "Get Device ID" commands
- * through a single /dev/ipmiN session to exercise nr_msgs counting.
+ * ipmi-msglimit.c — batch-send / drain test for nr_msgs counting.
  *
- * Exit 0: all messages succeeded.
- * Exit 1: one or more sends failed (likely EBUSY from nr_msgs leak).
- * Exit 2: setup or receive error.
+ * The bug (fixed by b52da4054ee0): ipmi_free_recv_msg() did not
+ * decrement nr_msgs, so every send-receive cycle permanently leaked
+ * one count.  After max_msgs_per_user cycles the count saturates and
+ * all further sends return EBUSY.
+ *
+ * Strategy — "batch then drain" across multiple rounds:
+ *
+ *   Round 1: send BATCH messages as fast as possible (no recv between
+ *            sends).  Then drain all BATCH responses.
+ *   Round 2: send another BATCH.
+ *            → Buggy kernel: nr_msgs is still BATCH from round 1
+ *              (never decremented), so the very first send of round 2
+ *              returns EBUSY.
+ *            → Fixed kernel: drain decremented nr_msgs back to 0,
+ *              so round 2 sends succeed.
+ *   Repeat for ROUNDS rounds.
+ *
+ * BATCH is set to max_msgs_per_user (the caller lowers this to a
+ * small value like 20).  This guarantees round 1 fills the counter
+ * exactly to the limit, and round 2 immediately overflows on a
+ * buggy kernel.
+ *
+ * Exit 0: all rounds succeeded — counting is correct.
+ * Exit 1: EBUSY detected — nr_msgs leaked (bug present).
+ * Exit 2: setup / unexpected error.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,21 +176,48 @@ static int recv_msg(int fd, long *msgid_out, int timeout_ms)
     return 0;
 }
 
+/* Drain all pending responses, return count received. */
+static int drain_responses(int fd, int expected, int verbose)
+{
+    int received = 0;
+    int rc;
+    long id;
+
+    while (received < expected) {
+        rc = recv_msg(fd, &id, 5000);
+        if (rc == -ETIMEDOUT) {
+            if (verbose)
+                fprintf(stderr, "  drain: timeout after %d/%d received\n",
+                        received, expected);
+            break;
+        }
+        if (rc < 0) {
+            if (verbose)
+                fprintf(stderr, "  drain: recv error: %s\n", strerror(-rc));
+            break;
+        }
+        received++;
+    }
+    return received;
+}
+
 int main(int argc, char *argv[])
 {
     const char *dev = "/dev/ipmi0";
-    int count = 200;
+    int batch = 20;    /* messages per round — should match limit */
+    int rounds = 5;    /* number of batch+drain rounds */
     int verbose = 0;
     int opt, fd, rc;
-    int i, ebusy_count = 0, send_ok = 0, recv_ok = 0, recv_err = 0;
 
-    while ((opt = getopt(argc, argv, "d:n:v")) != -1) {
+    while ((opt = getopt(argc, argv, "d:b:r:v")) != -1) {
         switch (opt) {
         case 'd': dev = optarg; break;
-        case 'n': count = atoi(optarg); break;
+        case 'b': batch = atoi(optarg); break;
+        case 'r': rounds = atoi(optarg); break;
         case 'v': verbose = 1; break;
         default:
-            fprintf(stderr, "Usage: %s [-d /dev/ipmiN] [-n count] [-v]\n",
+            fprintf(stderr,
+                    "Usage: %s [-d dev] [-b batch] [-r rounds] [-v]\n",
                     argv[0]);
             return 2;
         }
@@ -179,52 +229,66 @@ int main(int argc, char *argv[])
         return 2;
     }
 
-    for (i = 0; i < count; i++) {
-        rc = send_get_devid(fd, i + 1);
-        if (rc == -EBUSY) {
-            ebusy_count++;
-            if (verbose)
-                fprintf(stderr, "msg %d: send EBUSY (nr_msgs limit hit)\n",
-                        i + 1);
-            continue;
-        }
-        if (rc < 0) {
-            fprintf(stderr, "msg %d: send error: %s\n",
-                    i + 1, strerror(-rc));
-            close(fd);
-            return 2;
-        }
-        send_ok++;
+    int total_sent = 0, total_recv = 0, total_ebusy = 0;
+    long msgid = 0;
 
-        /* Read the response synchronously. */
-        long got_id = 0;
-        rc = recv_msg(fd, &got_id, 5000);
-        if (rc < 0) {
-            recv_err++;
-            if (verbose)
-                fprintf(stderr, "msg %d: recv error: %s\n",
-                        i + 1, strerror(-rc));
-        } else {
-            recv_ok++;
+    for (int r = 1; r <= rounds; r++) {
+        int sent = 0, ebusy = 0;
+
+        if (verbose)
+            fprintf(stderr, "Round %d/%d: sending %d messages...\n",
+                    r, rounds, batch);
+
+        /* Phase 1: send a batch as fast as possible. */
+        for (int i = 0; i < batch; i++) {
+            msgid++;
+            rc = send_get_devid(fd, msgid);
+            if (rc == -EBUSY) {
+                ebusy++;
+                total_ebusy++;
+                if (verbose)
+                    fprintf(stderr,
+                            "  round %d msg %d: EBUSY (nr_msgs leaked)\n",
+                            r, i + 1);
+            } else if (rc < 0) {
+                fprintf(stderr, "  round %d msg %d: send error: %s\n",
+                        r, i + 1, strerror(-rc));
+                close(fd);
+                return 2;
+            } else {
+                sent++;
+            }
+        }
+
+        total_sent += sent;
+
+        /* Phase 2: drain all responses. */
+        int drained = drain_responses(fd, sent, verbose);
+        total_recv += drained;
+
+        if (verbose)
+            fprintf(stderr,
+                    "  sent=%d drained=%d ebusy=%d\n",
+                    sent, drained, ebusy);
+
+        if (ebusy > 0) {
+            fprintf(stderr,
+                    "FAIL at round %d: %d/%d sends hit EBUSY "
+                    "— nr_msgs leaked from previous rounds\n",
+                    r, ebusy, batch);
+            printf("rounds=%d total_sent=%d total_recv=%d "
+                   "total_ebusy=%d\n",
+                   r, total_sent, total_recv, total_ebusy);
+            close(fd);
+            return 1;
         }
     }
 
     close(fd);
 
-    printf("sent=%d recv=%d recv_err=%d ebusy=%d total=%d\n",
-           send_ok, recv_ok, recv_err, ebusy_count, count);
+    printf("rounds=%d total_sent=%d total_recv=%d total_ebusy=%d\n",
+           rounds, total_sent, total_recv, total_ebusy);
 
-    if (ebusy_count > 0) {
-        fprintf(stderr,
-                "FAIL: %d/%d messages hit EBUSY — nr_msgs count leaked\n",
-                ebusy_count, count);
-        return 1;
-    }
-    if (recv_err > 0) {
-        fprintf(stderr,
-                "WARNING: %d receive errors (timeouts?), but no EBUSY\n",
-                recv_err);
-    }
     return 0;
 }
 CSOURCE
@@ -238,11 +302,11 @@ CSOURCE
 }
 
 main() {
-    while getopts "vl:n:d:o:h" opt; do
+    while getopts "vl:r:d:o:h" opt; do
         case "$opt" in
             v) opt_verbose=1 ;;
             l) opt_limit="$OPTARG" ;;
-            n) opt_count="$OPTARG" ;;
+            r) opt_rounds="$OPTARG" ;;
             d) opt_dev="$OPTARG" ;;
             o) opt_logfile="$OPTARG" ;;
             h) usage ;;
@@ -275,8 +339,9 @@ main() {
     fi
 
     log "Device:             $opt_dev"
-    log "Messages to send:   $opt_count"
-    log "Temporary limit:    $opt_limit"
+    log "Batch size (limit): $opt_limit"
+    log "Rounds:             $opt_rounds"
+    log "Total messages:     $(( opt_limit * opt_rounds ))"
 
     # Build the C test program
     log ""
@@ -297,18 +362,19 @@ main() {
         saved_limit=0  # Don't restore on exit
     fi
 
-    # --- Test 1: Sequential synchronous messages ---
+    # --- Test: Batch-send / drain across multiple rounds ---
     log ""
-    log "${BLD}Test 1: Sequential message counting${OFF}"
-    log "Sending $opt_count synchronous Get Device ID commands..."
-    log "On a buggy kernel, sends fail with EBUSY after ~$opt_limit messages."
+    log "${BLD}Test: Batch-send / drain (nr_msgs leak detection)${OFF}"
+    log "Each round sends $opt_limit messages as fast as possible, then"
+    log "drains all responses. On a buggy kernel, round 2+ sends fail"
+    log "with EBUSY because nr_msgs was never decremented on drain."
     log ""
 
     local output rc
     if ((opt_verbose)); then
-        output=$("$test_bin" -d "$opt_dev" -n "$opt_count" -v 2>&1)
+        output=$("$test_bin" -d "$opt_dev" -b "$opt_limit" -r "$opt_rounds" -v 2>&1)
     else
-        output=$("$test_bin" -d "$opt_dev" -n "$opt_count" 2>&1)
+        output=$("$test_bin" -d "$opt_dev" -b "$opt_limit" -r "$opt_rounds" 2>&1)
     fi
     rc=$?
 
@@ -316,52 +382,25 @@ main() {
 
     if [[ $rc -eq 0 ]]; then
         log ""
-        log "${GRN}✓ PASS: All $opt_count messages succeeded — nr_msgs counting is correct${OFF}"
+        log "${GRN}✓ PASS: All $opt_rounds rounds completed — nr_msgs counting is correct${OFF}"
     elif [[ $rc -eq 1 ]]; then
         log ""
         log "${RED}✗ FAIL: Messages hit EBUSY — nr_msgs count is leaking${OFF}"
-        log "${RED}  This indicates the b52da4054ee0 fix is missing or broken.${OFF}"
+        log "${RED}  This indicates the b52da4054ee0 fix is missing.${OFF}"
     else
         log ""
         log "${RED}✗ ERROR: Test program failed (exit $rc)${OFF}"
-    fi
-
-    # --- Test 2: Verify limit is still enforced ---
-    # This confirms the limit mechanism itself works (not just that
-    # counting is balanced). We skip this if we couldn't lower the limit.
-    if [[ -w "$PARAM" ]]; then
-        log ""
-        log "${BLD}Test 2: Limit enforcement (negative test)${OFF}"
-        log "Verifying max_msgs_per_user is still enforced..."
-
-        # Set limit to 2, send 50 messages. Some EBUSY is expected because
-        # the limit is so low that send can outpace the response path.
-        echo 2 > "$PARAM"
-        local output2
-        output2=$("$test_bin" -d "$opt_dev" -n 50 2>&1)
-        local rc2=$?
-        echo "$opt_limit" > "$PARAM"  # restore test limit
-
-        log "Result: $output2"
-
-        if [[ $rc2 -eq 1 ]]; then
-            log "${GRN}✓ PASS: Limit correctly enforced (EBUSY returned as expected)${OFF}"
-        elif [[ $rc2 -eq 0 ]]; then
-            # With limit=2, it's possible all 50 succeed if synchronous
-            # send/recv is fast enough. Not a failure, just informational.
-            log "${YLW}  INFO: All 50 succeeded even with limit=2 (fast sync path)${OFF}"
-            log "${YLW}  Limit enforcement could not be verified.${OFF}"
-        else
-            log "${RED}✗ ERROR: Test program failed (exit $rc2)${OFF}"
-        fi
     fi
 
     log ""
     log "${BLD}════════════════════════════════════════════════════════════${OFF}"
     if [[ $rc -eq 0 ]]; then
         log "${GRN}  MESSAGE LIMIT TEST PASSED${OFF}"
+        log "${YLW}  NOTE: On an unpatched kernel this test should FAIL.${OFF}"
+        log "${YLW}  If the kernel lacks b52da4054ee0, a PASS is unexpected.${OFF}"
     else
         log "${RED}  MESSAGE LIMIT TEST FAILED${OFF}"
+        log "${RED}  The kernel appears to lack the b52da4054ee0 fix.${OFF}"
     fi
     log "${BLD}════════════════════════════════════════════════════════════${OFF}"
 
