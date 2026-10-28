@@ -2,20 +2,21 @@
 #
 # ipmi-msglimit-test
 #
-# Tests the per-user IPMI message limit counting (nr_msgs).
-# Targets the bug fixed by upstream commit b52da4054ee0
-# ("ipmi: Rework user message limit handling").
+# IPMI message-path stress test exercising the per-user message limit
+# (max_msgs_per_user / nr_msgs).
 #
-# The bug: ipmi_free_recv_msg() did not decrement nr_msgs, so the
-# per-user message count leaked upward on every message cycle.
-# After max_msgs_per_user messages, all further sends fail with EBUSY.
+# Sends many IPMI messages through /dev/ipmi0 in a batch-send/drain
+# pattern with a lowered max_msgs_per_user limit. This stresses the
+# nr_msgs accounting path — the same path reworked by upstream commit
+# b52da4054ee0 ("ipmi: Rework user message limit handling").
 #
-# This test lowers max_msgs_per_user to a small value, then runs
-# multiple rounds of batch-send/drain-all through a single /dev/ipmi0
-# session. Each round fires LIMIT messages without waiting, then drains
-# all responses. On a buggy kernel, the drain doesn't decrement nr_msgs,
-# so round 2 immediately hits EBUSY. On a fixed kernel, drain resets
-# the count and all rounds succeed.
+# NOTE: The specific bug fixed by b52da4054ee0 involves kernel-internal
+# message paths (IPMB command handling, event delivery, use-after-free
+# in deliver_response) that cannot be triggered from userspace via
+# /dev/ipmiN ioctls.  The userspace ioctl path is balanced in both the
+# old and new code.  This test therefore serves as a regression test —
+# proving the rework does not break the normal message path — rather
+# than a bug detector.
 #
 # Author: Claude (Anthropic)
 # Prompted-by: Tony Camuso <tcamuso@redhat.com>
@@ -44,13 +45,12 @@ usage() {
 
 $SCRIPT_NAME [OPTIONS]
 
-Test IPMI per-user message limit counting (nr_msgs).
+IPMI message-path stress test for the per-user message limit.
 
-Verifies fix for b52da4054ee0 ("ipmi: Rework user message limit handling").
-Uses a batch-send/drain pattern: each round fires LIMIT messages as fast
-as possible (no recv between sends), then drains all responses. On a buggy
-kernel, nr_msgs leaks (never decremented on recv) so round 2+ sends fail
-with EBUSY. On a fixed kernel, drain resets the count and all rounds pass.
+Sends messages through /dev/ipmi0 in a batch-send/drain pattern with a
+lowered max_msgs_per_user limit, stressing the nr_msgs accounting code
+reworked by b52da4054ee0.  Serves as a regression test to verify the
+rework does not break the normal ioctl message path.
 
 Options:
     -v          Verbose output
@@ -84,32 +84,25 @@ build_test() {
 
     cat > "$tmpdir/ipmi-msglimit.c" << 'CSOURCE'
 /*
- * ipmi-msglimit.c — batch-send / drain test for nr_msgs counting.
+ * ipmi-msglimit.c — IPMI message-path stress test.
  *
- * The bug (fixed by b52da4054ee0): ipmi_free_recv_msg() did not
- * decrement nr_msgs, so every send-receive cycle permanently leaked
- * one count.  After max_msgs_per_user cycles the count saturates and
- * all further sends return EBUSY.
+ * Exercises nr_msgs accounting by sending batches of IPMI messages
+ * through a single /dev/ipmiN session with a lowered per-user limit.
  *
  * Strategy — "batch then drain" across multiple rounds:
  *
- *   Round 1: send BATCH messages as fast as possible (no recv between
- *            sends).  Then drain all BATCH responses.
- *   Round 2: send another BATCH.
- *            → Buggy kernel: nr_msgs is still BATCH from round 1
- *              (never decremented), so the very first send of round 2
- *              returns EBUSY.
- *            → Fixed kernel: drain decremented nr_msgs back to 0,
- *              so round 2 sends succeed.
- *   Repeat for ROUNDS rounds.
+ *   Each round fires BATCH messages as fast as possible (no recv
+ *   between sends), then drains all responses.  This keeps nr_msgs
+ *   near the limit during the send phase, stressing the accounting
+ *   under load.
  *
- * BATCH is set to max_msgs_per_user (the caller lowers this to a
- * small value like 20).  This guarantees round 1 fills the counter
- * exactly to the limit, and round 2 immediately overflows on a
- * buggy kernel.
+ * This is a regression test for the nr_msgs rework in b52da4054ee0.
+ * The specific bug fixed by that commit affects kernel-internal paths
+ * (IPMB, OEM, event delivery) not reachable from /dev/ipmiN, so this
+ * test validates the ioctl path remains correct after the rework.
  *
- * Exit 0: all rounds succeeded — counting is correct.
- * Exit 1: EBUSY detected — nr_msgs leaked (bug present).
+ * Exit 0: all rounds succeeded.
+ * Exit 1: EBUSY detected — unexpected nr_msgs accounting failure.
  * Exit 2: setup / unexpected error.
  */
 #include <stdio.h>
@@ -176,7 +169,6 @@ static int recv_msg(int fd, long *msgid_out, int timeout_ms)
     return 0;
 }
 
-/* Drain all pending responses, return count received. */
 static int drain_responses(int fd, int expected, int verbose)
 {
     int received = 0;
@@ -204,8 +196,8 @@ static int drain_responses(int fd, int expected, int verbose)
 int main(int argc, char *argv[])
 {
     const char *dev = "/dev/ipmi0";
-    int batch = 20;    /* messages per round — should match limit */
-    int rounds = 5;    /* number of batch+drain rounds */
+    int batch = 20;
+    int rounds = 5;
     int verbose = 0;
     int opt, fd, rc;
 
@@ -239,7 +231,6 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Round %d/%d: sending %d messages...\n",
                     r, rounds, batch);
 
-        /* Phase 1: send a batch as fast as possible. */
         for (int i = 0; i < batch; i++) {
             msgid++;
             rc = send_get_devid(fd, msgid);
@@ -248,8 +239,7 @@ int main(int argc, char *argv[])
                 total_ebusy++;
                 if (verbose)
                     fprintf(stderr,
-                            "  round %d msg %d: EBUSY (nr_msgs leaked)\n",
-                            r, i + 1);
+                            "  round %d msg %d: EBUSY\n", r, i + 1);
             } else if (rc < 0) {
                 fprintf(stderr, "  round %d msg %d: send error: %s\n",
                         r, i + 1, strerror(-rc));
@@ -262,19 +252,16 @@ int main(int argc, char *argv[])
 
         total_sent += sent;
 
-        /* Phase 2: drain all responses. */
         int drained = drain_responses(fd, sent, verbose);
         total_recv += drained;
 
         if (verbose)
-            fprintf(stderr,
-                    "  sent=%d drained=%d ebusy=%d\n",
+            fprintf(stderr, "  sent=%d drained=%d ebusy=%d\n",
                     sent, drained, ebusy);
 
         if (ebusy > 0) {
             fprintf(stderr,
-                    "FAIL at round %d: %d/%d sends hit EBUSY "
-                    "— nr_msgs leaked from previous rounds\n",
+                    "FAIL at round %d: %d/%d sends hit EBUSY\n",
                     r, ebusy, batch);
             printf("rounds=%d total_sent=%d total_recv=%d "
                    "total_ebusy=%d\n",
@@ -318,8 +305,11 @@ main() {
 
     log ""
     log "${BLD}════════════════════════════════════════════════════════════${OFF}"
-    log "${BLD}  IPMI Message Limit Test (b52da4054ee0)${OFF}"
+    log "${BLD}  IPMI Message Limit Stress Test${OFF}"
     log "${BLD}════════════════════════════════════════════════════════════${OFF}"
+    log ""
+    log "Regression test for the nr_msgs accounting rework (b52da4054ee0)."
+    log "Stresses the ioctl message path with a lowered per-user limit."
     log ""
 
     # Preflight checks
@@ -359,15 +349,15 @@ main() {
         log "Lowered max_msgs_per_user=$opt_limit"
     else
         log "${YLW}WARNING: Cannot write $PARAM (not root?) — using current limit${OFF}"
-        saved_limit=0  # Don't restore on exit
+        saved_limit=0
     fi
 
     # --- Test: Batch-send / drain across multiple rounds ---
     log ""
-    log "${BLD}Test: Batch-send / drain (nr_msgs leak detection)${OFF}"
+    log "${BLD}Test: Batch-send / drain (message-path stress)${OFF}"
     log "Each round sends $opt_limit messages as fast as possible, then"
-    log "drains all responses. On a buggy kernel, round 2+ sends fail"
-    log "with EBUSY because nr_msgs was never decremented on drain."
+    log "drains all responses. Verifies nr_msgs accounting remains"
+    log "balanced under load with a tight per-user limit."
     log ""
 
     local output rc
@@ -382,11 +372,10 @@ main() {
 
     if [[ $rc -eq 0 ]]; then
         log ""
-        log "${GRN}✓ PASS: All $opt_rounds rounds completed — nr_msgs counting is correct${OFF}"
+        log "${GRN}✓ PASS: All $opt_rounds rounds completed — message path OK${OFF}"
     elif [[ $rc -eq 1 ]]; then
         log ""
-        log "${RED}✗ FAIL: Messages hit EBUSY — nr_msgs count is leaking${OFF}"
-        log "${RED}  This indicates the b52da4054ee0 fix is missing.${OFF}"
+        log "${RED}✗ FAIL: Messages hit EBUSY — nr_msgs accounting error${OFF}"
     else
         log ""
         log "${RED}✗ ERROR: Test program failed (exit $rc)${OFF}"
@@ -395,12 +384,9 @@ main() {
     log ""
     log "${BLD}════════════════════════════════════════════════════════════${OFF}"
     if [[ $rc -eq 0 ]]; then
-        log "${GRN}  MESSAGE LIMIT TEST PASSED${OFF}"
-        log "${YLW}  NOTE: On an unpatched kernel this test should FAIL.${OFF}"
-        log "${YLW}  If the kernel lacks b52da4054ee0, a PASS is unexpected.${OFF}"
+        log "${GRN}  MESSAGE LIMIT STRESS TEST PASSED${OFF}"
     else
-        log "${RED}  MESSAGE LIMIT TEST FAILED${OFF}"
-        log "${RED}  The kernel appears to lack the b52da4054ee0 fix.${OFF}"
+        log "${RED}  MESSAGE LIMIT STRESS TEST FAILED${OFF}"
     fi
     log "${BLD}════════════════════════════════════════════════════════════${OFF}"
 
