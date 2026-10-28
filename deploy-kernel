@@ -27,7 +27,7 @@ OPTIONS
     -b        Deploy base kernel (set as default boot entry)
     -r        Reboot after install
     -t CMD    Run test command on host after reboot completes
-    -u USER   SSH user (default: tcamuso)
+    -u USER   SSH user (default: root)
     -w SECS   Seconds to wait for host after reboot (default: 180)
     -h        Show this help
 
@@ -58,7 +58,7 @@ main() {
 	local deploy_base=false
 	local do_reboot=false
 	local test_cmd=""
-	local ssh_user="tcamuso"
+	local ssh_user="root"
 	local -i wait_secs=180
 	local host=""
 
@@ -79,6 +79,12 @@ main() {
 
 	host="${1:-}"
 	[[ -z "$host" ]] && die "HOST argument required"
+
+	# Parse user@host if provided
+	if [[ "$host" == *@* ]]; then
+		ssh_user="${host%%@*}"
+		host="${host#*@}"
+	fi
 
 	# Default: deploy both if neither specified
 	if ! $deploy_debug && ! $deploy_base; then
