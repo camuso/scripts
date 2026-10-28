@@ -48,7 +48,7 @@ Test Sequence:
     2. Functional test - IPMI commands loop (ipmiloop)
     3. Stress test     - Module load/unload cycles (custom)
     4. Message test    - Large message handling (ipmi-big-message)
-    5. Msg limit test  - Per-user nr_msgs counting (b52da4054ee0)
+    5. Msg limit test  - Per-user nr_msgs stress (b52da4054ee0 regression)
 
 Author: Claude (Anthropic)
 Prompted-by: Tony Camuso <tcamuso@redhat.com>
@@ -196,10 +196,10 @@ test_msglimit() {
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local msglimit_test="$script_dir/ipmi-msglimit-test"
 
-    log_header "Test 5: Per-User Message Limit (b52da4054ee0)"
-    log "${YLW}Tests nr_msgs counting — the bug fixed by b52da4054ee0.${OFF}"
-    log "${YLW}Lowers max_msgs_per_user and sends many messages through${OFF}"
-    log "${YLW}a single session. A buggy kernel leaks the count → EBUSY.${OFF}"
+    log_header "Test 5: Message Limit Stress (b52da4054ee0 regression)"
+    log "${YLW}Regression test for the nr_msgs accounting rework.${OFF}"
+    log "${YLW}Stresses the ioctl message path with a lowered per-user${OFF}"
+    log "${YLW}limit to verify the rework does not break normal operation.${OFF}"
 
     if [[ ! -x "$msglimit_test" ]]; then
         log "${RED}ERROR: $msglimit_test not found or not executable${OFF}"
@@ -214,9 +214,9 @@ test_msglimit() {
     local rc=$?
 
     if [[ $rc -eq 0 ]]; then
-        log_result "msg-limit counting (200 msgs, limit=20)" "PASS"
+        log_result "msg-limit stress ($opt_loop_count rounds, limit=20)" "PASS"
     else
-        log_result "msg-limit counting (nr_msgs leak detected)" "FAIL"
+        log_result "msg-limit stress (unexpected EBUSY)" "FAIL"
     fi
     return $rc
 }
