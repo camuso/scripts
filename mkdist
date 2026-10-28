@@ -282,6 +282,8 @@ ${flavor_opts} \
 --without realtime \
 --without doc \
 --without cross_headers \
+--without efiuki \
+--define 'signkernel 0' \
 -bb\""
 
 	# Validate any existing source tarball before building
