@@ -1,0 +1,1494 @@
+#!/bin/bash
+#
+# hw-fault-report
+#
+# Collect SEL, MCA, EDAC, and poisoned-page evidence and print what it
+# can and cannot prove about an uncorrected memory fault.
+#
+# Poisoned frames are found by reading /proc/kpageflags (KPF_HWPOISON,
+# bit 19). page-types is not required.
+#
+# Prompted-by: Tony Camuso <tcamuso@redhat.com>
+#
+
+declare -r VERSION="1.0"
+declare -r SCRIPT_NAME="$(basename "$0")"
+declare -r KPF_HWPOISON_BIT=19
+
+declare -i opt_list_count=40
+declare -i opt_verbose_count=3
+declare -i opt_reproduce=0
+declare -i opt_repair_ras=0
+declare -i opt_load_edac=1
+declare -i opt_scan_pfns=0
+declare -i opt_self_test=0
+declare -i opt_node_seconds=120
+declare -i opt_node_percent=70
+declare opt_since=""
+declare opt_since_default="14 days ago"
+declare opt_incident="2026-10-31 23:41:00"
+declare opt_sel_file=""
+declare opt_outfile=""
+
+declare workdir=""
+declare -i report_exit=0
+
+declare -a findings=()
+
+declare -i hc_kb=-1
+declare -i poison_pfns=0
+declare -i poison_truncated=0
+declare -i journal_kills=0
+declare -i journal_addr=0
+declare -i dmesg_kills=0
+declare -i dmesg_addr=0
+declare -i edac_preexisting=0
+declare -i edac_ue=0
+declare -i edac_ce=0
+declare edac_ue_where=""
+declare edac_load=""
+declare cpu_family=""
+declare cpu_model=""
+declare cpu_stepping=""
+declare cpu_name=""
+declare boot_since=""
+declare -i boot_after_incident=-1
+declare -i ras_installed=0
+declare -i ras_active=0
+declare -i ras_records_flag=0
+declare -i ras_has_mc_event=-1
+declare -i sel_before=-1
+declare -i sel_after=-1
+declare sel_overflow=""
+declare -i sel_parsed=0
+declare -i sel_unique_ids=0
+declare -i sel_unique_stamps=0
+declare sel_last_id=""
+declare sel_desc_summary=""
+declare sel_payload=""
+declare -i sel_get_ok=-1
+declare -i sel_file_records=0
+declare -i sel_file_unique=0
+declare sel_file_note=""
+declare -i ipmi_present=0
+declare ipmi_selftest=""
+declare ipmi_guid_sys=""
+declare ipmi_guid_dev=""
+declare ipmi_identify=""
+declare -i selftest_rc=-1
+declare -i sysguid_rc=-1
+declare -i devid_rc=-1
+declare -i identify_rc=-1
+declare -i sel_clock_delta=-1
+declare planned_note=""
+
+declare usagestr="$(
+cat <<EOF
+$SCRIPT_NAME [-h|--help] [OPTIONS]
+
+Read the SEL, the kernel log, EDAC, and poisoned page flags, then print
+a findings report. The poisoned-page scan reads /proc/kpageflags directly.
+
+Does not clear the SEL. Does not stress memory unless --reproduce is given.
+Loading amd64_edac is attempted when no memory controller is registered.
+
+Exit codes:
+  0    Report finished, no uncorrected-memory evidence
+  1    Uncorrected-memory evidence found
+  2    Usage error, or not run as root
+  130  Interrupted
+
+Options:
+  -h, --help              Show this help
+  -o, --output FILE       Also write the report to FILE
+  --since TIME            Kernel journal start (default: $opt_since_default)
+  --incident TIME         Fault time used to interpret this boot
+                          (default: $opt_incident)
+  --sel-file FILE         sel save text file (default: newest /tmp/sel-*.bin)
+  --no-load-edac          Do not modprobe amd64_edac
+  --scan-pfns             Scan page flags even if HardwareCorrupted is 0
+  --repair-rasdaemon      Replace an empty rasdaemon database and restart
+                          the service when it is already started with --record
+  --reproduce             Sweep each NUMA node with stress-ng until one faults
+  --node-seconds N        Per-node stress time in seconds (default: $opt_node_seconds)
+  --node-percent N        Percent of that node's memory to allocate (default: $opt_node_percent)
+  --list-count N          SEL records to sample from the oldest (default: $opt_list_count)
+  --verbose-count N       SEL records to print in full (default: $opt_verbose_count)
+  --self-test             Check the page-flag and SEL parsers, then exit
+
+EOF
+)"
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected. Stopping." >&2
+	exitme 130
+}
+
+#** exitme: exit with code and optional message
+#*
+# Arguments
+#   $1 - exit code
+#   $2 - optional message
+#*
+exitme() {
+	local -i code="$1"
+	local msg="${2:-}"
+
+	[[ -n "$msg" ]] && echo -e "$msg" >&2
+	if ((code == 2)); then
+		usage >&2
+	fi
+	exit "$code"
+}
+
+#** cleanup: remove the temporary work directory
+#*
+cleanup() {
+	if [[ -n "$workdir" && -d "$workdir" ]]; then
+		rm -rf "$workdir"
+		workdir=""
+	fi
+}
+
+#** note: progress on stderr so the report on stdout stays clean
+#*
+# Arguments
+#   $* - message
+#*
+note() {
+	echo "==> $*" >&2
+}
+
+#** parse_args: set options from the command line
+#*
+# Arguments
+#   $@ - argv
+#*
+parse_args() {
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help|help)
+				usage
+				exit 0
+				;;
+			-o|--output)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_outfile="$2"
+				shift 2
+				;;
+			--since)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_since="$2"
+				shift 2
+				;;
+			--incident)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_incident="$2"
+				shift 2
+				;;
+			--sel-file)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_sel_file="$2"
+				shift 2
+				;;
+			--no-load-edac)
+				opt_load_edac=0
+				shift
+				;;
+			--scan-pfns)
+				opt_scan_pfns=1
+				shift
+				;;
+			--self-test)
+				opt_self_test=1
+				shift
+				;;
+			--repair-rasdaemon)
+				opt_repair_ras=1
+				shift
+				;;
+			--reproduce)
+				opt_reproduce=1
+				shift
+				;;
+			--node-seconds)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_node_seconds="$2"
+				shift 2
+				;;
+			--node-percent)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_node_percent="$2"
+				shift 2
+				;;
+			--list-count)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_list_count="$2"
+				shift 2
+				;;
+			--verbose-count)
+				[[ $# -ge 2 ]] || exitme 2 "Missing argument for $1"
+				opt_verbose_count="$2"
+				shift 2
+				;;
+			*)
+				exitme 2 "Unknown option: $1"
+				;;
+		esac
+	done
+
+	if ((opt_node_seconds < 1)); then
+		exitme 2 "--node-seconds must be >= 1"
+	fi
+	if ((opt_node_percent < 1 || opt_node_percent > 100)); then
+		exitme 2 "--node-percent must be 1-100"
+	fi
+	if ((opt_list_count < 1 || opt_verbose_count < 1)); then
+		exitme 2 "SEL sample counts must be >= 1"
+	fi
+}
+
+#** require_root: this report reads the SEL device and page flags
+#*
+require_root() {
+	if [[ "$(id -u)" -ne 0 ]]; then
+		exitme 2 "Must be root to read /proc/kpageflags, the SEL, and DMI."
+	fi
+}
+
+#** run_to: run a command with a timeout and keep combined output
+#*
+# Arguments
+#   $1 - output file
+#   $2 - timeout seconds
+#   $3... - command
+#*
+run_to() {
+	local out="$1"
+	local -i secs="$2"
+	shift 2
+	local -i rc=0
+
+	timeout --signal=TERM "$secs" "$@" >"$out" 2>&1 || rc=$?
+	printf '%s\n' "$rc" >"${out}.rc"
+	if ((rc == 124)); then
+		echo "TIMED OUT after ${secs}s" >>"$out"
+	fi
+	return 0
+}
+
+#** add_finding: record one interpreted result
+#*
+# Arguments
+#   $1 - FAULT, GAP, OK, or INFO
+#   $2 - sentence
+#*
+add_finding() {
+	findings+=("$1"$'\t'"$2")
+	if [[ "$1" == "FAULT" ]]; then
+		report_exit=1
+	fi
+}
+
+#** edac_dimm_count: number of EDAC dimm_label files
+#*
+edac_dimm_count() {
+	find /sys/devices/system/edac/mc -name dimm_label 2>/dev/null | wc -l
+}
+
+#** read_edac_counts: sum CE/UE and list labels that have seen a UE
+#*
+read_edac_counts() {
+	local label_file dir label ce ue
+	edac_ue=0
+	edac_ce=0
+	edac_ue_where=""
+	: >"$workdir/edac-dimms.txt"
+
+	while IFS= read -r label_file; do
+		dir="$(dirname "$label_file")"
+		label="$(tr -d '\n' <"$label_file" 2>/dev/null || true)"
+		ce="$(tr -d '\n' <"$dir/dimm_ce_count" 2>/dev/null || echo 0)"
+		ue="$(tr -d '\n' <"$dir/dimm_ue_count" 2>/dev/null || echo 0)"
+		[[ "$ce" =~ ^[0-9]+$ ]] || ce=0
+		[[ "$ue" =~ ^[0-9]+$ ]] || ue=0
+		edac_ce=$((edac_ce + ce))
+		edac_ue=$((edac_ue + ue))
+		printf '%s ce=%s ue=%s path=%s\n' "${label:-unlabeled}" "$ce" "$ue" "$dir" >>"$workdir/edac-dimms.txt"
+		if ((ue > 0)); then
+			edac_ue_where+="${label:-$dir} (ue=$ue) "
+		fi
+	done < <(find /sys/devices/system/edac/mc -name dimm_label 2>/dev/null | sort)
+}
+
+#** collect_host: identity, boot time, and memory totals
+#*
+collect_host() {
+	local incident_epoch boot_epoch memtotal
+	{
+		echo "hostname: $(hostname)"
+		echo "kernel: $(uname -r)"
+		echo "os: $(uname -srm)"
+		echo "time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+		echo "uptime: $(uptime)"
+		boot_since="$(uptime -s 2>/dev/null || true)"
+		echo "boot_since: ${boot_since:-unknown}"
+		echo "who_b: $(who -b 2>/dev/null || true)"
+		memtotal="$(awk '/^MemTotal:/{print $2, $3}' /proc/meminfo)"
+		echo "mem_total: ${memtotal:-unknown}"
+		hc_line="$(awk '/^HardwareCorrupted:/{print $2}' /proc/meminfo)"
+		if [[ -n "$hc_line" ]]; then
+			hc_kb="$hc_line"
+		fi
+		echo "hardware_corrupted_kb: ${hc_kb}"
+		echo "incident: $opt_incident"
+	} >"$workdir/host.txt"
+
+	incident_epoch="$(date -d "$opt_incident" +%s 2>/dev/null || true)"
+	boot_epoch="$(date -d "$boot_since" +%s 2>/dev/null || true)"
+	if [[ -n "$incident_epoch" && -n "$boot_epoch" ]]; then
+		if ((boot_epoch > incident_epoch)); then
+			boot_after_incident=1
+		else
+			boot_after_incident=0
+		fi
+	fi
+}
+
+#** scan_hwpoison: list PFNs whose stable page flag bit 19 is set
+#*
+scan_hwpoison() {
+	local page_size
+	page_size="$(getconf PAGE_SIZE)"
+	note "Scanning /proc/kpageflags for KPF_HWPOISON (bit $KPF_HWPOISON_BIT)"
+	python3 - "$page_size" "$KPF_HWPOISON_BIT" >"$workdir/poison.txt" <<'PY'
+import os, struct, sys
+page_size = int(sys.argv[1])
+bit = 1 << int(sys.argv[2])
+path = os.environ.get("HW_FAULT_KPAGEFLAGS", "/proc/kpageflags")
+try:
+    fd = os.open(path, os.O_RDONLY)
+except OSError as exc:
+    print("error %s" % exc)
+    sys.exit(0)
+pfn = 0
+found = []
+truncated = 0
+chunk = 1 << 20
+while True:
+    buf = os.read(fd, chunk * 8)
+    if not buf:
+        break
+    n = len(buf) // 8
+    if n == 0:
+        break
+    vals = struct.unpack_from("<%dQ" % n, buf)
+    base = pfn
+    for i, val in enumerate(vals):
+        if val & bit:
+            if len(found) < 10000:
+                found.append(base + i)
+            else:
+                truncated += 1
+    pfn += n
+    print("scanned %d pfns" % pfn, file=sys.stderr)
+os.close(fd)
+print("count %d" % len(found))
+print("truncated %d" % truncated)
+print("pagesize %d" % page_size)
+print("scanned_pfns %d" % pfn)
+if not found:
+    sys.exit(0)
+start = prev = found[0]
+ranges = []
+for p in found[1:]:
+    if p == prev + 1:
+        prev = p
+        continue
+    ranges.append((start, prev))
+    start = prev = p
+ranges.append((start, prev))
+for a, b in ranges:
+    nbytes = (b - a + 1) * page_size
+    print("range %#x %#x %#x %d" % (a, b, a * page_size, nbytes))
+PY
+	poison_pfns="$(awk '/^count /{print $2}' "$workdir/poison.txt")"
+	poison_truncated="$(awk '/^truncated /{print $2}' "$workdir/poison.txt")"
+	[[ "$poison_pfns" =~ ^[0-9]+$ ]] || poison_pfns=0
+	[[ "$poison_truncated" =~ ^[0-9]+$ ]] || poison_truncated=0
+}
+
+#** collect_poison: HardwareCorrupted, then a page-flag scan when needed
+#*
+collect_poison() {
+	if ((hc_kb > 0 || opt_scan_pfns == 1 || hc_kb < 0)); then
+		if [[ ! -r /proc/kpageflags ]]; then
+			echo "unreadable /proc/kpageflags" >"$workdir/poison.txt"
+			return
+		fi
+		if ! command -v python3 >/dev/null 2>&1; then
+			echo "python3 is required to scan /proc/kpageflags" >"$workdir/poison.txt"
+			return
+		fi
+		scan_hwpoison
+	else
+		{
+			echo "scan skipped"
+			echo "HardwareCorrupted is 0 kB, so no page has PG_hwpoison."
+			echo "Pass --scan-pfns to walk /proc/kpageflags anyway."
+		} >"$workdir/poison.txt"
+	fi
+}
+
+#** collect_kernel: dmesg and the persistent journal around MCA signatures
+#*
+collect_kernel() {
+	local -i rc=0
+	local pattern='MCE: Killing|hardware memory corruption|Machine [Cc]heck|Hardware Error|Memory failure|hwpoison|ADDR |SYND |IPID |mce:|EDAC|ghes|BERT|GHES'
+
+	note "Reading kernel log since $opt_since"
+	run_to "$workdir/dmesg.txt" 30 dmesg -T
+	if [[ "$(cat "$workdir/dmesg.txt.rc")" -ne 0 ]]; then
+		run_to "$workdir/dmesg.txt" 30 dmesg
+	fi
+	grep -Ei "$pattern" "$workdir/dmesg.txt" >"$workdir/dmesg-hits.txt" || true
+
+	if command -v journalctl >/dev/null 2>&1; then
+		note "Filtering kernel journal"
+		timeout 90 journalctl -k --since "$opt_since" --no-pager -o short-iso \
+			| grep -Ei "$pattern" >"$workdir/journal-hits.txt"
+		rc="${PIPESTATUS[0]}"
+	else
+		: >"$workdir/journal-hits.txt"
+		echo "journalctl is not installed" >"$workdir/journal-status.txt"
+		rc=127
+	fi
+
+	journal_kills="$(grep -Ec 'MCE: Killing|hardware memory corruption' "$workdir/journal-hits.txt" || true)"
+	dmesg_kills="$(grep -Ec 'MCE: Killing|hardware memory corruption' "$workdir/dmesg-hits.txt" || true)"
+	journal_addr="$(grep -Ec 'ADDR[[:space:]]+[0-9a-fA-F]|SYND[[:space:]]+[0-9a-fA-F]' "$workdir/journal-hits.txt" || true)"
+	dmesg_addr="$(grep -Ec 'ADDR[[:space:]]+[0-9a-fA-F]|SYND[[:space:]]+[0-9a-fA-F]' "$workdir/dmesg-hits.txt" || true)"
+
+	{
+		echo "journalctl_rc: $rc"
+		if [[ -f "$workdir/journal-status.txt" ]]; then
+			cat "$workdir/journal-status.txt"
+		fi
+		echo "journal_hit_lines: $(wc -l <"$workdir/journal-hits.txt" | tr -d ' ')"
+		echo "journal_kill_lines: $journal_kills"
+		echo "journal_addr_or_synd_lines: $journal_addr"
+		echo "dmesg_hit_lines: $(wc -l <"$workdir/dmesg-hits.txt" | tr -d ' ')"
+		echo "dmesg_kill_lines: $dmesg_kills"
+		echo "dmesg_addr_or_synd_lines: $dmesg_addr"
+		echo
+		echo "---- journal lines (kill, ADDR, SYND, Hardware Error, Memory failure) ----"
+		grep -E 'MCE: Killing|hardware memory corruption|Hardware Error|Memory failure|ADDR |SYND |Machine [Cc]heck' \
+			"$workdir/journal-hits.txt" | head -n 160 || true
+		echo
+		echo "---- dmesg lines (same filter) ----"
+		grep -E 'MCE: Killing|hardware memory corruption|Hardware Error|Memory failure|ADDR |SYND |Machine [Cc]heck' \
+			"$workdir/dmesg-hits.txt" | head -n 160 || true
+	} >"$workdir/kernel.txt"
+}
+
+#** collect_cpu: family and model, which decide whether amd64_edac can bind
+#*
+collect_cpu() {
+	awk '
+		/^processor[[:space:]]*:/ { if (seen++) exit }
+		/^vendor_id[[:space:]]*:/ ||
+		/^cpu family[[:space:]]*:/ ||
+		/^model[[:space:]]*:/ ||
+		/^model name[[:space:]]*:/ ||
+		/^stepping[[:space:]]*:/ ||
+		/^microcode[[:space:]]*:/ { print }
+	' /proc/cpuinfo >"$workdir/cpu.txt"
+	echo >>"$workdir/cpu.txt"
+	lscpu | grep -E 'Model name|Socket|Vendor ID|NUMA node\(s\)|Core\(s\) per socket|Thread\(s\) per core|^CPU\(s\):|Architecture' >>"$workdir/cpu.txt" || true
+	cpu_family="$(awk -F: '/^cpu family/{gsub(/ /,"",$2); print $2; exit}' "$workdir/cpu.txt")"
+	cpu_model="$(awk -F: '/^model[[:space:]]*:/{gsub(/ /,"",$2); print $2; exit}' "$workdir/cpu.txt")"
+	cpu_stepping="$(awk -F: '/^stepping/{gsub(/ /,"",$2); print $2; exit}' "$workdir/cpu.txt")"
+	cpu_name="$(awk -F: '/^model name/{sub(/^ */,"",$2); print $2; exit}' "$workdir/cpu.txt")"
+}
+
+#** collect_edac: DIMM counters, or the result of loading amd64_edac
+#*
+collect_edac() {
+	local -i n=0
+	local mod_rc
+
+	note "Checking EDAC"
+	n="$(edac_dimm_count)"
+	{
+		echo "lsmod:"
+		lsmod | grep -E 'edac|amd64|ghes' || echo "(none)"
+		echo
+		echo "edac sysfs:"
+		find /sys/devices/system/edac -maxdepth 2 -type d 2>/dev/null || echo "(no /sys/devices/system/edac)"
+		echo
+		echo "ACPI RAS tables:"
+		if [[ -d /sys/firmware/acpi/tables ]]; then
+			ls /sys/firmware/acpi/tables | grep -Ei 'BERT|HEST|ERST|EINJ' || echo "(no BERT/HEST/ERST/EINJ)"
+		else
+			echo "(no ACPI tables sysfs)"
+		fi
+	} >"$workdir/edac.txt"
+
+	if ((n > 0)); then
+		edac_preexisting=1
+		read_edac_counts
+	elif ((opt_load_edac)); then
+		if modinfo amd64_edac >/dev/null 2>&1; then
+			note "No EDAC DIMMs registered. Loading amd64_edac."
+			run_to "$workdir/modprobe-edac.txt" 30 modprobe amd64_edac
+			mod_rc="$(cat "$workdir/modprobe-edac.txt.rc")"
+			edac_load="modprobe amd64_edac rc=$mod_rc"
+			{
+				echo
+				echo "$edac_load"
+				cat "$workdir/modprobe-edac.txt"
+				echo
+				echo "dmesg edac lines:"
+				dmesg -T 2>/dev/null | grep -Ei 'edac|amd64_edac' | tail -n 30 || true
+			} >>"$workdir/edac.txt"
+			n="$(edac_dimm_count)"
+			if ((n > 0)); then
+				read_edac_counts
+			fi
+		else
+			edac_load="amd64_edac.ko is not installed for $(uname -r)"
+			echo >>"$workdir/edac.txt"
+			echo "$edac_load" >>"$workdir/edac.txt"
+		fi
+	else
+		edac_load="modprobe skipped (--no-load-edac)"
+		echo >>"$workdir/edac.txt"
+		echo "$edac_load" >>"$workdir/edac.txt"
+	fi
+
+	if [[ -s "$workdir/edac-dimms.txt" ]]; then
+		echo >>"$workdir/edac.txt"
+		echo "dimm counters:" >>"$workdir/edac.txt"
+		cat "$workdir/edac-dimms.txt" >>"$workdir/edac.txt"
+	fi
+}
+
+#** ras_tables: print sqlite table names, or a short error
+#*
+# Arguments
+#   $1 - database path
+#*
+ras_tables() {
+	local db="$1"
+	python3 - "$db" <<'PY'
+import sqlite3, sys
+path = sys.argv[1]
+try:
+    con = sqlite3.connect(path)
+    rows = con.execute("select name from sqlite_master where type='table' order by 1").fetchall()
+except Exception as exc:
+    print("error %s" % exc)
+    sys.exit(0)
+if not rows:
+    print("(no tables)")
+else:
+    for (name,) in rows:
+        print(name)
+PY
+}
+
+#** collect_ras: rasdaemon unit, --record, and the mc_event table
+#*
+collect_ras() {
+	local db="/var/lib/rasdaemon/ras-mc_event.db"
+	local execstart tables
+
+	note "Checking rasdaemon"
+	{
+		if ! command -v systemctl >/dev/null 2>&1 || ! systemctl cat rasdaemon >/dev/null 2>&1; then
+			echo "rasdaemon unit is not installed"
+			ras_installed=0
+		else
+			ras_installed=1
+			systemctl cat rasdaemon
+			echo
+			echo "active: $(systemctl is-active rasdaemon 2>/dev/null || true)"
+			systemctl is-active --quiet rasdaemon && ras_active=1 || ras_active=0
+		fi
+	} >"$workdir/ras.txt"
+
+	if ((ras_installed)); then
+		execstart="$(systemctl cat rasdaemon | awk -F= '/^ExecStart=/{print substr($0, index($0, "=")+1)}')"
+		echo >>"$workdir/ras.txt"
+		echo "ExecStart: $execstart" >>"$workdir/ras.txt"
+		if [[ " $execstart " == *" -r "* || " $execstart " == *" --record "* ]]; then
+			ras_records_flag=1
+		fi
+		echo "record_flag: $ras_records_flag" >>"$workdir/ras.txt"
+	fi
+
+	if [[ -f "$db" ]]; then
+		echo >>"$workdir/ras.txt"
+		echo "database: $db" >>"$workdir/ras.txt"
+		ls -l "$db" >>"$workdir/ras.txt"
+		if command -v python3 >/dev/null 2>&1; then
+			tables="$(ras_tables "$db")"
+			echo "tables:" >>"$workdir/ras.txt"
+			echo "$tables" >>"$workdir/ras.txt"
+			if [[ "$tables" == *"mc_event"* ]]; then
+				ras_has_mc_event=1
+			else
+				ras_has_mc_event=0
+			fi
+		else
+			echo "python3 unavailable, table list skipped" >>"$workdir/ras.txt"
+		fi
+	else
+		echo >>"$workdir/ras.txt"
+		echo "database: absent ($db)" >>"$workdir/ras.txt"
+		ras_has_mc_event=0
+	fi
+
+	if ((opt_repair_ras && ras_installed && ras_records_flag && ras_has_mc_event == 0)); then
+		note "Recreating rasdaemon database"
+		{
+			echo
+			echo "---- repair ----"
+			systemctl stop rasdaemon
+			if [[ -f "$db" ]]; then
+				mv "$db" "${db}.bak.$(date +%Y%m%d%H%M%S)"
+				echo "moved previous database aside"
+			fi
+			systemctl start rasdaemon
+			sleep 2
+			echo "active: $(systemctl is-active rasdaemon 2>/dev/null || true)"
+			if [[ -f "$db" ]]; then
+				ras_tables "$db"
+			else
+				echo "database was not created"
+			fi
+		} >>"$workdir/ras.txt"
+		if [[ -f "$db" ]] && ras_tables "$db" | grep -qx mc_event; then
+			ras_has_mc_event=1
+		fi
+	elif ((opt_repair_ras)); then
+		{
+			echo
+			echo "repair skipped: need an installed unit whose ExecStart includes -r/--record and a missing mc_event table"
+		} >>"$workdir/ras.txt"
+	fi
+}
+
+#** summarize_sel_list: counts from ipmitool sel list output
+#*
+# Arguments
+#   $1 - list output file
+#*
+summarize_sel_list() {
+	local file="$1"
+	awk -F'|' '
+		NF < 5 { next }
+		{
+			id=$1; date=$2; time=$3; sensor=$4; desc=$5
+			gsub(/^[ \t]+|[ \t]+$/, "", id)
+			gsub(/^[ \t]+|[ \t]+$/, "", date)
+			gsub(/^[ \t]+|[ \t]+$/, "", time)
+			gsub(/^[ \t]+|[ \t]+$/, "", sensor)
+			gsub(/^[ \t]+|[ \t]+$/, "", desc)
+			if (id !~ /^[0-9a-fA-F]+$/) next
+			n++
+			ids[id]++
+			stamps[date " " time]++
+			descs[sensor " | " desc]++
+			last=id
+		}
+		END {
+			ic=0; for (k in ids) ic++
+			tc=0; for (k in stamps) tc++
+			print "parsed " n+0
+			print "unique_ids " ic
+			print "unique_stamps " tc
+			print "last_id " last
+			for (k in descs) print "desc " descs[k] "\t" k
+			if (tc <= 8) for (k in stamps) print "stamp " stamps[k] "\t" k
+			if (ic <= 8) for (k in ids) print "id " ids[k] "\t" k
+		}
+	' "$file"
+}
+
+#** find_sel_file: default to the newest /tmp/sel-*.bin
+#*
+find_sel_file() {
+	local f newest
+	if [[ -n "$opt_sel_file" ]]; then
+		return
+	fi
+	newest=""
+	for f in /tmp/sel-*.bin; do
+		[[ -e "$f" ]] || continue
+		if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
+			newest="$f"
+		fi
+	done
+	opt_sel_file="$newest"
+}
+
+#** inspect_sel_file: unique payloads from a sel save text or writeraw file
+#*
+inspect_sel_file() {
+	local f="$opt_sel_file"
+	if [[ -z "$f" ]]; then
+		echo "no sel save file found" >"$workdir/sel-file.txt"
+		sel_file_note="no sel save file"
+		return
+	fi
+	if [[ ! -f "$f" ]]; then
+		echo "missing $f" >"$workdir/sel-file.txt"
+		sel_file_note="missing $f"
+		return
+	fi
+	note "Reading SEL file $f"
+	python3 - "$f" >"$workdir/sel-file.txt" <<'PY'
+import collections, sys
+path = sys.argv[1]
+data = open(path, "rb").read()
+if not data:
+    print("empty")
+    sys.exit(0)
+textish = b"\0" not in data[:4096] and (data[:4] == b"0x" or b" # " in data[:200])
+if textish:
+    lines = [ln.strip() for ln in data.decode("utf-8", "replace").splitlines() if ln.strip()]
+    counts = collections.Counter(lines)
+    print("format text")
+    print("records %d" % len(lines))
+    print("unique %d" % len(counts))
+    for line, n in counts.most_common(12):
+        print("payload %d\t%s" % (n, line))
+    sys.exit(0)
+if len(data) % 16 != 0:
+    print("format unknown")
+    print("bytes %d" % len(data))
+    sys.exit(0)
+import struct
+counts = collections.Counter()
+n = len(data) // 16
+for i in range(n):
+    rec = data[i*16:(i+1)*16]
+    rid, rtype, ts, gen, evm, st, sn, et, e0, e1, e2 = struct.unpack_from("<HBIHBBBBBBB", rec)
+    counts[(rtype, st, sn, et, e0, e1, e2, gen)] += 1
+print("format binary")
+print("records %d" % n)
+print("unique %d" % len(counts))
+for key, c in counts.most_common(12):
+    rtype, st, sn, et, e0, e1, e2, gen = key
+    print("payload %d\ttype=%02x sensor=%02x/%02x ev=%02x data=%02x%02x%02x gen=%04x" % (
+        c, rtype, st, sn, et, e0, e1, e2, gen))
+PY
+	sel_file_records="$(awk '/^records /{print $2; exit}' "$workdir/sel-file.txt")"
+	sel_file_unique="$(awk '/^unique /{print $2; exit}' "$workdir/sel-file.txt")"
+	[[ "$sel_file_records" =~ ^[0-9]+$ ]] || sel_file_records=0
+	[[ "$sel_file_unique" =~ ^[0-9]+$ ]] || sel_file_unique=0
+	sel_file_note="$f"
+}
+
+#** sel_info_entries: print the Entries count, or -1
+#*
+# Arguments
+#   $1 - sel info output
+#*
+sel_info_entries() {
+	awk -F: '/^Entries[[:space:]]*:/{gsub(/ /,"",$2); print $2; found=1} END{if (!found) print -1}' "$1"
+}
+
+#** collect_sel: info, a short walk, one direct get, and the save file
+#*
+collect_sel() {
+	local summary get_rc
+	find_sel_file
+	if ! command -v ipmitool >/dev/null 2>&1; then
+		ipmi_present=0
+		inspect_sel_file
+		{
+			echo "ipmitool is not installed"
+			echo
+			echo "==== sel file ($sel_file_note) ===="
+			cat "$workdir/sel-file.txt"
+		} >"$workdir/sel.txt"
+		return
+	fi
+	ipmi_present=1
+	note "Reading SEL info and the oldest $opt_list_count records"
+	run_to "$workdir/sel-info-before.txt" 20 ipmitool sel info
+	sel_before="$(sel_info_entries "$workdir/sel-info-before.txt")"
+	sel_overflow="$(awk -F: '/^Overflow[[:space:]]*:/{gsub(/^[ \t]+/,"",$2); print $2; exit}' "$workdir/sel-info-before.txt")"
+
+	run_to "$workdir/sel-list.txt" 90 ipmitool sel list "$opt_list_count"
+	run_to "$workdir/sel-verbose.txt" 60 ipmitool -v sel list "$opt_verbose_count"
+	summary="$(summarize_sel_list "$workdir/sel-list.txt")"
+	printf '%s\n' "$summary" >"$workdir/sel-summary.txt"
+	sel_parsed="$(awk '/^parsed /{print $2; exit}' "$workdir/sel-summary.txt")"
+	sel_unique_ids="$(awk '/^unique_ids /{print $2; exit}' "$workdir/sel-summary.txt")"
+	sel_unique_stamps="$(awk '/^unique_stamps /{print $2; exit}' "$workdir/sel-summary.txt")"
+	sel_last_id="$(awk '/^last_id /{print $2; exit}' "$workdir/sel-summary.txt")"
+	[[ "$sel_parsed" =~ ^[0-9]+$ ]] || sel_parsed=0
+	[[ "$sel_unique_ids" =~ ^[0-9]+$ ]] || sel_unique_ids=0
+	[[ "$sel_unique_stamps" =~ ^[0-9]+$ ]] || sel_unique_stamps=0
+
+	if [[ -n "$sel_last_id" ]]; then
+		note "Fetching SEL record $sel_last_id directly"
+		run_to "$workdir/sel-get.txt" 20 ipmitool sel get "0x$sel_last_id"
+		get_rc="$(cat "$workdir/sel-get.txt.rc")"
+		if ((get_rc == 0)) && ! grep -qi 'not found' "$workdir/sel-get.txt"; then
+			sel_get_ok=1
+		else
+			sel_get_ok=0
+		fi
+	fi
+
+	run_to "$workdir/sel-info-after.txt" 20 ipmitool sel info
+	sel_after="$(sel_info_entries "$workdir/sel-info-after.txt")"
+
+	run_to "$workdir/sel-time.txt" 20 ipmitool sel time get
+	date '+%Y-%m-%d %H:%M:%S %Z' >"$workdir/host-time.txt"
+	sel_clock_delta="$(python3 - "$workdir/sel-time.txt" <<'PY'
+import sys
+from datetime import datetime
+raw = open(sys.argv[1], encoding="utf-8", errors="replace").read().strip().splitlines()
+line = raw[-1].strip() if raw else ""
+for fmt in ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M:%S %Z"):
+    try:
+        sel = datetime.strptime(line, fmt)
+        break
+    except ValueError:
+        sel = None
+if sel is None:
+    print(-1)
+else:
+    delta = abs(int(datetime.now().timestamp() - sel.timestamp()))
+    print(delta)
+PY
+)"
+	[[ "$sel_clock_delta" =~ ^[0-9]+$ ]] || sel_clock_delta=-1
+
+	inspect_sel_file
+
+	sel_payload="$(awk -F: '/Event Data/{gsub(/^[ \t]+/,"",$2); print $2}' "$workdir/sel-verbose.txt" | sort | uniq -c | tr -s ' ')"
+	sel_desc_summary="$(grep '^desc ' "$workdir/sel-summary.txt" || true)"
+
+	{
+		echo "==== sel info before ===="
+		cat "$workdir/sel-info-before.txt"
+		echo
+		echo "==== sample summary ===="
+		cat "$workdir/sel-summary.txt"
+		echo
+		echo "==== sel get ${sel_last_id:-n/a} ===="
+		if [[ -f "$workdir/sel-get.txt" ]]; then
+			cat "$workdir/sel-get.txt"
+		else
+			echo "(not attempted)"
+		fi
+		echo
+		echo "==== sel info after ===="
+		cat "$workdir/sel-info-after.txt"
+		echo
+		echo "==== sel time ===="
+		cat "$workdir/sel-time.txt"
+		echo "host time: $(cat "$workdir/host-time.txt")"
+		echo "abs_delta_seconds: $sel_clock_delta"
+		echo
+		echo "==== verbose sample ===="
+		cat "$workdir/sel-verbose.txt"
+		echo
+		echo "==== sel file ($sel_file_note) ===="
+		cat "$workdir/sel-file.txt"
+	} >"$workdir/sel.txt"
+}
+
+#** collect_ipmi_cmds: completion text for the commands the functional test flags
+#*
+collect_ipmi_cmds() {
+	if ((ipmi_present == 0)); then
+		echo "ipmitool is not installed" >"$workdir/ipmi.txt"
+		return
+	fi
+	note "Probing IPMI self-test, GUID, and chassis identify"
+	run_to "$workdir/mc-info.txt" 20 ipmitool mc info
+	run_to "$workdir/mc-selftest.txt" 20 ipmitool mc selftest
+	run_to "$workdir/raw-devid.txt" 20 ipmitool raw 0x06 0x01
+	run_to "$workdir/raw-selftest.txt" 20 ipmitool raw 0x06 0x04
+	run_to "$workdir/raw-sysguid.txt" 20 ipmitool raw 0x06 0x37
+	run_to "$workdir/raw-devguid.txt" 20 ipmitool raw 0x06 0x08
+	run_to "$workdir/identify-on.txt" 25 ipmitool chassis identify 5
+	run_to "$workdir/identify-off.txt" 20 ipmitool chassis identify 0
+
+	ipmi_selftest="$(tr '\n' ' ' <"$workdir/mc-selftest.txt")"
+	ipmi_guid_sys="$(tr '\n' ' ' <"$workdir/raw-sysguid.txt")"
+	ipmi_guid_dev="$(tr '\n' ' ' <"$workdir/raw-devguid.txt")"
+	ipmi_identify="$(tr '\n' ' ' <"$workdir/identify-on.txt")"
+	selftest_rc="$(cat "$workdir/mc-selftest.txt.rc")"
+	sysguid_rc="$(cat "$workdir/raw-sysguid.txt.rc")"
+	devid_rc="$(cat "$workdir/raw-devid.txt.rc")"
+	identify_rc="$(cat "$workdir/identify-on.txt.rc")"
+	[[ -n "$ipmi_selftest" ]] || ipmi_selftest="(no output)"
+	[[ -n "$ipmi_guid_sys" ]] || ipmi_guid_sys="(no output)"
+	[[ -n "$ipmi_identify" ]] || ipmi_identify="(no output)"
+
+	{
+		echo "==== mc info ===="
+		grep -E '^(Device ID|Device Revision|Firmware Revision|IPMI Version|Manufacturer ID|Manufacturer Name|Product ID|Product Name)' \
+			"$workdir/mc-info.txt" || cat "$workdir/mc-info.txt"
+		echo
+		echo "==== mc selftest (rc $(cat "$workdir/mc-selftest.txt.rc")) ===="
+		cat "$workdir/mc-selftest.txt"
+		echo
+		echo "==== raw 0x06 0x01 Get Device ID (rc $(cat "$workdir/raw-devid.txt.rc")) ===="
+		cat "$workdir/raw-devid.txt"
+		echo
+		echo "==== raw 0x06 0x04 Get Self Test Results (rc $(cat "$workdir/raw-selftest.txt.rc")) ===="
+		cat "$workdir/raw-selftest.txt"
+		echo
+		echo "==== raw 0x06 0x37 Get System GUID (rc $(cat "$workdir/raw-sysguid.txt.rc")) ===="
+		cat "$workdir/raw-sysguid.txt"
+		echo
+		echo "==== raw 0x06 0x08 Get Device GUID (rc $(cat "$workdir/raw-devguid.txt.rc")) ===="
+		cat "$workdir/raw-devguid.txt"
+		echo
+		echo "==== chassis identify 5 (rc $(cat "$workdir/identify-on.txt.rc")) ===="
+		cat "$workdir/identify-on.txt"
+		echo
+		echo "==== chassis identify 0 (rc $(cat "$workdir/identify-off.txt.rc")) ===="
+		cat "$workdir/identify-off.txt"
+	} >"$workdir/ipmi.txt"
+}
+
+#** collect_dimm: populated DIMM inventory from DMI
+#*
+collect_dimm() {
+	note "Reading DMI memory inventory"
+	if ! command -v dmidecode >/dev/null 2>&1; then
+		echo "dmidecode is not installed" >"$workdir/dimm.txt"
+		return
+	fi
+	run_to "$workdir/dmidecode-memory.txt" 30 dmidecode -t memory
+	awk '
+		function flush() {
+			if (size != "" && size !~ /No Module/ && size !~ /Not Installed/ && loc != "") {
+				printf "%-22s %-24s %-12s %-6s %-10s %s\n", loc, bank, size, rank, speed, part
+				n++
+			}
+			loc=bank=size=rank=speed=part=""
+		}
+		{
+			line=$0
+			sub(/^[[:space:]]+/, "", line)
+			if (line ~ /^Handle /) { flush(); next }
+			key=line
+			sub(/:.*$/, "", key)
+			val=line
+			sub(/^[^:]*:[[:space:]]*/, "", val)
+			if (key=="Locator") loc=val
+			else if (key=="Bank Locator") bank=val
+			else if (key=="Size") size=val
+			else if (key=="Rank") rank=val
+			else if (key=="Part Number") part=val
+			else if (key=="Configured Memory Speed") speed=val
+		}
+		END {
+			flush()
+			printf "populated_dimms %d\n", n+0
+		}
+	' "$workdir/dmidecode-memory.txt" >"$workdir/dimm.txt"
+}
+
+#** node_sweep_plan: one stress-ng command per NUMA node
+#*
+node_sweep_plan() {
+	local oom="" node mb use
+	: >"$workdir/commands.txt"
+	if ! command -v numactl >/dev/null 2>&1; then
+		echo "numactl is not installed" >"$workdir/commands.txt"
+		planned_note="numactl is not installed, so no per-node command was built"
+		return
+	fi
+	if ! command -v stress-ng >/dev/null 2>&1; then
+		planned_note="stress-ng is not installed. Commands below are what to run after it is installed."
+	fi
+	if command -v stress-ng >/dev/null 2>&1 && stress-ng --help 2>&1 | grep -q -- '--oom-avoid'; then
+		oom="--oom-avoid "
+	fi
+	while read -r node mb; do
+		[[ "$mb" =~ ^[0-9]+$ ]] || continue
+		use=$((mb * opt_node_percent / 100))
+		if ((use < 1)); then
+			continue
+		fi
+		printf 'numactl -m %s stress-ng %s--vm 1 --vm-bytes %sM --madvise 2 --userfaultfd 2 --timeout %s --metrics-brief\n' \
+			"$node" "$oom" "$use" "$opt_node_seconds"
+	done < <(numactl -H | awk '$1=="node" && $3=="size:" {print $2, $4}') >"$workdir/commands.txt"
+}
+
+#** collect_numa: node map and the sweep commands
+#*
+collect_numa() {
+	if command -v numactl >/dev/null 2>&1; then
+		numactl -H >"$workdir/numa.txt" 2>&1 || true
+	else
+		echo "numactl is not installed" >"$workdir/numa.txt"
+	fi
+	node_sweep_plan
+	{
+		echo
+		echo "==== planned node sweep ===="
+		cat "$workdir/commands.txt"
+	} >>"$workdir/numa.txt"
+}
+
+#** run_reproduce: run the node sweep and stop at the first new fault
+#*
+run_reproduce() {
+	local line node before after k_before k_after rc
+	local -i poisoned=0
+	local -i killed=0
+	{
+		echo "A node sweep can panic the machine if an uncorrected error is in kernel memory."
+		echo
+	} >"$workdir/repro.txt"
+	if ! command -v numactl >/dev/null 2>&1 || ! command -v stress-ng >/dev/null 2>&1; then
+		echo "Sweep not started. numactl and stress-ng are both required." >>"$workdir/repro.txt"
+		return
+	fi
+	if ! grep -q '^numactl ' "$workdir/commands.txt"; then
+		echo "Sweep not started. No node commands were built." >>"$workdir/repro.txt"
+		return
+	fi
+	while IFS= read -r line; do
+		[[ "$line" == numactl\ * ]] || continue
+		node="$(awk '{print $3}' <<<"$line")"
+		before="$(awk '/^HardwareCorrupted:/{print $2}' /proc/meminfo)"
+		k_before="$(dmesg 2>/dev/null | grep -Ec 'MCE: Killing|hardware memory corruption' || true)"
+		note "Node $node sweep for ${opt_node_seconds}s"
+		echo "---- node $node ----" >>"$workdir/repro.txt"
+		echo "command: $line" >>"$workdir/repro.txt"
+		echo "hardware_corrupted_before_kb: ${before:-unknown}" >>"$workdir/repro.txt"
+		echo "kill_lines_before: ${k_before:-0}" >>"$workdir/repro.txt"
+		rc=0
+		timeout "$((opt_node_seconds + 45))" bash -c "$line" >>"$workdir/repro.txt" 2>&1 || rc=$?
+		after="$(awk '/^HardwareCorrupted:/{print $2}' /proc/meminfo)"
+		k_after="$(dmesg 2>/dev/null | grep -Ec 'MCE: Killing|hardware memory corruption' || true)"
+		echo "exit: $rc" >>"$workdir/repro.txt"
+		echo "hardware_corrupted_after_kb: ${after:-unknown}" >>"$workdir/repro.txt"
+		echo "kill_lines_after: ${k_after:-0}" >>"$workdir/repro.txt"
+		poisoned=0
+		killed=0
+		if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] && ((after > before)); then
+			poisoned=1
+		fi
+		if [[ "$k_before" =~ ^[0-9]+$ && "$k_after" =~ ^[0-9]+$ ]] && ((k_after > k_before)); then
+			killed=1
+			echo "new dmesg kill lines:" >>"$workdir/repro.txt"
+			dmesg -T 2>/dev/null | grep -E 'MCE: Killing|hardware memory corruption' | tail -n "$((k_after - k_before + 2))" >>"$workdir/repro.txt" || true
+		fi
+		if ((poisoned || killed)); then
+			echo "STOPPED on node $node" >>"$workdir/repro.txt"
+			add_finding "FAULT" "The NUMA-node sweep faulted on node $node. HardwareCorrupted went from ${before:-unknown} kB to ${after:-unknown} kB, and kill lines went from ${k_before:-0} to ${k_after:-0}. That node's DIMMs are the set to swap."
+			return
+		fi
+	done <"$workdir/commands.txt"
+	echo "Sweep finished with no new HardwareCorrupted count and no new MCE line." >>"$workdir/repro.txt"
+	add_finding "OK" "The NUMA-node sweep finished without a new poisoned page or MCE line. That does not repair the earlier fault; it means this pass did not touch a bad cell."
+}
+
+#** build_findings: turn the collected files into the lead paragraphs
+#*
+build_findings() {
+	local kills addr payload_empty=0
+	kills=$((journal_kills + dmesg_kills))
+	addr=$((journal_addr + dmesg_addr))
+
+	if ((kills > 0)); then
+		add_finding "FAULT" "The kernel log has ${kills} hardware memory-corruption kill line(s) (journal ${journal_kills}, dmesg ${dmesg_kills}). The address on a 'MCE: Killing' line is a user virtual address of the process that consumed the poison, not a DIMM address."
+	else
+		add_finding "GAP" "No 'MCE: Killing' line is in the current dmesg buffer or the kernel journal since ${opt_since}. If those lines were seen earlier, they have rotated out."
+	fi
+
+	if ((hc_kb > 0)); then
+		local poison_extra=""
+		if ((poison_truncated > 0)); then
+			poison_extra=", plus ${poison_truncated} more not listed"
+		fi
+		add_finding "FAULT" "HardwareCorrupted is ${hc_kb} kB, so poisoned pages are still offlined in this boot. The page-flag scan found ${poison_pfns} flagged PFN(s)${poison_extra}."
+	elif ((hc_kb == 0)); then
+		if ((boot_after_incident == 1)); then
+			add_finding "INFO" "HardwareCorrupted is 0 kB. This boot started at ${boot_since}, which is after ${opt_incident}, so a zero count does not erase that incident. Poison from before the reboot is gone."
+		else
+			add_finding "OK" "HardwareCorrupted is 0 kB. This boot is not holding poisoned pages."
+		fi
+	else
+		add_finding "GAP" "HardwareCorrupted is not present in /proc/meminfo, and the page-flag scan found ${poison_pfns} PFN(s)."
+	fi
+
+	if ((addr > 0)); then
+		add_finding "INFO" "The kernel log contains MCA ADDR or SYND fields. Those are the physical-side values. A DIMM label still requires EDAC or the AMD address translator for this CPU."
+	elif ((kills > 0)); then
+		add_finding "GAP" "The kill lines are present and no MCA ADDR or SYND was kept with them. The physical address was not retained."
+	fi
+
+	if ((edac_preexisting && edac_ue > 0)); then
+		add_finding "FAULT" "EDAC was already loaded and reports uncorrected errors on: ${edac_ue_where}"
+	elif ((edac_preexisting)); then
+		add_finding "INFO" "EDAC is loaded from before this run. Corrected total ${edac_ce}, uncorrected total ${edac_ue}."
+	elif ((edac_ue > 0 || edac_ce > 0)); then
+		add_finding "INFO" "amd64_edac bound when this script loaded it (${edac_load}). Counters started at load time: corrected ${edac_ce}, uncorrected ${edac_ue}. They do not include the earlier fault."
+	elif [[ -n "$edac_load" ]]; then
+		add_finding "GAP" "No EDAC DIMM is registered. ${edac_load}. CPU is family ${cpu_family:-unknown} model ${cpu_model:-unknown} stepping ${cpu_stepping:-unknown} (${cpu_name:-unknown}). A module that does not know this family cannot name a slot."
+	else
+		add_finding "GAP" "No EDAC DIMM is registered, so there is no per-slot corrected or uncorrected count."
+	fi
+
+	if ((ras_installed == 0)); then
+		add_finding "GAP" "rasdaemon is not installed, so machine checks are not being stored in a database."
+	elif ((ras_has_mc_event == 1)); then
+		add_finding "OK" "rasdaemon has an mc_event table. Errors recorded after the daemon was started with --record can be listed with ras-mc-ctl --errors."
+	elif ((ras_records_flag == 0)); then
+		add_finding "GAP" "rasdaemon's ExecStart does not include -r/--record, so it will not create mc_event. Earlier machine checks were not saved there."
+	else
+		add_finding "GAP" "rasdaemon is configured to record, but mc_event is missing from its database. Earlier machine checks were not saved. Re-run with --repair-rasdaemon to recreate the database."
+	fi
+
+	if ((ipmi_present == 0)); then
+		add_finding "GAP" "ipmitool is not installed, so the SEL was not read."
+	else
+		if ((sel_before < 0)); then
+			add_finding "GAP" "SEL info did not return an entry count. The BMC or the IPMI driver did not answer Get SEL Info."
+		elif ((sel_after > sel_before)); then
+			add_finding "INFO" "SEL entries went from ${sel_before} to ${sel_after} while this script read the log. Something is appending records during SEL reads. Do not walk the full log again until that stops."
+		elif ((sel_after == sel_before)); then
+			add_finding "OK" "SEL holds ${sel_before} entries, overflow is ${sel_overflow:-unknown}, and the count did not change while the sample was read."
+		elif ((sel_after < 0)); then
+			add_finding "GAP" "SEL info returned ${sel_before} entries before the sample and did not return a count after it."
+		else
+			add_finding "INFO" "SEL count went from ${sel_before} before the sample to ${sel_after} after it."
+		fi
+		if ((sel_before > 0 && sel_parsed == 0)); then
+			add_finding "GAP" "SEL info reports ${sel_before} entries, but the sample walk did not parse a record. The list output is in the SEL section."
+		fi
+		if ((sel_parsed > 0 && sel_unique_ids == 1)); then
+			add_finding "INFO" "All ${sel_parsed} sampled SEL lines use record id ${sel_last_id}. That is one id stamped onto many rows, not ${sel_parsed} distinct record keys."
+		fi
+		if ((sel_get_ok == 0)); then
+			add_finding "INFO" "ipmitool sel get 0x${sel_last_id} was rejected. The id printed by sel list is not a key this BMC will fetch. Use the walk from record 0, which is what the sample already did."
+		elif ((sel_get_ok == 1)); then
+			add_finding "OK" "ipmitool sel get 0x${sel_last_id} succeeded. Direct SEL reads work for that id."
+		fi
+		if ((sel_unique_stamps == 1 && sel_parsed > 1)); then
+			add_finding "INFO" "The sampled SEL rows share a single timestamp. They were logged in the same second, or the BMC timestamp is stuck. Compare 'sel time' with the host clock in the details."
+		fi
+		if echo "$sel_payload" | grep -q '02ffff' && [[ "$(echo "$sel_payload" | grep -c .)" -le 1 ]]; then
+			payload_empty=1
+		fi
+		if [[ -f "$workdir/sel-file.txt" ]]; then
+			local dominant=""
+			dominant="$(awk -F'\t' '/^payload /{print $2; exit}' "$workdir/sel-file.txt")"
+			if [[ "$dominant" == *"0x02 0xff 0xff"* || "$dominant" == *"data=02ffff"* ]]; then
+				payload_empty=1
+			fi
+		fi
+		if ((payload_empty)); then
+			add_finding "GAP" "SEL event data is the empty System Event payload (offset 0x02, bytes ff ff). Those rows say 'Undetermined system hardware failure' and do not name a FRU. The file is ${sel_file_note:-not present} (${sel_file_records} records, ${sel_file_unique} unique)."
+		elif [[ -n "$sel_payload" ]]; then
+			add_finding "INFO" "SEL event-data bytes from the verbose sample: ${sel_payload}"
+		fi
+		if ((sel_clock_delta > 120)); then
+			add_finding "INFO" "SEL clock and host clock differ by ${sel_clock_delta} seconds. SEL timestamps are not host time."
+		fi
+	fi
+
+	if [[ -n "$ipmi_selftest" ]]; then
+		if echo "$ipmi_selftest" | grep -qi 'passed'; then
+			add_finding "OK" "BMC self-test passed. The IPMI device responds."
+		elif echo "$ipmi_selftest" | grep -qi 'TIMED OUT\|Unable to send\|No data available'; then
+			add_finding "GAP" "BMC self-test did not complete: ${ipmi_selftest}"
+		else
+			add_finding "INFO" "BMC self-test: ${ipmi_selftest}"
+		fi
+	fi
+	if [[ -n "$ipmi_guid_sys" ]]; then
+		if echo "$ipmi_guid_sys" | grep -qi 'Invalid command\|rsp=0xc1\|rsp=0xC1'; then
+			add_finding "OK" "Get System GUID (raw 0x06 0x37) is not implemented (invalid command). Get Device ID in the same run shows the message path works. The functional-test failure is this unsupported command."
+		elif echo "$ipmi_guid_sys" | grep -qi 'TIMED OUT\|Unable to send'; then
+			add_finding "GAP" "Get System GUID failed in transport: ${ipmi_guid_sys}"
+		elif [[ "$(cat "$workdir/raw-sysguid.txt.rc" 2>/dev/null || echo 1)" -eq 0 ]]; then
+			add_finding "OK" "Get System GUID succeeded."
+		else
+			add_finding "INFO" "Get System GUID: ${ipmi_guid_sys}"
+		fi
+	fi
+	if [[ -n "$ipmi_identify" ]]; then
+		if echo "$ipmi_identify" | grep -qi 'Invalid command\|rsp=0xc1\|Invalid data\|rsp=0xcc\|rsp=0xCC'; then
+			add_finding "OK" "Chassis identify 5 was rejected as an unsupported or invalid request: ${ipmi_identify} The LED command is not evidence of the memory fault."
+		elif echo "$ipmi_identify" | grep -qi 'TIMED OUT\|Unable to send'; then
+			add_finding "GAP" "Chassis identify did not complete: ${ipmi_identify}"
+		elif [[ "$(cat "$workdir/identify-on.txt.rc" 2>/dev/null || echo 1)" -eq 0 ]]; then
+			add_finding "OK" "Chassis identify 5 succeeded, and identify 0 was sent afterward."
+		else
+			add_finding "INFO" "Chassis identify 5: ${ipmi_identify}"
+		fi
+	fi
+
+	if ((opt_reproduce == 0)); then
+		if ((edac_preexisting && edac_ue > 0)); then
+			planned_note="EDAC already names the uncorrected DIMM. A node sweep is only needed if you want a second confirmation. Commands are in the NUMA section."
+		else
+			planned_note="No slot was named. Run the same script with --reproduce to sweep one NUMA node at a time and stop at the first new fault. Commands are in the NUMA section. ${planned_note}"
+		fi
+	fi
+}
+
+#** render: findings first, then the evidence that produced them
+#*
+render() {
+	local line level text n=0 report
+	report="$workdir/report.txt"
+	{
+		echo "hw-fault-report $VERSION"
+		echo "command: $SCRIPT_NAME $*"
+		echo
+		if [[ -f "$workdir/host.txt" ]]; then
+			cat "$workdir/host.txt"
+		fi
+		echo
+		echo "CONCLUSION"
+		echo "----------------------------------------------------------------------"
+		if ((report_exit == 1)); then
+			echo "Uncorrected memory-error evidence is on this machine."
+		else
+			echo "This run did not find uncorrected memory-error evidence still on the machine."
+		fi
+		if ((edac_preexisting && edac_ue > 0)); then
+			echo "EDAC names the DIMM. Replace that module, then confirm the uncorrected count stays at zero."
+		elif ((journal_kills + dmesg_kills > 0 || hc_kb > 0)); then
+			if ((journal_addr + dmesg_addr > 0)); then
+				echo "An MCA ADDR or SYND was logged. It is in the kernel-log section."
+				echo "EDAC did not turn that address into a DIMM label."
+			else
+				echo "The failing slot is not in the retained SEL, EDAC, or MCA address fields."
+				echo "Isolate it by NUMA node, then by swapping one DIMM out of the node that faults."
+			fi
+		else
+			echo "If the fault was real and the logs have rotated, enable rasdaemon --record before the next run so the next kill keeps an address."
+		fi
+		echo
+		echo "FINDINGS"
+		echo "----------------------------------------------------------------------"
+		for line in "${findings[@]}"; do
+			n=$((n + 1))
+			level="${line%%$'\t'*}"
+			text="${line#*$'\t'}"
+			printf '%2d. %-5s %s\n' "$n" "$level" "$text"
+		done
+		echo
+		echo "NEXT STEP"
+		echo "----------------------------------------------------------------------"
+		if ((opt_reproduce)); then
+			echo "A node sweep was requested. Its output is in the REPRODUCE section."
+		else
+			echo "${planned_note:-See the NUMA section for per-node commands.}"
+			echo
+			echo "    $SCRIPT_NAME --reproduce"
+		fi
+		echo
+		echo "The address on 'MCE: Killing ... fault at <hex>' is a userspace virtual address."
+		echo "SEL text 'Undetermined system hardware failure' with event data 02ffff has no slot in it."
+		echo
+		echo "DETAILS: HOST"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/host.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: POISONED PAGES"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/poison.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: KERNEL LOG"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/kernel.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: CPU"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/cpu.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: EDAC"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/edac.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: RASDAEMON"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/ras.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: SEL"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/sel.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: IPMI COMMANDS"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/ipmi.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: DIMMS"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/dimm.txt" 2>/dev/null || true
+		echo
+		echo "DETAILS: NUMA"
+		echo "----------------------------------------------------------------------"
+		cat "$workdir/numa.txt" 2>/dev/null || true
+		if [[ -f "$workdir/repro.txt" ]]; then
+			echo
+			echo "DETAILS: REPRODUCE"
+			echo "----------------------------------------------------------------------"
+			cat "$workdir/repro.txt"
+		fi
+	} >"$report"
+
+	cat "$report"
+	if [[ -n "$opt_outfile" ]]; then
+		cp "$report" "$opt_outfile"
+		note "Wrote $opt_outfile"
+	fi
+}
+
+#** self_test: check the parsers without root or a live SEL
+#*
+self_test() {
+	local page flags_file sel_text sel_bin summary dominant
+	local -i failures=0
+
+	workdir="$(mktemp -d /tmp/hw-fault-report.XXXXXX)"
+	page="$(getconf PAGE_SIZE)"
+	flags_file="$workdir/kpageflags"
+	python3 - "$flags_file" <<'PY'
+import struct, sys
+flags = [0] * 8
+flags[3] = 1 << 19
+flags[4] = 1 << 19
+flags[7] = 1 << 19
+open(sys.argv[1], "wb").write(struct.pack("<8Q", *flags))
+PY
+	export HW_FAULT_KPAGEFLAGS="$flags_file"
+	scan_hwpoison
+	unset HW_FAULT_KPAGEFLAGS
+	if [[ "$poison_pfns" -ne 3 ]]; then
+		echo "FAIL poison count $poison_pfns" >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -q '^range 0x3 0x4 ' "$workdir/poison.txt"; then
+		echo "FAIL missing contiguous range" >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -q '^range 0x7 0x7 ' "$workdir/poison.txt"; then
+		echo "FAIL missing single pfn" >&2
+		failures=$((failures + 1))
+	fi
+
+	sel_text="$workdir/sel-save.txt"
+	{
+		echo "0x04 0x12 0x01 0x6f 0x02 0xff 0xff # System Event #0x01 Undetermined system hardware failure"
+		echo "0x04 0x12 0x01 0x6f 0x02 0xff 0xff # System Event #0x01 Undetermined system hardware failure"
+		echo "0x04 0x0c 0x01 0x6f 0xa0 0x00 0x01 # Memory #0x01 Correctable ECC"
+	} >"$sel_text"
+	opt_sel_file="$sel_text"
+	inspect_sel_file
+	if [[ "$sel_file_records" -ne 3 || "$sel_file_unique" -ne 2 ]]; then
+		echo "FAIL text sel records=$sel_file_records unique=$sel_file_unique" >&2
+		failures=$((failures + 1))
+	fi
+	dominant="$(awk -F'\t' '/^payload /{print $2; exit}' "$workdir/sel-file.txt")"
+	if [[ "$dominant" != *"0x02 0xff 0xff"* ]]; then
+		echo "FAIL dominant payload: $dominant" >&2
+		failures=$((failures + 1))
+	fi
+
+	sel_bin="$workdir/sel.bin"
+	python3 - "$sel_bin" <<'PY'
+import struct, sys
+rec = struct.pack("<HBIHBBBBBBB", 0x7bea, 2, 1700000000, 0x0020, 4, 0x12, 0x01, 0x6f, 0x02, 0xff, 0xff)
+open(sys.argv[1], "wb").write(rec * 2)
+PY
+	opt_sel_file="$sel_bin"
+	inspect_sel_file
+	if [[ "$sel_file_records" -ne 2 || "$sel_file_unique" -ne 1 ]]; then
+		echo "FAIL binary sel records=$sel_file_records unique=$sel_file_unique" >&2
+		failures=$((failures + 1))
+	fi
+	if ! grep -q 'data=02ffff' "$workdir/sel-file.txt"; then
+		echo "FAIL binary event data" >&2
+		cat "$workdir/sel-file.txt" >&2
+		failures=$((failures + 1))
+	fi
+
+	cat >"$workdir/sel-list.txt" <<'EOF'
+7bea | 11/02/2026 | 18:39:06 | System Event #0x01 | Undetermined system hardware failure | Asserted
+7bea | 11/02/2026 | 18:39:06 | System Event #0x01 | Undetermined system hardware failure | Asserted
+294e | 10/31/2026 | 01:29:35 AM EDT | System Event #0x01 | Undetermined system hardware failure | Asserted
+noise that is not a record
+EOF
+	summary="$(summarize_sel_list "$workdir/sel-list.txt")"
+	if [[ "$summary" != *"parsed 3"* || "$summary" != *"unique_ids 2"* || "$summary" != *"unique_stamps 2"* ]]; then
+		echo "FAIL sel list summary:" >&2
+		printf '%s\n' "$summary" >&2
+		failures=$((failures + 1))
+	fi
+
+	if ((failures == 0)); then
+		echo "self-test passed"
+		return 0
+	fi
+	echo "self-test failed: $failures" >&2
+	return 1
+}
+
+#** main: collect, interpret, print
+#*
+main() {
+	trap control_c SIGINT
+	trap cleanup EXIT
+
+	parse_args "$@"
+	if ((opt_self_test)); then
+		self_test
+		exit $?
+	fi
+	require_root
+
+	if [[ -z "$opt_since" ]]; then
+		opt_since="$(date -d "$opt_since_default" '+%Y-%m-%d %H:%M:%S')"
+	fi
+
+	workdir="$(mktemp -d /tmp/hw-fault-report.XXXXXX)"
+	note "Work directory $workdir"
+
+	collect_host
+	collect_poison
+	collect_kernel
+	collect_cpu
+	collect_edac
+	collect_ras
+	collect_sel
+	collect_ipmi_cmds
+	collect_dimm
+	collect_numa
+	if ((opt_reproduce)); then
+		run_reproduce
+	fi
+	build_findings
+	render "$@"
+	exit "$report_exit"
+}
+
+main "$@"
