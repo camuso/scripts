@@ -1,0 +1,167 @@
+#!/bin/bash
+#
+# bw-receive-tokens
+#
+# Receive the provisioning Send, then log this host into Bitwarden so
+# later commands can unlock the vault. The Send URL and the token text
+# are not printed.
+
+set +x
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")
+
+Receive ~/.config/bitwarden/pending-send and store the tokens in this
+host's Bitwarden vault. bw prompts for the Send password and, when this
+host is not logged in, for the Bitwarden login.
+
+The Send URL is removed after a successful receive. Tokens are not
+written to plaintext files or logs.
+
+EOF
+)"
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	bw_lock
+	exit 1
+}
+
+#** load_bwsecrets: source the Bitwarden helper
+#*
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
+#** payload_field: print one JSON field from a token payload
+#*
+# Arguments
+#   $1 - payload file
+#   $2 - field name
+#*
+payload_field() {
+	python3 -c '
+import json, sys
+from pathlib import Path
+data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+value = data.get(sys.argv[2]) or ""
+if value:
+    sys.stdout.write(value)
+' "$1" "$2"
+}
+
+#** store_received: upsert vault items from the received payload
+#*
+store_received() {
+	local payload="$1"
+	local github gitlab cee
+
+	github="$(payload_field "$payload" github)"
+	gitlab="$(payload_field "$payload" gitlab)"
+	cee="$(payload_field "$payload" gitlab_cee)"
+
+	if [[ -z "$github" ]]; then
+		echo "The Send did not contain a GitHub token." >&2
+		unset github gitlab cee
+		return 1
+	fi
+
+	bw_upsert_login \
+		"$BW_ITEM_GITHUB" \
+		"camuso" \
+		"$github" \
+		"GitHub personal access token used by ~/bin scripts." \
+		"https://github.com" || {
+		unset github gitlab cee
+		return 1
+	}
+	if [[ -n "$gitlab" ]]; then
+		bw_upsert_login \
+			"$BW_ITEM_GITLAB" \
+			"tcamuso" \
+			"$gitlab" \
+			"gitlab.com personal access token used by ~/bin scripts." \
+			"https://gitlab.com" || {
+			unset github gitlab cee
+			return 1
+		}
+	fi
+	if [[ -n "$cee" ]]; then
+		bw_upsert_login \
+			"$BW_ITEM_GITLAB_CEE" \
+			"tcamuso" \
+			"$cee" \
+			"gitlab.cee.redhat.com personal access token used by ~/bin scripts." \
+			"https://gitlab.cee.redhat.com" || {
+			unset github gitlab cee
+			return 1
+		}
+	fi
+	unset github gitlab cee
+}
+
+#** main
+#*
+main() {
+	local pending payload url
+
+	trap control_c SIGINT
+	case "${1:-}" in
+		-h|--help|help)
+			usage
+			exit 0
+			;;
+	esac
+
+	load_bwsecrets
+	trap 'bw_lock' EXIT
+	bw_require || exit 1
+	pending="$(bw_pending_send_path)"
+	[[ -f "$pending" ]] || {
+		echo "No Send is waiting at $pending." >&2
+		exit 1
+	}
+
+	url="$(<"$pending")"
+	payload="$(secret_tmp)" || exit 1
+	if ! bw_send_receive "$url" > "$payload"; then
+		secret_shred "$payload"
+		unset url
+		echo "Could not receive the Bitwarden Send." >&2
+		exit 1
+	fi
+	unset url
+	secret_shred "$pending"
+
+	# Login and unlock before writing items. bw prompts on this terminal.
+	bw_unlock || {
+		secret_shred "$payload"
+		exit 1
+	}
+	store_received "$payload" || {
+		secret_shred "$payload"
+		exit 1
+	}
+	secret_shred "$payload"
+	bw_lock
+	echo "Bitwarden is installed. This host can unlock it to use the GitHub and GitLab tokens."
+}
+
+main "$@"

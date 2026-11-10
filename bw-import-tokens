@@ -1,0 +1,292 @@
+#!/bin/bash
+#
+# bw-import-tokens
+#
+# Copy local GitHub and GitLab tokens into Bitwarden, check the vault
+# copy, then shred the plaintext files. A later host gets those tokens
+# through a Bitwarden Send, not through these files.
+
+set +x
+
+declare github_file="$HOME/.config/github/mygithubtoken"
+declare lab_file="$HOME/.config/lab/lab.toml"
+declare cee_file="$HOME/.config/gitlabcee/mygitlabceetoken"
+declare -a github_copies=(
+	"$HOME/.config/github/mygithubtoken"
+	"$HOME/.config/github/mygithubtoken.old"
+	"$HOME/.config/github/mygithubtoken.old.1"
+)
+declare -a cee_copies=(
+	"$HOME/.config/gitlabcee/mygitlabceetoken"
+	"$HOME/380-backup/.config/gitlabcee/mygitlabceetoken"
+)
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0")
+
+Store the local GitHub and GitLab tokens in Bitwarden and remove the
+plaintext copies after the vault items match those files.
+
+Bitwarden items:
+  github-token      from ~/.config/github/mygithubtoken
+  gitlab-token      from the token line in ~/.config/lab/lab.toml
+  gitlab-cee-token  from ~/.config/gitlabcee/mygitlabceetoken
+                    GITLAB_CEE_TOKEN is used when that file is absent
+
+The Bitwarden master password is prompted by bw and is not written to
+a file or a log. Plaintext files are shredded only after a match.
+
+Log in first when this host has no Bitwarden session. Accounts that use
+single sign-on are asked before the login prompt.
+
+EOF
+)"
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	bw_lock
+	exit 1
+}
+
+#** load_bwsecrets: source the Bitwarden helper
+#*
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
+#** tighten_private_files: stop other accounts from reading token files
+#*
+tighten_private_files() {
+	local file
+
+	if [[ -d "$HOME/.config/gitlabcee" ]]; then
+		chmod 700 "$HOME/.config/gitlabcee"
+	fi
+	for file in "${github_copies[@]}" "${cee_copies[@]}" "$lab_file"; do
+		[[ -f "$file" ]] || continue
+		chmod 600 "$file"
+	done
+	if [[ -e "$HOME/.config/github/2fa-recovery" ]]; then
+		chmod -R go-rwx "$HOME/.config/github/2fa-recovery" 2>/dev/null || true
+		echo "Move ~/.config/github/2fa-recovery into Bitwarden yourself, then delete it." >&2
+		echo "This script does not read or send that file." >&2
+	fi
+}
+
+#** import_github: store the GitHub token and shred matching files
+#*
+import_github() {
+	local file copy
+
+	[[ -f "$github_file" ]] || {
+		echo "No $github_file. Skipping the GitHub import." >&2
+		return 0
+	}
+	echo "Storing the GitHub token in Bitwarden item $BW_ITEM_GITHUB."
+	bw_upsert_login \
+		"$BW_ITEM_GITHUB" \
+		"camuso" \
+		"$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).read_text(encoding="utf-8").strip(), end="")' "$github_file")" \
+		"GitHub personal access token used by ~/bin scripts." \
+		"https://github.com" || return 1
+	bw_password_matches "$BW_ITEM_GITHUB" "$github_file" || {
+		echo "The vault item did not match the GitHub token file. The file was kept." >&2
+		return 1
+	}
+	local -a matched=()
+	for copy in "${github_copies[@]}"; do
+		[[ -f "$copy" ]] || continue
+		if bw_password_matches "$BW_ITEM_GITHUB" "$copy"; then
+			matched+=("$copy")
+		else
+			echo "Left $copy in place because its contents differ from the imported token." >&2
+			chmod 600 "$copy"
+		fi
+	done
+	if ((${#matched[@]} > 0)); then
+		secret_shred "${matched[@]}"
+		printf 'Removed plaintext file %s\n' "${matched[@]}"
+	fi
+}
+
+#** import_gitlab: store the lab.toml token and remove that line
+#*
+import_gitlab() {
+	local token_file
+
+	[[ -f "$lab_file" ]] || {
+		echo "No $lab_file. Skipping the GitLab import." >&2
+		return 0
+	}
+	if ! python3 -c '
+import re, sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+raise SystemExit(0 if re.search(r"(?m)^\s*token\s*=", text) else 1)
+' "$lab_file"; then
+		echo "$lab_file has no token line."
+		chmod 600 "$lab_file"
+		return 0
+	fi
+
+	token_file="$(secret_tmp)" || return 1
+	python3 -c '
+import re, sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+match = re.search(r"(?m)^\s*token\s*=\s*(.+?)\s*$", text)
+if not match:
+    raise SystemExit(1)
+raw = match.group(1).strip()
+if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'\''":
+    raw = raw[1:-1]
+Path(sys.argv[2]).write_text(raw, encoding="utf-8")
+' "$lab_file" "$token_file" || {
+		secret_shred "$token_file"
+		echo "Could not read the GitLab token line." >&2
+		return 1
+	}
+
+	echo "Storing the GitLab token in Bitwarden item $BW_ITEM_GITLAB."
+	bw_upsert_login \
+		"$BW_ITEM_GITLAB" \
+		"tcamuso" \
+		"$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).read_text(encoding="utf-8").strip(), end="")' "$token_file")" \
+		"gitlab.com personal access token used by ~/bin scripts." \
+		"https://gitlab.com" || {
+		secret_shred "$token_file"
+		return 1
+	}
+	bw_password_matches "$BW_ITEM_GITLAB" "$token_file" || {
+		secret_shred "$token_file"
+		echo "The vault item did not match the GitLab token. lab.toml was kept." >&2
+		return 1
+	}
+	strip_lab_token "$lab_file" "$lab_file"
+	secret_shred "$token_file"
+	echo "Removed the token line from $lab_file"
+	echo "Use ~/bin/lab so the token comes from Bitwarden. ~/bin must precede /usr/bin on PATH."
+}
+
+#** cee_source_file: print the first GitLab CEE token file that exists
+#*
+cee_source_file() {
+	local copy
+
+	for copy in "${cee_copies[@]}"; do
+		if [[ -f "$copy" ]]; then
+			printf '%s\n' "$copy"
+			return 0
+		fi
+	done
+	return 1
+}
+
+#** import_gitlab_cee: store the GitLab CEE token and shred matching files
+#*
+import_gitlab_cee() {
+	local token_file source copy
+	local -a matched=()
+
+	source="$(cee_source_file || true)"
+	if [[ -z "$source" && -z "${GITLAB_CEE_TOKEN:-}" ]]; then
+		echo "No $cee_file and GITLAB_CEE_TOKEN is unset. Skipping the GitLab CEE import." >&2
+		return 0
+	fi
+	if [[ -n "$source" && -n "${GITLAB_CEE_TOKEN:-}" ]]; then
+		if ! printf '%s' "$GITLAB_CEE_TOKEN" | python3 -c '
+import sys
+from pathlib import Path
+got = sys.stdin.read().strip()
+expected = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
+raise SystemExit(0 if got == expected and got != "" else 1)
+' "$source"; then
+			echo "GITLAB_CEE_TOKEN does not match $source. Nothing was changed." >&2
+			return 1
+		fi
+	fi
+
+	token_file="$(secret_tmp)" || return 1
+	if [[ -n "$source" ]]; then
+		python3 -c 'from pathlib import Path; import sys; Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text(encoding="utf-8").strip(), encoding="utf-8")' \
+			"$source" "$token_file" || {
+			secret_shred "$token_file"
+			echo "Could not read $source." >&2
+			return 1
+		}
+		echo "Storing the GitLab CEE token from $source in Bitwarden item $BW_ITEM_GITLAB_CEE."
+	else
+		printf '%s' "$GITLAB_CEE_TOKEN" > "$token_file"
+		echo "Storing GITLAB_CEE_TOKEN in Bitwarden item $BW_ITEM_GITLAB_CEE."
+	fi
+	bw_upsert_login \
+		"$BW_ITEM_GITLAB_CEE" \
+		"tcamuso" \
+		"$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).read_text(encoding="utf-8").strip(), end="")' "$token_file")" \
+		"gitlab.cee.redhat.com personal access token used by ~/bin scripts." \
+		"https://gitlab.cee.redhat.com" || {
+		secret_shred "$token_file"
+		return 1
+	}
+	bw_password_matches "$BW_ITEM_GITLAB_CEE" "$token_file" || {
+		secret_shred "$token_file"
+		echo "The vault item did not match the GitLab CEE token. The file was kept." >&2
+		return 1
+	}
+	secret_shred "$token_file"
+	for copy in "${cee_copies[@]}"; do
+		[[ -f "$copy" ]] || continue
+		if bw_password_matches "$BW_ITEM_GITLAB_CEE" "$copy"; then
+			matched+=("$copy")
+		else
+			echo "Left $copy in place because its contents differ from the imported token." >&2
+			chmod 600 "$copy"
+		fi
+	done
+	if ((${#matched[@]} > 0)); then
+		secret_shred "${matched[@]}"
+		printf 'Removed plaintext file %s\n' "${matched[@]}"
+	fi
+	unset GITLAB_CEE_TOKEN
+}
+
+#** main
+#*
+main() {
+	trap control_c SIGINT
+	case "${1:-}" in
+		-h|--help|help)
+			usage
+			exit 0
+			;;
+	esac
+
+	load_bwsecrets
+	trap 'bw_lock' EXIT
+	tighten_private_files
+	bw_require || exit 1
+	bw_unlock || exit 1
+	import_github || exit 1
+	import_gitlab || exit 1
+	import_gitlab_cee || exit 1
+	bw_lock
+	echo "Bitwarden now holds the imported tokens."
+}
+
+main "$@"
