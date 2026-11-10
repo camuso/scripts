@@ -62,8 +62,9 @@ if $key_exists; then
 else
 	echo "Uploading SSH key to GitHub..."
 	resp="$(secret_tmp)" || exit 1
+	hdr="$(secret_tmp)" || exit 1
 	code="$(curl_with_token Authorization "Bearer $github_token" \
-		-sS -o "$resp" -w "%{http_code}" \
+		-sS -o "$resp" -D "$hdr" -w "%{http_code}" \
 		-H "Accept: application/vnd.github+json" \
 		-d "{\"title\":\"${TITLE}\",\"key\":\"${PUBKEY}\"}" \
 		"$API")" || code="000"
@@ -71,10 +72,27 @@ else
 		echo "Key uploaded successfully."
 	else
 		echo "Upload failed (HTTP $code)." >&2
-		secret_shred "$resp"
+		python3 -c '
+import json, sys
+from pathlib import Path
+body = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+try:
+    message = json.loads(body).get("message") or ""
+except Exception:
+    message = ""
+if message:
+    print(f"GitHub: {message}", file=sys.stderr)
+scopes = ""
+for line in Path(sys.argv[2]).read_text(encoding="utf-8", errors="replace").splitlines():
+    if line.lower().startswith("x-accepted-oauth-scopes:"):
+        scopes = line.split(":", 1)[1].strip()
+if scopes:
+    print(f"The token needs one of these scopes: {scopes}", file=sys.stderr)
+' "$resp" "$hdr" || true
+		secret_shred "$resp" "$hdr"
 		exit 1
 	fi
-	secret_shred "$resp"
+	secret_shred "$resp" "$hdr"
 fi
 
 if $key_exists || [[ "${code:-}" == "201" ]]; then

@@ -188,22 +188,121 @@ bw_tty() {
 	return 1
 }
 
-#** bw_login: log in without leaving the session key on the screen
+#** bw_email_file: path of the saved Bitwarden account email
+#*
+bw_email_file() {
+	printf '%s\n' "$HOME/.config/bitwarden/email"
+}
+
+#** bw_session_file: path of a short-lived unlocked session
+#*
+bw_session_file() {
+	printf '%s\n' "$HOME/.cache/bwsecrets/session"
+}
+
+#** bw_session_save: store the current session for the next command
+#*
+bw_session_save() {
+	local path dir
+
+	[[ -n "${BW_SESSION:-}" ]] || return 0
+	path="$(bw_session_file)"
+	dir="$(dirname "$path")"
+	mkdir -p "$dir"
+	chmod 700 "$dir"
+	umask 077
+	printf '%s' "$BW_SESSION" > "$path"
+	chmod 600 "$path"
+}
+
+#** bw_session_load: reuse a saved session when it still unlocks the vault
+#*
+bw_session_load() {
+	local path session
+
+	path="$(bw_session_file)"
+	[[ -f "$path" ]] || return 1
+	session="$(<"$path")"
+	[[ -n "$session" ]] || return 1
+	BW_SESSION="$session"
+	export BW_SESSION
+	unset session
+	if [[ "$(bw_status)" == "unlocked" ]]; then
+		BW_HOLDING_SESSION=yes
+		return 0
+	fi
+	unset BW_SESSION
+	secret_shred "$path"
+	return 1
+}
+
+#** bw_login: log in with the saved email and one hidden master password
+#*
+# The authenticator code is read with echo off. bw's own two-step prompt
+# displays what is typed, so this function supplies the code itself.
 #*
 bw_login() {
-	local bw answer
+	local bw email password password_file code session errfile
 
+	set +x
 	bw_tty || return 1
 	bw="$(bw_bin)" || return 1
-	echo "Log in to Bitwarden. The session key stays in this process." >/dev/tty
-	read -r -p "Use single sign-on? [y/N] " answer </dev/tty
-	if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
-		BW_SESSION="$("$bw" login --sso --raw </dev/tty)" || return 1
-	else
-		BW_SESSION="$("$bw" login --raw </dev/tty)" || return 1
+	email="${BW_EMAIL:-}"
+	if [[ -z "$email" && -f "$(bw_email_file)" ]]; then
+		email="$(<"$(bw_email_file)")"
+		email="${email//$'\n'/}"
+		email="${email//$'\r'/}"
 	fi
+	if [[ -z "$email" ]]; then
+		read -r -p "Bitwarden email: " email </dev/tty || return 1
+	else
+		echo "Logging in to Bitwarden as $email." >/dev/tty
+	fi
+
+	password_file="$(secret_tmp)" || return 1
+	read -rs -p "Master password: " password </dev/tty || {
+		secret_shred "$password_file"
+		unset password
+		return 1
+	}
+	printf '\n' >/dev/tty
+	printf '%s\n' "$password" > "$password_file"
+	unset password
+
+	errfile="$(secret_tmp)" || {
+		secret_shred "$password_file"
+		return 1
+	}
+	session="$(BW_NOINTERACTION=true "$bw" login "$email" \
+		--passwordfile "$password_file" --raw </dev/null 2>"$errfile" || true)"
+	if [[ -z "$session" ]] && grep -qi -E 'code is required|two-step|two factor' "$errfile"; then
+		read -rs -p "Authenticator code: " code </dev/tty || {
+			secret_shred "$password_file" "$errfile"
+			unset code
+			return 1
+		}
+		printf '\n' >/dev/tty
+		session="$(BW_NOINTERACTION=true "$bw" login "$email" \
+			--passwordfile "$password_file" --method 0 --code "$code" \
+			--raw </dev/null 2>"$errfile" || true)"
+		unset code
+	fi
+	secret_shred "$password_file" "$errfile"
+	if [[ -z "$session" ]]; then
+		echo "Bitwarden login failed." >/dev/tty
+		unset session
+		return 1
+	fi
+
+	mkdir -p "$HOME/.config/bitwarden"
+	chmod 700 "$HOME/.config/bitwarden"
+	printf '%s\n' "$email" > "$(bw_email_file)"
+	chmod 600 "$(bw_email_file)"
+	BW_SESSION="$session"
+	unset session
 	export BW_SESSION
 	BW_UNLOCKED_HERE=yes
+	BW_HOLDING_SESSION=yes
 }
 
 #** bw_unlock: prompt for the master password and export BW_SESSION
@@ -218,6 +317,10 @@ bw_unlock() {
 	bw_require || return 1
 	bw="$(bw_bin)" || return 1
 
+	if bw_session_load; then
+		return 0
+	fi
+
 	if [[ -n "${BW_SESSION:-}" ]]; then
 		status="$(bw_status)"
 		if [[ "$status" == "unlocked" ]]; then
@@ -228,6 +331,7 @@ bw_unlock() {
 	status="$(bw_status)"
 	if [[ "$status" == "unauthenticated" ]]; then
 		bw_login || return 1
+		"$bw" sync >/dev/null || return 1
 		return 0
 	fi
 
@@ -236,6 +340,8 @@ bw_unlock() {
 	BW_SESSION="$("$bw" unlock --raw </dev/tty)" || return 1
 	export BW_SESSION
 	BW_UNLOCKED_HERE=yes
+	BW_HOLDING_SESSION=yes
+	"$bw" sync >/dev/null || return 1
 }
 
 #** bw_lock: lock the vault when this process unlocked it
@@ -244,15 +350,24 @@ bw_lock() {
 	local bw
 
 	set +x
-	if [[ "${BW_UNLOCKED_HERE:-no}" != "yes" ]]; then
+	if [[ "${BW_KEEP_SESSION:-}" == "yes" && -n "${BW_SESSION:-}" ]]; then
+		bw_session_save
+		unset BW_SESSION
+		BW_UNLOCKED_HERE=no
+		BW_HOLDING_SESSION=no
+		return 0
+	fi
+	if [[ "${BW_UNLOCKED_HERE:-no}" != "yes" && "${BW_HOLDING_SESSION:-no}" != "yes" ]]; then
 		unset BW_SESSION
 		return 0
 	fi
 	if bw="$(bw_bin)"; then
 		"$bw" lock >/dev/null 2>&1 || true
 	fi
+	secret_shred "$(bw_session_file)"
 	unset BW_SESSION
 	BW_UNLOCKED_HERE=no
+	BW_HOLDING_SESSION=no
 }
 
 #** bw_get_password: print one vault password to stdout
@@ -269,9 +384,33 @@ bw_get_password() {
 
 	set +x
 	[[ -n "$name" ]] || return 1
+	local rc
+
 	bw_unlock || return 1
 	bw="$(bw_bin)" || return 1
-	"$bw" get password "$name"
+	# list does not ask for the master password again. bw get does, once
+	# per item, when the item is marked for master-password re-prompt.
+	set -o pipefail
+	"$bw" list items --search "$name" | BW_ITEM_NAME="$name" python3 -c '
+import json, os, sys
+name = os.environ["BW_ITEM_NAME"]
+try:
+    items = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+for item in items:
+    if item.get("name") != name:
+        continue
+    password = (item.get("login") or {}).get("password") or ""
+    if password:
+        sys.stdout.write(password)
+        raise SystemExit(0)
+raise SystemExit(1)
+'
+	rc=$?
+	set +o pipefail
+	unset BW_ITEM_NAME
+	return "$rc"
 }
 
 #** bw_item_id: print the id of an item with this exact name
@@ -432,8 +571,8 @@ bw_send_create() {
 	bw="$(bw_bin)" || return 1
 	[[ -n "${BW_SEND_TEXT:-}" ]] || return 1
 	export BW_SEND_TEXT BW_SEND_NAME
-	bw_prompt_secret password "Bitwarden Send password: " || return 1
-	bw_prompt_secret password_again "Repeat Send password: " || return 1
+	bw_prompt_secret password "Choose a one-time Send password. This is not your Bitwarden master password: " || return 1
+	bw_prompt_secret password_again "Repeat the Send password: " || return 1
 	if [[ "$password" != "$password_again" || -z "$password" ]]; then
 		unset password password_again
 		echo "Send passwords did not match." >&2
@@ -477,8 +616,16 @@ PY
 	unset req
 	id="$(printf '%s' "$url" | python3 -c '
 import re, sys
-text = sys.stdin.read()
-match = re.search(r"(https://\S*/send/([^/\s]+)/\S+)", text)
+text = re.sub(r"\x1b\[[0-9;]*m", "", sys.stdin.read())
+patterns = (
+    r"(https://\S+/#([A-Za-z0-9_-]+)/[^\s\"\\]+)",
+    r"(https://\S*/send/([A-Za-z0-9_-]+)/[^\s\"\\]+)",
+)
+match = None
+for pattern in patterns:
+    match = re.search(pattern, text)
+    if match:
+        break
 if not match:
     raise SystemExit(1)
 print(match.group(2))
@@ -632,7 +779,7 @@ load_vault_tokens() {
 	fi
 }
 
-#** ssh_key_generate: create an SSH key and reject an empty passphrase
+#** ssh_key_generate: create an SSH key with no passphrase
 #*
 # Arguments
 #   $1 - private key path
@@ -644,20 +791,14 @@ ssh_key_generate() {
 
 	mkdir -p "$(dirname "$priv")"
 	chmod 700 "$(dirname "$priv")"
-	echo "Choose a passphrase for the new SSH key." >/dev/tty
-	echo "An empty passphrase is rejected and the key is removed." >/dev/tty
 	if [[ "$kind" == "rsa" ]]; then
-		ssh-keygen -t rsa -b 4096 -f "$priv" </dev/tty || return 1
+		ssh-keygen -q -t rsa -b 4096 -f "$priv" -N "" </dev/tty || return 1
 	else
-		ssh-keygen -t ed25519 -f "$priv" </dev/tty || return 1
-	fi
-	if ssh-keygen -P "" -y -f "$priv" >/dev/null 2>&1; then
-		rm -f "$priv" "${priv}.pub"
-		echo "The SSH key had an empty passphrase, so it was removed." >&2
-		return 1
+		ssh-keygen -q -t ed25519 -f "$priv" -N "" </dev/tty || return 1
 	fi
 	chmod 600 "$priv"
 	chmod 644 "${priv}.pub"
+	ssh-keygen -lf "${priv}.pub"
 }
 
 #** strip_lab_token: write lab.toml without a token line

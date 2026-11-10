@@ -2,7 +2,7 @@
 # Upload or update an SSH key in GitLab.
 #
 # The token comes from the Bitwarden item gitlab-token. bw prompts for
-# the master password. A new SSH key requires a passphrase.
+# the master password. A new SSH key has no passphrase.
 
 set +x
 

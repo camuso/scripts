@@ -110,19 +110,23 @@ load_bwsecrets() {
 # copy the localhost's ssh key to the remote host
 copykey "$user" "$host"
 
-# python3 unpacks the Bitwarden CLI. rsync copies the rest of the archive.
+# python3 installs the Bitwarden CLI on the target. The target logs into
+# the same account and reads the tokens there. No Send is created.
 ssh -o StrictHostKeyChecking=accept-new "$user@$host" \
 	"sudo dnf install -y rsync python3 ca-certificates curl"
 
 load_bwsecrets
-trap 'unset github_token gitlab_token gitlab_cee_token BW_SEND_TEXT send_url send_body; bw_lock' EXIT
-bw_require || exit 1
 
-echo "Reading tokens from Bitwarden. The master password is prompted and not logged."
-load_vault_tokens || exit 1
-if [[ -z "$gitlab_cee_token" ]]; then
-	echo "Bitwarden item gitlab-cee-token is empty. $host will not receive a GitLab CEE token." >&2
+bw_email="$("$HOME/.local/bin/bw" status 2>/dev/null | python3 -c 'import json,sys
+try:
+    print((json.load(sys.stdin).get("userEmail") or "").strip())
+except Exception:
+    print("")')"
+if [[ -n "$bw_email" ]]; then
+	printf '%s\n' "$bw_email" | ssh -o StrictHostKeyChecking=accept-new "$user@$host" \
+		'umask 077; mkdir -p ~/.config/bitwarden; cat > ~/.config/bitwarden/email; chmod 600 ~/.config/bitwarden/email'
 fi
+unset bw_email
 
 # Copy lab.toml without the token line. The remote lab wrapper reads
 # the token from Bitwarden after a master-password prompt.
@@ -138,60 +142,7 @@ else
 	echo "Can't find .config/lab/lab.toml"
 fi
 
-send_body="$(
-	BW_PAYLOAD_GITHUB="$github_token" \
-	BW_PAYLOAD_GITLAB="$gitlab_token" \
-	BW_PAYLOAD_GITLAB_CEE="$gitlab_cee_token" \
-	python3 - << 'PY'
-import json, os
-print(json.dumps({
-    "github": os.environ.get("BW_PAYLOAD_GITHUB") or "",
-    "gitlab": os.environ.get("BW_PAYLOAD_GITLAB") or "",
-    "gitlab_cee": os.environ.get("BW_PAYLOAD_GITLAB_CEE") or "",
-}))
-PY
-)" || exit 1
-unset github_token gitlab_token gitlab_cee_token
-unset BW_PAYLOAD_GITHUB BW_PAYLOAD_GITLAB BW_PAYLOAD_GITLAB_CEE
-
-export BW_SEND_TEXT="$send_body"
-export BW_SEND_NAME="bin-tokens-$RANDOM"
-unset send_body
-send_out="$(secret_tmp)" || exit 1
-if ! bw_send_create > "$send_out"; then
-	unset BW_SEND_TEXT BW_SEND_NAME
-	secret_shred "$send_out"
-	echo "Could not create a Bitwarden Send." >&2
-	exit 1
-fi
-unset BW_SEND_TEXT BW_SEND_NAME
-mapfile -t send_parts < "$send_out"
-secret_shred "$send_out"
-send_id="${send_parts[0]}"
-send_url="${send_parts[1]}"
-unset send_parts
-if [[ -z "$send_id" || -z "$send_url" ]]; then
-	unset send_id send_url
-	echo "Bitwarden did not return a Send." >&2
-	exit 1
-fi
-
-# The URL contains the Send encryption key. It travels on the SSH
-# channel and is stored mode 0600. It is not written to this script's log.
-printf '%s\n' "$send_url" | ssh -o StrictHostKeyChecking=accept-new "$user@$host" \
-	'umask 077; mkdir -p ~/.config/bitwarden; cat > ~/.config/bitwarden/pending-send'
-unset send_url
-
-echo "Installing the Bitwarden CLI on $host, then receiving the Send."
-echo "You will be prompted for the Send password and, if needed, the Bitwarden login."
-if ! runremote "$user" "$host" "$HOME/bin/bw-receive-tokens"; then
-	bw_send_delete "$send_id" || true
-	unset send_id
-	exit 1
-fi
-bw_send_delete "$send_id" || echo "Could not delete the Send. It expires within two hours." >&2
-unset send_id
-bw_lock
+echo "The target installs Bitwarden and prompts for the master password before using the tokens."
 
 script="$HOME/bin/bootstrap-github-access"
 if [[ ! -f "$script" ]]; then
@@ -200,15 +151,16 @@ if [[ ! -f "$script" ]]; then
 fi
 
 echo "Uploading the remote SSH key to GitHub..."
-runremote "$user" "$host" "$script"
+echo "The target asks for the master password once, then the authenticator code."
+BW_KEEP_SESSION=yes runremote "$user" "$host" "$script" || exit 1
 
 echo "connecting with $remote..."
 if $installer; then
 	runremote "$user" "$host" \
-		"$HOME/bin/init-my-stuff" -i $pushpriv $nolinuxrepo "$user"
+		"$HOME/bin/init-my-stuff" -i $pushpriv $nolinuxrepo "$user" || exit 1
 else
 	runremote "$user" "$host" \
-		"$HOME/bin/init-my-stuff" $pushpriv $nolinuxrepo "$user" "$host" "$newuser"
+		"$HOME/bin/init-my-stuff" $pushpriv $nolinuxrepo "$user" "$host" "$newuser" || exit 1
 fi
 
 echo

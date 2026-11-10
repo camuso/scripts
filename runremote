@@ -28,6 +28,7 @@ declare remote_dir=".cache/runremote"
 declare name
 declare lib
 declare here
+declare remote_prefix
 declare -a quoted=()
 declare arg
 
@@ -51,6 +52,11 @@ for arg in "$@"; do
 	quoted+=("$(printf '%q' "$arg")")
 done
 
+remote_prefix="BWSECRETS_LIB=\$HOME/$remote_lib/bwsecrets.sh"
+if [[ "${BW_KEEP_SESSION:-}" == "yes" ]]; then
+	remote_prefix="BW_KEEP_SESSION=yes $remote_prefix"
+fi
+
 # shellcheck disable=SC2029
 exec ssh -t $ssh_opts "$user@$host" \
-	"BWSECRETS_LIB=\$HOME/$remote_lib/bwsecrets.sh bash \$HOME/$remote_dir/$name ${quoted[*]}"
+	"$remote_prefix bash \$HOME/$remote_dir/$name ${quoted[*]}"
