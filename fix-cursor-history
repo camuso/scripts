@@ -1,0 +1,75 @@
+#!/bin/bash
+#
+# Fix Cursor chat history sidebar by updating embedded workspace identifiers
+# in orphaned conversations.
+#
+# Usage: Quit Cursor completely, kill lingering processes, then run this script.
+
+GLOBAL_DB="/home/tcamuso/.config/Cursor/User/globalStorage/state.vscdb"
+OLD_WS_ID="72fe3ecb6e84b8c58341a06b6190ea85"
+NEW_WS_ID="ef4d79846709cd1844d7e07ec3943e6b"
+NEW_CONFIG="/home/tcamuso/.cursor/plans/bin.code-workspace"
+
+if pgrep -x "cursor" > /dev/null 2>&1 || pgrep -f "/[Cc]ursor/" > /dev/null 2>&1; then
+    echo "ERROR: Cursor appears to be running."
+    echo "       Kill all processes: pkill -9 -f '/Cursor/'"
+    exit 1
+fi
+
+echo "Backing up database..."
+cp "$GLOBAL_DB" "${GLOBAL_DB}.bak.$(date +%Y%m%d_%H%M%S)"
+
+echo "Updating workspace identifiers in conversation headers..."
+python3 << 'PYEOF'
+import sqlite3, json
+
+db_path = "/home/tcamuso/.config/Cursor/User/globalStorage/state.vscdb"
+old_ws_id = "72fe3ecb6e84b8c58341a06b6190ea85"
+new_ws_id = "ef4d79846709cd1844d7e07ec3943e6b"
+new_config = "/home/tcamuso/.cursor/plans/bin.code-workspace"
+
+new_workspace_identifier = {
+    "id": new_ws_id,
+    "configPath": {
+        "$mid": 1,
+        "fsPath": new_config,
+        "external": "file://" + new_config,
+        "path": new_config,
+        "scheme": "file"
+    }
+}
+
+conn = sqlite3.connect(db_path)
+cur = conn.cursor()
+
+# Find all conversations with the old workspace ID
+cur.execute("SELECT composerId, value FROM composerHeaders WHERE workspaceId = ?", (old_ws_id,))
+rows = cur.fetchall()
+print(f"Found {len(rows)} entries with old workspace ID")
+
+updated = 0
+for composer_id, value_str in rows:
+    try:
+        val = json.loads(value_str)
+        val["workspaceIdentifier"] = new_workspace_identifier
+        new_value = json.dumps(val)
+        cur.execute(
+            "UPDATE composerHeaders SET workspaceId = ?, value = ? WHERE composerId = ?",
+            (new_ws_id, new_value, composer_id)
+        )
+        updated += 1
+    except Exception as e:
+        print(f"  Warning: could not update {composer_id}: {e}")
+
+conn.commit()
+
+cur.execute("SELECT COUNT(*) FROM composerHeaders WHERE workspaceId = ? AND isSubagent = 0", (new_ws_id,))
+total = cur.fetchone()[0]
+
+print(f"Updated {updated} entries")
+print(f"Total conversations now in current workspace: {total}")
+conn.close()
+PYEOF
+
+echo ""
+echo "Done! Open Cursor now."
