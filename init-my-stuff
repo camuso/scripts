@@ -10,7 +10,6 @@ declare logfile="$HOME/.initmystuff.log"
 declare repolist="rcbak hints etcbk misc ipmi patchtools isb"
 declare b_pushpriv=true
 declare b_gitrepo=true
-declare clonestr
 declare distro
 declare installagent
 declare installflags
@@ -18,44 +17,43 @@ declare fetched=false
 declare majersion=
 declare b_install=false
 declare pkg=
-declare gitlabtok
 declare yumrepo="/etc/yum.repos.d"
 declare host="$(hostname)"
 declare tmpstr=
 declare newuser=
 declare majvers
 declare -a pkglist
+declare github_token=
+declare gitlab_token=
+declare gitlab_cee_token=
+
+set +x
+
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
+load_bwsecrets
+
+# Do not log commands or their output. A DEBUG trap that re-runs commands
+# would write tokens and the Bitwarden session into ~/.initmystuff.log.
+cleanup_secrets() {
+	set +x
+	unset github_token gitlab_token gitlab_cee_token
+	unset GITHUB_TOKEN LAB_CORE_TOKEN BW_SEND_TEXT
+	bw_lock
+}
+trap cleanup_secrets EXIT
 
 # Init the logfile
 > "$logfile"
-
-###############################################################################
-# This trick uses the bash DEBUG command to trap every command issued
-# and log it into the logfile.
-#
-log_command() {
-	local output=
-	local command="$BASH_COMMAND"
-	local -a tokens=( $command )
-
-	# Exclude some commands
-	case ${tokens[0]} in
-		"trap"  ) ;&
-		"rptch" ) return
-			  ;;
-		"for"   ) ;&
-		"while" ) echo "$command" >> "$logfile"
-			  return
-	esac
-
-	output=$({ eval "$command"; } 2>&1)
-	grep -q 'echo' <<< "$command" || echo "$command" >> "$logfile"
-	[ -n "$output" ] && echo "$output" >> "$logfile"
-	# eval "$command" 2>&1 | tee -a "$logfile"
-}
-
-# trap 'log_command' DEBUG
-###############################################################################
 
 rptch() {
 	local ch="$1"
@@ -156,31 +154,24 @@ assure rsync
 assure wget
 assure curl
 assure git
+assure python3
 
 cd		# make sure we're home
 
-# Use HTTPS with token auth if GITHUB_TOKEN is available (supports
-# both clone and push with 'repo' scope). Fall back to SSH if push
-# privileges are needed without a token, or plain HTTPS for read-only.
-#
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-	clonestr="git clone https://${GITHUB_TOKEN}@github.com/camuso/"
-elif $b_pushpriv; then
-	clonestr="git clone git@github.com:camuso/"
-else
-	clonestr="git clone https://github.com/camuso/"
-fi
+# Clone a camuso GitHub repo. The token is supplied to git through the
+# environment and is not written into .git/config or this script's log.
+clone_camuso_repo() {
+	local repo="$1"
+	local dest="$2"
 
-# Get the gitlab token
-# If called by ark2host, then the lab.toml file should be there.
-#
-if [ -f ~/.config/lab/lab.toml ]; then
-	cd ~/.config/lab/
-	gitlabtok="$(grep token lab.toml | awk -F' ' '{print $3}' | tr -d \")"
-	cd -
-else
-	echo "No lab.toml file!"
-fi
+	if [[ -n "$github_token" ]]; then
+		git_clone_auth "https://github.com/camuso/${repo}.git" "$dest" "$github_token"
+	elif $b_pushpriv; then
+		git clone "git@github.com:camuso/${repo}.git" "$dest"
+	else
+		git clone "https://github.com/camuso/${repo}.git" "$dest"
+	fi
+}
 
 upload_github_ssh_key() {
 	local key_type="${1:-ed25519}"
@@ -204,15 +195,15 @@ upload_github_ssh_key() {
 		mkdir -p "$HOME/.ssh"
 		chmod 700 "$HOME/.ssh"
 		if [[ "$key_type" == "rsa" ]]; then
-			ssh-keygen -t rsa -b 4096 -f "$priv_file" -N ""
+			ssh_key_generate "$priv_file" rsa || return 1
 		else
-			ssh-keygen -t ed25519 -f "$priv_file" -N ""
+			ssh_key_generate "$priv_file" ed25519 || return 1
 		fi
 	fi
 
 	# Ensure token is present
-	if [[ -z "$GITHUB_TOKEN" ]]; then
-		echo "Error: GITHUB_TOKEN environment variable not set" >&2
+	if [[ -z "$github_token" ]]; then
+		echo "Error: GitHub token is not available from Bitwarden" >&2
 		return 1
 	fi
 
@@ -221,8 +212,8 @@ upload_github_ssh_key() {
 	key_data=$(awk '{print $2}' < "$key_file")
 
 	# Check if key already exists on GitHub
-	existing_keys=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-		-H "Accept: application/vnd.github+json" \
+	existing_keys=$(curl_with_token Authorization "Bearer $github_token" \
+		-sS -H "Accept: application/vnd.github+json" \
 		https://api.github.com/user/keys 2>/dev/null)
 
 	if echo "$existing_keys" | grep -qF "$key_data"; then
@@ -236,8 +227,8 @@ upload_github_ssh_key() {
 
 	# Upload via GitHub API
 	echo "Uploading SSH key to GitHub..."
-	if curl -s -H "Authorization: token $GITHUB_TOKEN" \
-		-H "Accept: application/vnd.github+json" \
+	if curl_with_token Authorization "Bearer $github_token" \
+		-sS -H "Accept: application/vnd.github+json" \
 		https://api.github.com/user/keys \
 		-d "{\"title\":\"$title\",\"key\":\"$pubkey\"}" >/dev/null; then
 		echo "SSH key uploaded to GitHub successfully."
@@ -254,7 +245,7 @@ upload_gitlab_ssh_key() {
 	local existing_keys
 
 	# --- Upload SSH key to GitLab ---
-	if [[ -z "$gitlabtok" ]]; then
+	if [[ -z "$gitlab_token" ]]; then
 		return 0
 	fi
 
@@ -273,8 +264,8 @@ upload_gitlab_ssh_key() {
 	local_key=$(awk '{print $1, $2}' < "$keyfile")
 
 	# Check if key already exists on GitLab
-	existing_keys=$(curl --silent \
-		--header "PRIVATE-TOKEN: $gitlabtok" \
+	existing_keys=$(curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+		--silent \
 		https://gitlab.com/api/v4/user/keys 2>/dev/null)
 
 	if echo "$existing_keys" | grep -qF "$(awk '{print $2}' < "$keyfile")"; then
@@ -283,8 +274,8 @@ upload_gitlab_ssh_key() {
 	fi
 
 	echo "Uploading SSH key to GitLab..."
-	if curl --silent --show-error --fail \
-		--header "PRIVATE-TOKEN: $gitlabtok" \
+	if curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+		--silent --show-error --fail \
 		--request POST \
 		--form "title=$(hostname)-$(date +%Y%m%d)" \
 		--form "key=$(<"$keyfile")" \
@@ -295,24 +286,65 @@ upload_gitlab_ssh_key() {
 	fi
 }
 
+# copy the ssh key to gitlab.cee.redhat.com
+#
+upload_gitlab_cee_ssh_key() {
+	local keyfile
+	local existing_keys
+
+	if [[ -z "$gitlab_cee_token" ]]; then
+		return 0
+	fi
+
+	if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+		keyfile=~/.ssh/id_ed25519.pub
+	elif [[ -f ~/.ssh/id_rsa.pub ]]; then
+		keyfile=~/.ssh/id_rsa.pub
+	else
+		echo "No SSH public key found. Skipping GitLab CEE upload."
+		return 1
+	fi
+
+	existing_keys=$(curl_with_token PRIVATE-TOKEN "$gitlab_cee_token" \
+		--silent \
+		https://gitlab.cee.redhat.com/api/v4/user/keys 2>/dev/null)
+
+	if echo "$existing_keys" | grep -qF "$(awk '{print $2}' < "$keyfile")"; then
+		echo "SSH key already exists on GitLab CEE. Skipping upload."
+		return 0
+	fi
+
+	echo "Uploading SSH key to GitLab CEE..."
+	if curl_with_token PRIVATE-TOKEN "$gitlab_cee_token" \
+		--silent --show-error --fail \
+		--request POST \
+		--form "title=$(hostname)-$(date +%Y%m%d)" \
+		--form "key=$(<"$keyfile")" \
+		https://gitlab.cee.redhat.com/api/v4/user/keys >/dev/null; then
+		echo "SSH key uploaded to GitLab CEE successfully."
+	else
+		echo "GitLab CEE key upload failed. You may need to enter it manually."
+	fi
+}
+
 echo
 
-# Load GITHUB_TOKEN from file if not already set
-if [[ -z "${GITHUB_TOKEN:-}" ]] && [[ -f ~/.config/github/mygithubtoken ]]; then
-	export GITHUB_TOKEN
-	GITHUB_TOKEN="$(cat ~/.config/github/mygithubtoken)"
-	echo "Loaded GITHUB_TOKEN from ~/.config/github/mygithubtoken"
-fi
+# Prompt for the Bitwarden master password and read the tokens into
+# memory. They are not written to the logfile or to a plaintext file.
+bw_require || exit 1
+load_vault_tokens || exit 1
 
 upload_github_ssh_key
 upload_gitlab_ssh_key
+upload_gitlab_cee_ssh_key
 
 # Ensure GitHub and GitLab SSH host keys are trusted before cloning
-echo "Adding SSH host keys for github.com and gitlab.com ..."
+echo "Adding SSH host keys for github.com, gitlab.com, and gitlab.cee.redhat.com ..."
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
 ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts 2>/dev/null
+ssh-keyscan -H gitlab.cee.redhat.com >> ~/.ssh/known_hosts 2>/dev/null
 
 echo "*******************************"
 echo "* Clone or update Env Files   *"
@@ -331,13 +363,13 @@ for repo in $repolist; do
 		else
 			echo "Converting directory $repo to git repo"
 			rm -rf $repo
-			$clonestr$repo.git $repo
+			clone_camuso_repo "$repo" "$repo"
 			cd $repo
 			git config pull.rebase false
 		fi
 	else
 		echo "Cloning $repo ..."
-		$clonestr$repo.git $repo
+		clone_camuso_repo "$repo" "$repo"
 	fi
 	# chown -R tcamuso.tcamuso $repo
 	# chmod -R u+wrx,go+rx,go-w $repo
@@ -358,7 +390,7 @@ if [ -d bin/.git ]; then
 else
 	[ -e bin ] && rm -rf bin
 	echo "Creating bin repo..."
-	${clonestr}scripts.git bin
+	clone_camuso_repo scripts bin
 	cd bin
 	git config pull.rebase false
 fi

@@ -1,41 +1,56 @@
 #!/bin/bash
-# runremote: stream a local script to a remote host and run it with optional
-# env injection
 #
-# Automatically injects any GITHUB_* environment variables.
+# runremote: copy a local script to a host and run it on a terminal.
 #
-# Escapes all arguments and passes them to the remote script.
-#
-# Streams the script via bash -s with no quoting mess.
+# Secret environment variables are not forwarded. Bitwarden prompts need
+# a tty, so the remote command is started with ssh -t.
 
-user=$1
-host=$2
-script=$3
+set +x
+
+declare user="$1"
+declare host="$2"
+declare script="$3"
+
+if [[ -z "$user" || -z "$host" || -z "$script" ]]; then
+	echo "Usage: $(basename "$0") user host script [args...]" >&2
+	exit 1
+fi
+if [[ ! -f "$script" ]]; then
+	echo "Script not found: $script" >&2
+	exit 1
+fi
+
 shift 3
 
-# Collect remaining args
-declare -a args
+declare ssh_opts="-o StrictHostKeyChecking=accept-new"
+declare remote_lib=".local/lib"
+declare remote_dir=".cache/runremote"
+declare name
+declare lib
+declare here
+declare -a quoted=()
+declare arg
+
+name="$(basename "$script")"
+here="$(dirname "$(readlink -f "$0")")"
+lib="$here/lib/bwsecrets.sh"
+
+ssh $ssh_opts "$user@$host" \
+	"mkdir -p ~/$remote_lib ~/$remote_dir && chmod 700 ~/$remote_lib ~/$remote_dir" \
+	|| exit 1
+
+if [[ -f "$lib" ]]; then
+	scp $ssh_opts "$lib" "$user@$host:$remote_lib/bwsecrets.sh" || exit 1
+	ssh $ssh_opts "$user@$host" "chmod 600 ~/$remote_lib/bwsecrets.sh" || exit 1
+fi
+
+scp $ssh_opts "$script" "$user@$host:$remote_dir/$name" || exit 1
+ssh $ssh_opts "$user@$host" "chmod 700 ~/$remote_dir/$name" || exit 1
+
 for arg in "$@"; do
-  args+=("$(printf '%q' "$arg")")
+	quoted+=("$(printf '%q' "$arg")")
 done
 
-# Inject env vars directly from exported shell vars
-declare -a env_lines
-while IFS='=' read -r name value; do
-  [[ "$name" =~ ^GITHUB_ ]] && env_lines+=("$name=$(printf '%q' "$value")")
-done < <(env)
-
-sshcmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-{
-  # Inject env vars
-  for line in "${env_lines[@]}"; do
-    printf '%s\n' "$line"
-  done
-
-  # Inject positional args
-  printf 'set -- %s\n' "${args[*]}"
-
-  # Stream the script
-  cat "$script"
-} | $sshcmd "$user@$host" "bash -s"
+# shellcheck disable=SC2029
+exec ssh -t $ssh_opts "$user@$host" \
+	"BWSECRETS_LIB=\$HOME/$remote_lib/bwsecrets.sh bash \$HOME/$remote_dir/$name ${quoted[*]}"

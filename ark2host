@@ -28,6 +28,11 @@ Options:
   -g       - do not install linux git repos
   -h       - this help text
 
+Tokens are not copied as files. ark2host reads them from Bitwarden,
+prompts for a Send password, and delivers a password-protected
+Bitwarden Send. The remote prompts for that password and for the
+Bitwarden master password. Send URLs and tokens are not logged.
+
 EOF
 
 )
@@ -89,55 +94,121 @@ if [ -n "$newuser" ] && [ "$user" != "root" ]; then
 	echo "That is, 'ark2host -i -u $newuser root@$host'"
 fi
 
+set +x
+
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
 # copy the localhost's ssh key to the remote host
 copykey "$user" "$host"
 
-# Must install rsync on the remote system before doing anything else.
-ssh "$user@$host" "sudo dnf install -y rsync"
+# python3 unpacks the Bitwarden CLI. rsync copies the rest of the archive.
+ssh -o StrictHostKeyChecking=accept-new "$user@$host" \
+	"sudo dnf install -y rsync python3 ca-certificates curl"
 
-# Copy the lab.toml file
+load_bwsecrets
+trap 'unset github_token gitlab_token gitlab_cee_token BW_SEND_TEXT send_url send_body; bw_lock' EXIT
+bw_require || exit 1
+
+echo "Reading tokens from Bitwarden. The master password is prompted and not logged."
+load_vault_tokens || exit 1
+if [[ -z "$gitlab_cee_token" ]]; then
+	echo "Bitwarden item gitlab-cee-token is empty. $host will not receive a GitLab CEE token." >&2
+fi
+
+# Copy lab.toml without the token line. The remote lab wrapper reads
+# the token from Bitwarden after a master-password prompt.
 if [ -f ~/.config/lab/lab.toml ]; then
+	lab_copy="$(secret_tmp)" || exit 1
+	strip_lab_token ~/.config/lab/lab.toml "$lab_copy"
 	rsync -Pat --rsync-path='mkdir -p .config/lab/ && rsync' \
-		~/.config/lab/lab.toml "$user"@"$host":.config/lab/lab.toml
+		"$lab_copy" "$user"@"$host":.config/lab/lab.toml
+	ssh -o StrictHostKeyChecking=accept-new "$user@$host" \
+		"chmod 600 .config/lab/lab.toml"
+	secret_shred "$lab_copy"
 else
 	echo "Can't find .config/lab/lab.toml"
 fi
 
-# Copy the GitHub token file
-if [ -f ~/.config/github/mygithubtoken ]; then
-       rsync -Pat --rsync-path='mkdir -p .config/github/ && rsync' \
-               ~/.config/github/mygithubtoken "$user"@"$host":.config/github/mygithubtoken
-       ssh "$user@$host" "chmod 600 ~/.config/github/mygithubtoken"
-       echo "Copied GitHub token to remote host"
-else
-       echo "Warning: ~/.config/github/mygithubtoken not found locally"
+send_body="$(
+	BW_PAYLOAD_GITHUB="$github_token" \
+	BW_PAYLOAD_GITLAB="$gitlab_token" \
+	BW_PAYLOAD_GITLAB_CEE="$gitlab_cee_token" \
+	python3 - << 'PY'
+import json, os
+print(json.dumps({
+    "github": os.environ.get("BW_PAYLOAD_GITHUB") or "",
+    "gitlab": os.environ.get("BW_PAYLOAD_GITLAB") or "",
+    "gitlab_cee": os.environ.get("BW_PAYLOAD_GITLAB_CEE") or "",
+}))
+PY
+)" || exit 1
+unset github_token gitlab_token gitlab_cee_token
+unset BW_PAYLOAD_GITHUB BW_PAYLOAD_GITLAB BW_PAYLOAD_GITLAB_CEE
+
+export BW_SEND_TEXT="$send_body"
+export BW_SEND_NAME="bin-tokens-$RANDOM"
+unset send_body
+send_out="$(secret_tmp)" || exit 1
+if ! bw_send_create > "$send_out"; then
+	unset BW_SEND_TEXT BW_SEND_NAME
+	secret_shred "$send_out"
+	echo "Could not create a Bitwarden Send." >&2
+	exit 1
+fi
+unset BW_SEND_TEXT BW_SEND_NAME
+mapfile -t send_parts < "$send_out"
+secret_shred "$send_out"
+send_id="${send_parts[0]}"
+send_url="${send_parts[1]}"
+unset send_parts
+if [[ -z "$send_id" || -z "$send_url" ]]; then
+	unset send_id send_url
+	echo "Bitwarden did not return a Send." >&2
+	exit 1
 fi
 
-# Export the GitHub token so runremote can inject it into the remote env
-if [ -f ~/.config/github/mygithubtoken ]; then
-       export GITHUB_TOKEN
-       GITHUB_TOKEN="$(cat ~/.config/github/mygithubtoken)"
-else
-       echo "⚠️  No GitHub token found at ~/.config/github/mygithubtoken"
-       echo "   SSH key upload to GitHub will be skipped."
+# The URL contains the Send encryption key. It travels on the SSH
+# channel and is stored mode 0600. It is not written to this script's log.
+printf '%s\n' "$send_url" | ssh -o StrictHostKeyChecking=accept-new "$user@$host" \
+	'umask 077; mkdir -p ~/.config/bitwarden; cat > ~/.config/bitwarden/pending-send'
+unset send_url
+
+echo "Installing the Bitwarden CLI on $host, then receiving the Send."
+echo "You will be prompted for the Send password and, if needed, the Bitwarden login."
+if ! runremote "$user" "$host" "$HOME/bin/bw-receive-tokens"; then
+	bw_send_delete "$send_id" || true
+	unset send_id
+	exit 1
 fi
+bw_send_delete "$send_id" || echo "Could not delete the Send. It expires within two hours." >&2
+unset send_id
+bw_lock
 
 script="$HOME/bin/bootstrap-github-access"
 if [[ ! -f "$script" ]]; then
-  echo "❌ Script not found: $script"
-  exit 1
+	echo "Script not found: $script" >&2
+	exit 1
 fi
 
-echo "🔐 Uploading remote SSH key to GitHub..."
+echo "Uploading the remote SSH key to GitHub..."
 runremote "$user" "$host" "$script"
 
 echo "connecting with $remote..."
 if $installer; then
-	runremote $user $host \
-		"$HOME/bin/init-my-stuff" -i $pushpriv $nolinuxrepo $user
+	runremote "$user" "$host" \
+		"$HOME/bin/init-my-stuff" -i $pushpriv $nolinuxrepo "$user"
 else
-	runremote $user $host \
-		"$HOME/bin/init-my-stuff" $pushpriv $nolinuxrepo $user $host $newuser
+	runremote "$user" "$host" \
+		"$HOME/bin/init-my-stuff" $pushpriv $nolinuxrepo "$user" "$host" "$newuser"
 fi
 
 echo
