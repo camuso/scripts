@@ -7,7 +7,7 @@
 #
 
 # --- Script-level variable declarations ---
-declare gitlab_token="${GITLAB_CEE_TOKEN:-}"
+declare gitlab_token=""
 declare gitlab_api="https://gitlab.cee.redhat.com/api/v4"
 declare title="$(hostname)"
 declare key_file=""
@@ -26,9 +26,9 @@ The script will:
   2. Generate a new Ed25519 key if none exists
   3. Upload the key to GitLab CEE, or update the title if key already exists
 
-Environment Variables:
-  GITLAB_CEE_TOKEN   Required. Your GitLab CEE personal access token with 'api' scope.
-                     Create one at: https://gitlab.cee.redhat.com/-/user_settings/personal_access_tokens
+The GitLab CEE token is read from the Bitwarden item gitlab-cee-token.
+bw prompts for the master password. Create the token at:
+  https://gitlab.cee.redhat.com/-/user_settings/personal_access_tokens
 
 Options:
   -h, --help, help   Show this help message
@@ -80,8 +80,8 @@ find_or_generate_key() {
 	elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
 		key_file="$HOME/.ssh/id_rsa.pub"
 	else
-		echo "No SSH public key found. Generating a new Ed25519 key..."
-		ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N "" || {
+		echo "No SSH public key found. Generating a new Ed25519 key."
+		ssh_key_generate "$HOME/.ssh/id_ed25519" ed25519 || {
 			exitme 1 "Failed to generate Ed25519 key"
 		}
 		key_file="$HOME/.ssh/id_ed25519.pub"
@@ -108,8 +108,8 @@ read_public_key() {
 #*
 fetch_existing_keys() {
 	echo "Fetching existing keys from GitLab CEE..."
-	keys_json=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
-		"$gitlab_api/user/keys")
+	keys_json=$(curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+		-sS "$gitlab_api/user/keys")
 }
 
 #** find_matching_key: check if current key already exists in GitLab
@@ -128,15 +128,15 @@ upload_or_update_key() {
 
 	if [[ -n "$key_id" && "$key_id" != "null" ]]; then
 		echo "Key already exists (id=$key_id). Updating title to: $title"
-		response=$(curl -s --request PUT \
-			--header "PRIVATE-TOKEN: $gitlab_token" \
+		response=$(curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+			-sS --request PUT \
 			--header "Content-Type: application/json" \
 			--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
 			"$gitlab_api/user/keys/$key_id")
 	else
 		echo "Uploading new key with title: $title"
-		response=$(curl -s --request POST \
-			--header "PRIVATE-TOKEN: $gitlab_token" \
+		response=$(curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+			-sS --request POST \
 			--header "Content-Type: application/json" \
 			--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
 			"$gitlab_api/user/keys")
@@ -145,17 +145,25 @@ upload_or_update_key() {
 	echo "$response" | jq .
 }
 
+#** load_bwsecrets: source the Bitwarden helper
+#*
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
 #** main
 #*
 main() {
 	trap control_c SIGINT
+	set +x
 
-	# Check for required token
-	if [[ -z "$gitlab_token" ]]; then
-		exitme 1 "GITLAB_CEE_TOKEN environment variable is not set."
-	fi
-
-	# Parse arguments
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			-h|--help|help)
@@ -175,6 +183,17 @@ main() {
 				;;
 		esac
 	done
+
+	load_bwsecrets
+	trap 'unset gitlab_token gitlab_cee_token github_token; bw_lock' EXIT
+	bw_require || exitme 1 "Bitwarden CLI is not available."
+	bw_unlock || exitme 1 "Could not unlock Bitwarden."
+	gitlab_token="$(bw_get_password "$BW_ITEM_GITLAB_CEE" 2>/dev/null || true)"
+	gitlab_token="${gitlab_token//$'\n'/}"
+	if [[ -z "$gitlab_token" || "$gitlab_token" == *" "* ]]; then
+		gitlab_token=""
+		exitme 1 "Bitwarden has no item named $BW_ITEM_GITLAB_CEE."
+	fi
 
 	find_or_generate_key
 	read_public_key

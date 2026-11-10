@@ -1,50 +1,77 @@
 #!/usr/bin/env bash
-# Upload or update SSH key in GitLab, using hostname as title
+# Upload or update an SSH key in GitLab.
+#
+# The token comes from the Bitwarden item gitlab-token. bw prompts for
+# the master password. A new SSH key requires a passphrase.
 
-# --- Configuration ---
-gitlab_token="${GITLAB_TOKEN:?Set GITLAB_TOKEN env var}"
+set +x
+
 title="$(hostname)"
 gitlab_api="https://gitlab.com/api/v4"
+key_file=""
+pubkey=""
+gitlab_token=""
 
-# --- Determine key file ---
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
+load_bwsecrets
+trap 'unset gitlab_token pubkey; bw_lock' EXIT
+
+bw_require || exit 1
+bw_unlock || exit 1
+gitlab_token="$(bw_get_password "$BW_ITEM_GITLAB" 2>/dev/null || true)"
+gitlab_token="${gitlab_token//$'\n'/}"
+if [[ -z "$gitlab_token" || "$gitlab_token" == *" "* ]]; then
+	echo "Bitwarden has no item named $BW_ITEM_GITLAB." >&2
+	exit 1
+fi
+
 if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
 	key_file="$HOME/.ssh/id_ed25519.pub"
 elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
 	key_file="$HOME/.ssh/id_rsa.pub"
 else
-	echo "No SSH public key found. Generating a new Ed25519 key..."
-	ssh-keygen -t ed25519 -f "$HOME/.ssh/id_ed25519" -N "" || {
-		echo "Failed to generate Ed25519 key" >&2
-		exit 1
-	}
+	echo "No SSH public key found. Generating a new Ed25519 key."
+	ssh_key_generate "$HOME/.ssh/id_ed25519" ed25519 || exit 1
 	key_file="$HOME/.ssh/id_ed25519.pub"
 fi
 
-# --- Read key ---
-if [[ ! -f "$key_file" ]]; then
+[[ -f "$key_file" ]] || {
 	echo "Key file not found: $key_file" >&2
 	exit 1
-fi
-pubkey=$(<"$key_file")
+}
+pubkey="$(<"$key_file")"
 
-# --- Fetch existing keys ---
-keys_json=$(curl -s --header "PRIVATE-TOKEN: $gitlab_token" \
-	"$gitlab_api/user/keys")
+keys_json="$(curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+	-sS "$gitlab_api/user/keys")"
 
-# --- Check if this key already exists ---
-key_id=$(echo "$keys_json" | jq -r --arg PUBKEY "$pubkey" \
-	'.[] | select(.key==$PUBKEY) | .id')
+key_id="$(echo "$keys_json" | jq -r --arg PUBKEY "$pubkey" \
+	'.[] | select(.key==$PUBKEY) | .id')"
 
 if [[ -n "$key_id" && "$key_id" != "null" ]]; then
 	echo "Key already exists (id=$key_id). Updating title to: $title"
-	curl -s --request PUT --header "PRIVATE-TOKEN: $gitlab_token" \
+	curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+		-sS --request PUT \
 		--header "Content-Type: application/json" \
 		--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
 		"$gitlab_api/user/keys/$key_id" | jq .
 else
 	echo "Uploading new key with title: $title"
-	curl -s --request POST --header "PRIVATE-TOKEN: $gitlab_token" \
+	curl_with_token PRIVATE-TOKEN "$gitlab_token" \
+		-sS --request POST \
 		--header "Content-Type: application/json" \
 		--data "{\"title\":\"$title\",\"key\":\"$pubkey\"}" \
 		"$gitlab_api/user/keys" | jq .
 fi
+
+unset gitlab_token pubkey
+bw_lock

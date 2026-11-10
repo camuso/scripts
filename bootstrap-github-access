@@ -1,82 +1,87 @@
 #!/bin/bash
-# bootstrap-github-access.sh
-# Uploads remote system's SSH key to GitHub using GITHUB_TOKEN
+# bootstrap-github-access
+#
+# Upload this host's SSH public key to GitHub. The token comes from
+# Bitwarden item github-token. bw prompts for the master password.
 
-# Load token from file if not in environment
-if [[ -z "${GITHUB_TOKEN:-}" ]] && [[ -f ~/.config/github/mygithubtoken ]]; then
-  export GITHUB_TOKEN
-  GITHUB_TOKEN="$(cat ~/.config/github/mygithubtoken)"
-fi
-
-[[ -n "${GITHUB_TOKEN:-}" ]] && echo "✅ GITHUB_TOKEN is set" \
-                             || echo "❌ GITHUB_TOKEN is missing"
+set +x
 
 API="https://api.github.com/user/keys"
 TITLE="$(hostname)-$(date +%Y%m%d)"
 KEYFILE=""
+github_token=""
 
-if [[ -z "${GITHUB_TOKEN:-}" ]]; then
-  echo "❌ GITHUB_TOKEN not set. Aborting."
-  exit 1
-fi
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
 
-# --- Detect or generate SSH key ---
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
+load_bwsecrets
+trap 'unset github_token; bw_lock' EXIT
+
+bw_require || exit 1
+load_vault_tokens || exit 1
+
 if [[ -f ~/.ssh/id_ed25519.pub ]]; then
-  KEYFILE=~/.ssh/id_ed25519.pub
+	KEYFILE=~/.ssh/id_ed25519.pub
 elif [[ -f ~/.ssh/id_rsa.pub ]]; then
-  KEYFILE=~/.ssh/id_rsa.pub
+	KEYFILE=~/.ssh/id_rsa.pub
 else
-  echo "⚠️ No SSH public key found. Generating one..."
-  mkdir -p ~/.ssh
-  chmod 700 ~/.ssh
-  ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -C "$(whoami)@$(hostname)"
-  KEYFILE=~/.ssh/id_ed25519.pub
+	echo "No SSH public key found. Generating one."
+	ssh_key_generate "$HOME/.ssh/id_ed25519" ed25519 || exit 1
+	KEYFILE=~/.ssh/id_ed25519.pub
 fi
 
-PUBKEY=$(<"$KEYFILE")
-LOCAL_FP=$(ssh-keygen -lf "$KEYFILE" | awk '{print $2}')
-EXISTING=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API")
+PUBKEY="$(<"$KEYFILE")"
+LOCAL_FP="$(ssh-keygen -lf "$KEYFILE" | awk '{print $2}')"
+EXISTING="$(curl_with_token Authorization "Bearer $github_token" \
+	-sS -H "Accept: application/vnd.github+json" "$API")"
 
 key_exists=false
 if command -v jq >/dev/null 2>&1; then
-  if echo "$EXISTING" | jq -r '.[].key' 2>/dev/null \
-     | ssh-keygen -lf /dev/stdin 2>/dev/null \
-     | awk '{print $2}' | grep -q "$LOCAL_FP"; then
-    key_exists=true
-  fi
+	if echo "$EXISTING" | jq -r '.[].key' 2>/dev/null \
+		| ssh-keygen -lf /dev/stdin 2>/dev/null \
+		| awk '{print $2}' | grep -q "$LOCAL_FP"; then
+		key_exists=true
+	fi
 else
-  # Fallback: simple string match when jq is not available
-  local_key_data=$(awk '{print $2}' < "$KEYFILE")
-  if echo "$EXISTING" | grep -qF "$local_key_data"; then
-    key_exists=true
-  fi
+	local_key_data="$(awk '{print $2}' < "$KEYFILE")"
+	if echo "$EXISTING" | grep -qF "$local_key_data"; then
+		key_exists=true
+	fi
 fi
 
 if $key_exists; then
-  echo "✅ Key already exists on GitHub (fingerprint $LOCAL_FP)."
+	echo "Key already exists on GitHub (fingerprint $LOCAL_FP)."
 else
-  echo "⬆️  Uploading SSH key to GitHub..."
-  RESP=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
-    -H "Authorization: token $GITHUB_TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    -d "{\"title\":\"${TITLE}\",\"key\":\"${PUBKEY}\"}" \
-    "$API")
-
-  if [[ "$RESP" == "201" ]]; then
-    echo "✅ Key uploaded successfully."
-  else
-    echo "❌ Upload failed (HTTP $RESP). See /tmp/resp.json."
-    cat /tmp/resp.json
-    exit 1
-  fi
+	echo "Uploading SSH key to GitHub..."
+	resp="$(secret_tmp)" || exit 1
+	code="$(curl_with_token Authorization "Bearer $github_token" \
+		-sS -o "$resp" -w "%{http_code}" \
+		-H "Accept: application/vnd.github+json" \
+		-d "{\"title\":\"${TITLE}\",\"key\":\"${PUBKEY}\"}" \
+		"$API")" || code="000"
+	if [[ "$code" == "201" ]]; then
+		echo "Key uploaded successfully."
+	else
+		echo "Upload failed (HTTP $code)." >&2
+		secret_shred "$resp"
+		exit 1
+	fi
+	secret_shred "$resp"
 fi
 
-# Only set up SSH URL rewriting and host key if the SSH key upload succeeded
-if $key_exists || [[ "${RESP:-}" == "201" ]]; then
-  git config --global url."git@github.com:".insteadOf "https://github.com/"
-  ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+if $key_exists || [[ "${code:-}" == "201" ]]; then
+	git config --global url."git@github.com:".insteadOf "https://github.com/"
+	ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
 else
-  echo "⚠️  SSH key not on GitHub — will use HTTPS with token for git access."
+	echo "SSH key was not uploaded. GitHub access still requires Bitwarden."
 fi
-unset GITHUB_TOKEN
-
+unset github_token
+bw_lock

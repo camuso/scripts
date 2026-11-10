@@ -1,0 +1,82 @@
+#!/bin/bash
+#
+# lab - run GitLab lab with the token from Bitwarden
+#
+# ~/.config/lab/lab.toml keeps the host and user. The token is read from
+# the Bitwarden item gitlab-token after bw prompts for the master password.
+
+set +x
+
+declare usagestr="$(
+cat <<EOF
+
+$(basename "$0") [lab arguments]
+
+Run /usr/bin/lab with LAB_CORE_TOKEN taken from Bitwarden item
+gitlab-token. bw prompts for the master password. The token is not
+written to lab.toml, the screen, or a log.
+
+~/bin must appear before /usr/bin on PATH, or this wrapper is not used.
+
+EOF
+)"
+
+#** usage: print usage information
+#*
+usage() {
+	echo -e "$usagestr"
+}
+
+#** control_c: control-c trap
+#*
+control_c() {
+	echo -e "\nCtrl-c detected\nCleaning up and exiting."
+	bw_lock
+	exit 1
+}
+
+#** load_bwsecrets: source the Bitwarden helper
+#*
+load_bwsecrets() {
+	local lib="${BWSECRETS_LIB:-}"
+
+	if [[ -z "$lib" ]]; then
+		lib="$(dirname "$(readlink -f "$0")")/lib/bwsecrets.sh"
+		[[ -f "$lib" ]] || lib="$HOME/bin/lib/bwsecrets.sh"
+	fi
+	# shellcheck disable=SC1090
+	source "$lib"
+}
+
+#** main
+#*
+main() {
+	local token
+
+	trap control_c SIGINT
+	case "${1:-}" in
+		-h|--help|help)
+			usage
+			exit 0
+			;;
+	esac
+	[[ -x /usr/bin/lab ]] || {
+		echo "Install the lab package. /usr/bin/lab was not found." >&2
+		exit 1
+	}
+
+	load_bwsecrets
+	token="$(bw_get_password "$BW_ITEM_GITLAB")" || exit 1
+	token="${token//$'\n'/}"
+	if [[ -z "$token" ]]; then
+		echo "Bitwarden item $BW_ITEM_GITLAB is empty." >&2
+		bw_lock
+		exit 1
+	fi
+	export LAB_CORE_TOKEN="$token"
+	unset token
+	# exec drops this shell, and the token leaves with the lab process.
+	exec /usr/bin/lab "$@"
+}
+
+main "$@"
