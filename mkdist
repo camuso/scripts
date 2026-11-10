@@ -34,6 +34,12 @@ OPTIONS
     -S        Short-circuit: skip to %install/%package (reuse previous
               build in BUILD dir).  Use after a build that compiled
               successfully but failed at a late stage (KABI, packaging).
+    -i        Incremental: overlay changed sources onto a previous
+              rpm BUILD tree, rebuild only dirty objects, then package
+              with --short-circuit.  Requires a leftover linux-* dir
+              under redhat/rpm/BUILD from a prior full mkdist.  Optional
+              paths after the flags limit which files are copied
+              (e.g. mkdist -i drivers/char/ipmi).
     -t NAME   Toolbox container name (overrides auto-detect)
     -n        No toolbox -- run the build directly on the host
     -h        Show this help
@@ -225,19 +231,148 @@ detect_toolbox() {
 	return 1
 }
 
+# Locate the unpacked linux-* tree from a previous rpmbuild.
+# Prefers a debug tree when -d was given, otherwise a non-debug tree.
+find_build_linux() {
+	local -a dirs=()
+	local d
+
+	[[ -d redhat/rpm/BUILD ]] || return 1
+	while IFS= read -r d; do
+		dirs+=("$d")
+	done < <(find redhat/rpm/BUILD -mindepth 1 -maxdepth 3 -type d -name 'linux-*' 2>/dev/null | sort)
+
+	((${#dirs[@]} > 0)) || return 1
+
+	if $build_debug; then
+		for d in "${dirs[@]}"; do
+			[[ "$d" == *debug* ]] && { echo "$d"; return 0; }
+		done
+	else
+		for d in "${dirs[@]}"; do
+			[[ "$d" != *debug* ]] && { echo "$d"; return 0; }
+		done
+	fi
+	echo "${dirs[-1]}"
+}
+
+# Files to overlay into BUILD: explicit paths, else dirty git files,
+# else the files from HEAD.
+collect_changed_files() {
+	local -a paths=("$@")
+	local -a files=()
+	local p f
+
+	if ((${#paths[@]} > 0)); then
+		for p in "${paths[@]}"; do
+			if [[ -d "$p" ]]; then
+				while IFS= read -r f; do
+					files+=("$f")
+				done < <(find "$p" -type f \
+					\( -name '*.c' -o -name '*.h' -o -name '*.S' \
+					   -o -name '*.rs' -o -name 'Makefile' \
+					   -o -name 'Kconfig*' \) 2>/dev/null)
+			elif [[ -f "$p" ]]; then
+				files+=("$p")
+			else
+				echo "Warning: not a file or directory: $p" >&2
+			fi
+		done
+	else
+		while IFS= read -r f; do
+			[[ -n "$f" && -f "$f" ]] && files+=("$f")
+		done < <(git diff --name-only HEAD; git diff --cached --name-only)
+		if ((${#files[@]} == 0)); then
+			while IFS= read -r f; do
+				[[ -n "$f" && -f "$f" ]] && files+=("$f")
+			done < <(git diff --name-only HEAD~1 HEAD 2>/dev/null)
+		fi
+	fi
+
+	if ((${#files[@]} == 0)); then
+		return 1
+	fi
+	printf '%s\n' "${files[@]}"
+}
+
+copy_into_build() {
+	local build_linux="$1"
+	local f dest
+	local -i n=0
+
+	while IFS= read -r f; do
+		[[ -f "$f" ]] || continue
+		[[ "$f" == redhat/* || "$f" == localversion || "$f" == Makefile.rhelver ]] && continue
+		dest="$build_linux/$f"
+		mkdir -p "$(dirname "$dest")"
+		cp "$f" "$dest"
+		touch "$dest"
+		echo "  overlay $f"
+		n=$((n + 1))
+	done
+	echo "Copied $n source file(s) into $build_linux"
+	((n > 0))
+}
+
+# Package existing BUILD objects without regenerating the tarball.
+# dist-sources always recreates SOURCES/; skip it so the leftover
+# spec and BUILD tree stay intact.
+# $1 - rpmbuild flavor options (e.g. --without debug --without debuginfo)
+package_short_circuit() {
+	local flavor_opts="$1"
+	local dist spec
+	dist=$(grep -oP '(?<=^DIST \?= )\S+' redhat/Makefile.variables 2>/dev/null)
+	[[ -n "$dist" ]] || dist=".el10"
+
+	spec=""
+	for spec in redhat/rpm/SOURCES/kernel.spec redhat/rpm/SPECS/kernel.spec; do
+		[[ -f "$spec" ]] && break
+		spec=""
+	done
+	[[ -n "$spec" ]] || return 1
+
+	rpmbuild \
+		--define "_sourcedir $PWD/redhat/rpm/SOURCES" \
+		--define "_builddir $PWD/redhat/rpm/BUILD" \
+		--define "_srcrpmdir $PWD/redhat/rpm/SRPMS" \
+		--define "_rpmdir $PWD/redhat/rpm/RPMS" \
+		--define "_specdir $PWD/redhat/rpm/SPECS" \
+		--define "dist $dist" \
+		--target "$(uname -m)" \
+		${flavor_opts} \
+		--without vdso_install \
+		--without bpftool \
+		--without perf \
+		--without libperf \
+		--without tools \
+		--without selftests \
+		--without realtime \
+		--without doc \
+		--without cross_headers \
+		--without efiuki \
+		--without kabichk \
+		--nodeps \
+		--short-circuit \
+		-bb \
+		"$spec"
+}
+
 main() {
 	local mkstart mkend mkdiff etmins etsecs
 	local use_toolbox=true
 	local build_debug=false
 	local short_circuit=false
+	local incremental=false
 	local toolbox_name="${TOOLBOX:-}"
 	local logfile="../mkdist.log"
+	local -a inc_paths=()
 
 	exec > >(tee "$logfile") 2>&1
 
-	while getopts "dSt:nh" opt; do
+	while getopts "diSt:nh" opt; do
 		case "$opt" in
 			d) build_debug=true ;;
+			i) incremental=true ;;
 			S) short_circuit=true ;;
 			t) toolbox_name="$OPTARG" ;;
 			n) use_toolbox=false ;;
@@ -245,6 +380,8 @@ main() {
 			*) exitme 1 "" ;;
 		esac
 	done
+	shift $((OPTIND - 1))
+	inc_paths=("$@")
 
 	if [[ ! -f Makefile ]] || ! grep -q 'dist-rpm-baseonly' redhat/Makefile 2>/dev/null; then
 		exitme 1 "Error: not in a RHEL kernel tree root."
@@ -278,6 +415,65 @@ main() {
 	if $short_circuit; then
 		sc_flag="--short-circuit"
 		echo "Short-circuit: reusing previous build, skipping to packaging"
+	fi
+
+	if $incremental; then
+		local build_linux here
+		build_linux=$(find_build_linux) || \
+			exitme 1 "Error: no rpm BUILD linux-* tree found.\n       Run a full mkdist once first.  The RPM spec always\n       runs 'make mrproper', so incremental rebuilds need that\n       leftover BUILD directory."
+
+		echo "Incremental BUILD tree: $build_linux"
+		echo "Overlaying changed sources:"
+		if ! collect_changed_files "${inc_paths[@]}" | copy_into_build "$build_linux"; then
+			echo "No changed source files found; making existing BUILD objects."
+		fi
+
+		here="$(pwd)"
+		mkstart=$(date +%s)
+
+		local -i rc
+		echo ""
+		echo "Incremental compile in $build_linux"
+		if $use_toolbox && [[ -n "$toolbox_name" ]]; then
+			echo "Building in toolbox: $toolbox_name"
+			cd "$HOME"
+			run_with_heartbeat toolbox run -c "$toolbox_name" \
+				bash -c "cd /run/host${here}/${build_linux} && make -j\$(nproc)"
+			rc=$?
+			cd "$here"
+		else
+			echo "Building on host (no toolbox)"
+			run_with_heartbeat make -C "$build_linux" -j"$(nproc)"
+			rc=$?
+		fi
+
+		if ((rc != 0)); then
+			mkend=$(date +%s)
+			echo "Incremental compile FAILED (exit code $rc)"
+			echo "Elapsed time: $(((mkend - mkstart) / 60))m $(((mkend - mkstart) % 60))s"
+			exit $rc
+		fi
+
+		echo ""
+		echo "Packaging previous BUILD with --short-circuit"
+		run_with_heartbeat package_short_circuit "$flavor_opts"
+		rc=$?
+
+		mkend=$(date +%s)
+		mkdiff=$((mkend - mkstart))
+		echo ""
+		echo "Elapsed time: $((mkdiff / 60))m $((mkdiff % 60))s"
+		if ((rc == 0)); then
+			local rpmdir="redhat/rpm/RPMS/$(uname -m)"
+			if [[ -d "$rpmdir" ]]; then
+				echo ""
+				echo "RPMs:"
+				ls -1 "$rpmdir"/*.rpm 2>/dev/null
+			fi
+		else
+			echo "Build FAILED (exit code $rc)"
+		fi
+		exit $rc
 	fi
 
 	local build_cmd
