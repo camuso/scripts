@@ -186,6 +186,9 @@ reload_ipmi_stack() {
             log "  Warning: modprobe $mod returned non-zero"
         fi
     done
+    # SSIF is the only interface on some hosts. Unload removes it;
+    # a missing module or a KCS-only machine is not a failure.
+    modprobe -v ipmi_ssif 2>/dev/null || true
     modprobe -v acpi_ipmi 2>/dev/null || true
 }
 
@@ -208,10 +211,9 @@ test_stress() {
             ((unloaded++))
             printf ' OK\n'
         else
-            printf ' ipmi_si still in use (skipped)\n'
-            # Module couldn't be removed; reload is a no-op, skip to next.
-            spin "Cycle $i/$cycles: waiting before next attempt" 2
-            continue
+            # ipmi_devintf is already gone by the time ipmi_si refuses
+            # to leave. Reloading is what puts /dev/ipmi0 back.
+            printf ' ipmi_si still in use — restoring\n'
         fi
         spin "Cycle $i/$cycles: settling" 1
 
@@ -240,8 +242,8 @@ test_stress() {
         log_result "stress test" "FAIL"
     elif (( unloaded == 0 )); then
         log "${YLW}  ipmi_si could not be unloaded in any cycle (module in use).${OFF}"
-        log "${YLW}  The stress test was effectively skipped.${OFF}"
-        log_result "stress test ($cycles cycles — 0 actual reloads, module in use)" "PASS"
+        log "${YLW}  Device interface was reloaded; ipmi_si itself stayed resident.${OFF}"
+        log_result "stress test ($cycles cycles — 0 ipmi_si reloads, module in use)" "PASS"
     else
         log_result "stress test ($cycles cycles, $unloaded actual reloads)" "PASS"
     fi
@@ -279,8 +281,10 @@ test_msglimit() {
 
     if [[ $rc -eq 0 ]]; then
         log_result "msg-limit stress ($opt_loop_count rounds, limit=20)" "PASS"
-    else
+    elif [[ $rc -eq 1 ]]; then
         log_result "msg-limit stress (unexpected EBUSY)" "FAIL"
+    else
+        log_result "msg-limit stress (setup failed, exit $rc)" "FAIL"
     fi
     return $rc
 }
