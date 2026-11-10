@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# cursor-workspace-menu
+#
+# Presents an interactive menu of saved Cursor *.code-workspace files and
+# launches the chosen one (or all of them) with the real `cursor` binary.
+#
+# This is meant to be invoked by the `cursor` shell function defined in
+# ~/.bashrc when `cursor` is run with no arguments. It is also safe to run
+# directly.
+#
+# Workspace search locations (in order):
+#   $HOME/*.code-workspace
+#   $HOME/workspaces/*.code-workspace   (if that directory exists)
+#
+# Add more directories to WORKSPACE_SEARCH_DIRS below if you keep
+# .code-workspace files elsewhere.
+
+set -uo pipefail
+
+# Resolve the real cursor binary, bypassing any shell function/alias named
+# `cursor` that may be in scope (important: this script itself is what the
+# `cursor` function calls, so we must not recurse into it).
+CURSOR_BIN="$(command -v cursor)"
+if [ -z "$CURSOR_BIN" ]; then
+    echo "cursor-workspace-menu: could not find the real 'cursor' binary in PATH" >&2
+    exit 1
+fi
+
+WORKSPACE_SEARCH_DIRS=("$HOME")
+[ -d "$HOME/workspaces" ] && WORKSPACE_SEARCH_DIRS+=("$HOME/workspaces")
+
+declare -a workspaces=()
+for d in "${WORKSPACE_SEARCH_DIRS[@]}"; do
+    while IFS= read -r -d '' f; do
+        workspaces+=("$f")
+    done < <(find "$d" -maxdepth 1 -iname "*.code-workspace" -print0 2>/dev/null | sort -z)
+done
+
+if [ "${#workspaces[@]}" -eq 0 ]; then
+    echo "No saved .code-workspace files found. Launching cursor with no arguments."
+    nohup "$CURSOR_BIN" >/dev/null 2>&1 &
+    exit 0
+fi
+
+declare -a names=()
+for w in "${workspaces[@]}"; do
+    base="$(basename "$w")"
+    names+=("${base%.code-workspace}")
+done
+
+echo "Saved Cursor workspaces:"
+echo
+
+PS3=$'\nSelect a workspace to open (or Ctrl-C to cancel): '
+options=("${names[@]}" "Open all" "None (launch cursor with no arguments)")
+
+select choice in "${options[@]}"; do
+    if [ -z "$choice" ]; then
+        echo "Invalid selection, try again." >&2
+        continue
+    fi
+
+    case "$choice" in
+        "Open all")
+            for w in "${workspaces[@]}"; do
+                echo "Opening: $w"
+                nohup "$CURSOR_BIN" "$w" >/dev/null 2>&1 &
+            done
+            ;;
+        "None (launch cursor with no arguments)")
+            nohup "$CURSOR_BIN" >/dev/null 2>&1 &
+            ;;
+        *)
+            for i in "${!names[@]}"; do
+                if [ "${names[$i]}" = "$choice" ]; then
+                    echo "Opening: ${workspaces[$i]}"
+                    nohup "$CURSOR_BIN" "${workspaces[$i]}" >/dev/null 2>&1 &
+                    break
+                fi
+            done
+            ;;
+    esac
+    break
+done
