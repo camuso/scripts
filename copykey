@@ -117,7 +117,7 @@ main() {
 	# - Sets the correct permissions for the `authorized_keys` file and the
 	#   `.ssh` directory.
 	#
-	# `ssh -o "StrictHostKeyChecking=no" $remote_user@$remote_host "$remote_script"`
+	# `ssh -o StrictHostKeyChecking=accept-new $remote_user@$remote_host "$remote_script"`
 	#  - connects to the remote host and runs the script.
 
 	### Script to Automate the Process
@@ -151,7 +151,7 @@ chmod 700 ~/.ssh
 EOF
 )
 
-ssh -o "StrictHostKeyChecking=no" "$remote_user@$remote_host" "$remote_script"
+ssh -o StrictHostKeyChecking=accept-new "$remote_user@$remote_host" "$remote_script"
 	exitme 0
 }
 
