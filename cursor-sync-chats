@@ -1,18 +1,25 @@
 #!/bin/bash
 #
-# cursor-sync-chats - push Cursor chat transcripts to a remote machine
+# cursor-sync-chats - sync Cursor chat transcripts between machines
 #
-# Syncs the agent-transcripts directories from ~/.cursor/projects/
-# to a remote host. Uses rsync with --ignore-existing so chats on
-# the remote are never overwritten, only new ones are added.
+# Syncs the agent-transcripts directories under ~/.cursor/projects/.
+# Uses rsync --ignore-existing so chats on the destination are never
+# overwritten — only new UUID directories are added.
 #
-# Usage: cursor-sync-chats <remote-host>
-#        cursor-sync-chats  (uses default host)
+# Safe to run while Cursor is open on either end (plain JSONL files,
+# not SQLite databases).
+#
+# Usage: cursor-sync-chats [--push|--pull] [remote-host]
+#        cursor-sync-chats  (push to default host)
+#
+# Typical CSB laptop workflow (laptop cannot be reached from lab):
+#   cursor-sync-chats --pull hp-dl380pgen9-07.khw.eng.bos2.dc.redhat.com
 #
 # Tony Camuso / Claude opus4.6
 
 declare default_host="dell-per640-01.khw.eng.rdu2.dc.redhat.com"
-declare remote="${1:-$default_host}"
+declare direction="push"
+declare remote=""
 declare projects="$HOME/.cursor/projects"
 declare -i errs=0
 
@@ -24,34 +31,79 @@ declare -a workspaces=(
 )
 
 usage() {
-	echo "Usage: ${0##*/} [remote-host]"
-	echo "  Default host: $default_host"
+	echo "Usage: ${0##*/} [--push|--pull] [remote-host]"
 	echo ""
-	echo "  Pushes Cursor chat transcripts to the remote machine."
+	echo "  --push   Push local transcripts to remote (default)"
+	echo "  --pull   Pull remote transcripts to local"
+	echo "  -h       Show this help"
+	echo ""
+	echo "  Default host: $default_host"
 	echo "  Safe to run while Cursor is open on either end."
+	echo ""
+	echo "  CSB laptop example (run on the laptop):"
+	echo "    ${0##*/} --pull <lab-host>"
 	exit 1
 }
 
-[[ "$1" == "-h" || "$1" == "--help" ]] && usage
+while (( $# )); do
+	case "$1" in
+	--push)  direction="push"; shift ;;
+	--pull)  direction="pull"; shift ;;
+	-h|--help) usage ;;
+	-*)
+		echo "ERROR: Unknown option: $1"
+		usage
+		;;
+	*)
+		remote="$1"
+		shift
+		;;
+	esac
+done
+
+remote="${remote:-$default_host}"
 
 # Verify SSH connectivity
 if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$remote" true 2>/dev/null; then
 	echo "ERROR: Cannot reach $remote via SSH."
+	if [[ "$direction" == "push" ]]; then
+		echo "Hint: if the remote is a laptop behind NAT/firewall, run this"
+		echo "      on the laptop instead with:  ${0##*/} --pull <this-host>"
+	fi
 	exit 1
 fi
 
 for ws in "${workspaces[@]}"; do
-	src="$projects/$ws/agent-transcripts/"
+	local_dir="$projects/$ws/agent-transcripts"
+	remote_spec="$remote:$projects/$ws/agent-transcripts/"
 
-	if [[ ! -d "$src" ]]; then
-		echo "SKIP: $ws (no local transcripts)"
-		continue
+	if [[ "$direction" == "push" ]]; then
+		src="${local_dir}/"
+		dst="$remote_spec"
+
+		if [[ ! -d "$local_dir" ]]; then
+			echo "SKIP: $ws (no local transcripts)"
+			continue
+		fi
+
+		# Ensure remote destination exists
+		ssh -o BatchMode=yes "$remote" "mkdir -p $projects/$ws/agent-transcripts"
+	else
+		src="$remote_spec"
+		dst="${local_dir}/"
+
+		# Ensure local destination exists
+		mkdir -p "$local_dir"
+
+		# Skip if remote has nothing for this workspace
+		if ! ssh -o BatchMode=yes "$remote" "test -d $projects/$ws/agent-transcripts"; then
+			echo "SKIP: $ws (no remote transcripts)"
+			continue
+		fi
 	fi
 
-	echo -n "Syncing $ws ... "
-	if rsync -a --ignore-existing -r \
-		"$src" \
-		"$remote:$projects/$ws/agent-transcripts/"; then
+	echo -n "${direction^}ing $ws ... "
+	if rsync -a --ignore-existing "$src" "$dst"; then
 		echo "OK"
 	else
 		echo "FAILED"
