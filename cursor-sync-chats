@@ -13,14 +13,15 @@
 #        cursor-sync-chats  (push to default host)
 #
 # Typical CSB laptop workflow (laptop cannot be reached from lab):
-#   cursor-sync-chats --pull hp-dl380pgen9-07.khw.eng.bos2.dc.redhat.com
+#   cursor-sync-chats --pull hp-dl380pgen9-07.khw.eng.rdu2.dc.redhat.com
 #
 # Tony Camuso / Claude opus4.6
 
 declare default_host="dell-per640-01.khw.eng.rdu2.dc.redhat.com"
 declare direction="push"
 declare remote=""
-declare projects="$HOME/.cursor/projects"
+declare local_projects="$HOME/.cursor/projects"
+declare remote_projects=""
 declare -i errs=0
 
 # Disable LocalForward/RemoteForward from ~/.ssh/config (e.g. VNC 5902).
@@ -83,9 +84,21 @@ if ! ssh "${ssh_opts[@]}" "$remote" true 2>/dev/null; then
 	exit 1
 fi
 
+# Resolve remote HOME independently. CSB/ostree laptops often use
+# /var/home/$USER while lab hosts use /home/$USER — baking the local
+# $HOME into remote paths makes every workspace look empty.
+remote_home=$(ssh "${ssh_opts[@]}" "$remote" 'printf %s "$HOME"')
+if [[ -z "$remote_home" ]]; then
+	echo "ERROR: Could not determine remote HOME on $remote."
+	exit 1
+fi
+remote_projects="$remote_home/.cursor/projects"
+echo "Remote projects: $remote_projects"
+
 for ws in "${workspaces[@]}"; do
-	local_dir="$projects/$ws/agent-transcripts"
-	remote_spec="$remote:$projects/$ws/agent-transcripts/"
+	local_dir="$local_projects/$ws/agent-transcripts"
+	remote_dir="$remote_projects/$ws/agent-transcripts"
+	remote_spec="$remote:$remote_dir/"
 
 	if [[ "$direction" == "push" ]]; then
 		src="${local_dir}/"
@@ -97,7 +110,7 @@ for ws in "${workspaces[@]}"; do
 		fi
 
 		# Ensure remote destination exists
-		ssh "${ssh_opts[@]}" "$remote" "mkdir -p $projects/$ws/agent-transcripts"
+		ssh "${ssh_opts[@]}" "$remote" "mkdir -p '$remote_dir'"
 	else
 		src="$remote_spec"
 		dst="${local_dir}/"
@@ -106,8 +119,8 @@ for ws in "${workspaces[@]}"; do
 		mkdir -p "$local_dir"
 
 		# Skip if remote has nothing for this workspace
-		if ! ssh "${ssh_opts[@]}" "$remote" "test -d $projects/$ws/agent-transcripts"; then
-			echo "SKIP: $ws (no remote transcripts)"
+		if ! ssh "${ssh_opts[@]}" "$remote" "test -d '$remote_dir'"; then
+			echo "SKIP: $ws (no remote transcripts at $remote_dir)"
 			continue
 		fi
 	fi
