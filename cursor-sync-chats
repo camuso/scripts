@@ -23,6 +23,16 @@ declare remote=""
 declare projects="$HOME/.cursor/projects"
 declare -i errs=0
 
+# Disable LocalForward/RemoteForward from ~/.ssh/config (e.g. VNC 5902).
+# Sync only needs a plain shell/rsync channel; bound forwards cause
+# "bind [127.0.0.1]:5902: Address already in use" on the laptop.
+declare -a ssh_opts=(
+	-o ConnectTimeout=5
+	-o BatchMode=yes
+	-o ClearAllForwardings=yes
+)
+declare rsync_ssh="ssh ${ssh_opts[*]}"
+
 # Projects that have agent-transcripts worth syncing
 declare -a workspaces=(
 	home-tcamuso-bin
@@ -64,7 +74,7 @@ done
 remote="${remote:-$default_host}"
 
 # Verify SSH connectivity
-if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "$remote" true 2>/dev/null; then
+if ! ssh "${ssh_opts[@]}" "$remote" true 2>/dev/null; then
 	echo "ERROR: Cannot reach $remote via SSH."
 	if [[ "$direction" == "push" ]]; then
 		echo "Hint: if the remote is a laptop behind NAT/firewall, run this"
@@ -87,7 +97,7 @@ for ws in "${workspaces[@]}"; do
 		fi
 
 		# Ensure remote destination exists
-		ssh -o BatchMode=yes "$remote" "mkdir -p $projects/$ws/agent-transcripts"
+		ssh "${ssh_opts[@]}" "$remote" "mkdir -p $projects/$ws/agent-transcripts"
 	else
 		src="$remote_spec"
 		dst="${local_dir}/"
@@ -96,14 +106,14 @@ for ws in "${workspaces[@]}"; do
 		mkdir -p "$local_dir"
 
 		# Skip if remote has nothing for this workspace
-		if ! ssh -o BatchMode=yes "$remote" "test -d $projects/$ws/agent-transcripts"; then
+		if ! ssh "${ssh_opts[@]}" "$remote" "test -d $projects/$ws/agent-transcripts"; then
 			echo "SKIP: $ws (no remote transcripts)"
 			continue
 		fi
 	fi
 
 	echo -n "${direction^}ing $ws ... "
-	if rsync -a --ignore-existing "$src" "$dst"; then
+	if rsync -a --ignore-existing -e "$rsync_ssh" "$src" "$dst"; then
 		echo "OK"
 	else
 		echo "FAILED"
